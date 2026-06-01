@@ -34,7 +34,7 @@
  * module file was never loaded — typically a manifest / install path
  * problem on Foundry's side.
  * =================================================================== */
-console.log("=== The Eternal Skald v1.0.3 — module file loaded ===");
+console.log("=== The Eternal Skald v1.0.4 — module file loaded ===");
 
 import { IronswornData } from "./ironsworn-data.js";
 
@@ -447,18 +447,26 @@ function formatMarkdown(text) {
  * @returns {boolean} true if a Skald command was matched and dispatched
  */
 function dispatchCommand(rawText) {
-  if (!rawText || typeof rawText !== "string") return false;
+  console.log(`${LOG_PREFIX} dispatchCommand() called with:`, JSON.stringify(rawText));
+  if (!rawText || typeof rawText !== "string") {
+    console.log(`${LOG_PREFIX} dispatchCommand: rejected — not a non-empty string (type=${typeof rawText})`);
+    return false;
+  }
   const trimmed = rawText.trim();
   // We use "!" as the command prefix instead of "/" — see the COMMANDS
   // declaration above for the reason. Messages that don't start with
   // "!" are ignored here so normal chat passes through untouched.
-  if (!trimmed.startsWith("!")) return false;
+  if (!trimmed.startsWith("!")) {
+    console.log(`${LOG_PREFIX} dispatchCommand: rejected — does not start with "!"`);
+    return false;
+  }
 
   // Split on the first run of whitespace — "!oracle action" -> ["!oracle", "action"].
   // Commands without args (e.g. "!skald-help") split to a single-element array.
   const firstSpace = trimmed.search(/\s/);
   const head = (firstSpace === -1 ? trimmed : trimmed.slice(0, firstSpace)).toLowerCase();
   const args = (firstSpace === -1 ? "" : trimmed.slice(firstSpace + 1)).trim();
+  console.log(`${LOG_PREFIX} dispatchCommand: head=${JSON.stringify(head)} args=${JSON.stringify(args)}`);
 
   // Map command tokens to their async handler. We use a lookup table so we
   // can match the prefix exactly (no partial matches, no fall-through).
@@ -475,7 +483,10 @@ function dispatchCommand(rawText) {
     }
   })();
 
-  if (!handler) return false;
+  if (!handler) {
+    console.log(`${LOG_PREFIX} dispatchCommand: no handler for ${head} — known commands:`, Object.values(COMMANDS));
+    return false;
+  }
 
   console.log(`${LOG_PREFIX} dispatching command "${head}" args="${args}"`);
 
@@ -483,10 +494,17 @@ function dispatchCommand(rawText) {
   // DO NOT await — we have to return synchronously below so the hook
   // can suppress Foundry's default chat publication.
   Promise.resolve()
-    .then(handler)
+    .then(() => {
+      console.log(`${LOG_PREFIX} command handler "${head}" starting...`);
+      return handler();
+    })
+    .then(result => {
+      console.log(`${LOG_PREFIX} command handler "${head}" completed.`);
+      return result;
+    })
     .catch(err => {
       console.error(LOG_PREFIX, `Command "${head}" failed:`, err);
-      ui.notifications?.error(`${SKALD_NAME}: ${err.message ?? err}`);
+      try { ui.notifications?.error(`${SKALD_NAME}: ${err?.message ?? err}`); } catch (_) {}
     });
 
   return true;
@@ -1213,14 +1231,61 @@ const SceneContext = {
 /*  §13 HOOK REGISTRATIONS                                                */
 /* ===================================================================== */
 
-// --- init: register settings AND chat-command hook -------------------
-// We register the chatMessage hook inside 'init' (rather than at the
-// top level of the module) for two reasons:
-//   1. It guarantees the hook is attached AFTER Foundry has finished
-//      initialising its own hook system and chat plumbing — avoiding
-//      any race between module load order and Foundry core.
-//   2. It groups all early-lifecycle wiring in one place so the order
-//      of registration is unambiguous.
+/* =====================================================================
+ * COMMAND-INTERCEPTION STRATEGY (v1.0.4 — heavy debug)
+ * ---------------------------------------------------------------------
+ * Foundry VTT v14 changed how chat input is processed. The pre-v14
+ * `chatMessage` hook signature was `(chatLog, messageText, chatData)`
+ * and could be cancelled with `return false`. In v14, depending on the
+ * Foundry build, this hook may:
+ *   - Receive an object instead of a string for `messageText`.
+ *   - Not fire at all for messages that don't begin with `/`.
+ *   - Fire but ignore the return value.
+ *
+ * Strategy: register THREE hooks and log everything from each one so we
+ * can see in DevTools which fires for `!skald-help`:
+ *
+ *   1.  `chatMessage`           — the classic pre-v14 entry point
+ *   2.  `preCreateChatMessage`  — fires when the ChatMessage document
+ *                                 is about to be persisted; we can
+ *                                 cancel by returning false here.
+ *   3.  `createChatMessage`     — final fallback; the message has been
+ *                                 created so we can't suppress it, but
+ *                                 we can still execute the command and
+ *                                 then delete the user's command line.
+ *
+ * `tryCommandFromText()` is shared by all three so the logic stays in
+ * one place. Each hook logs its arguments verbosely so we can diagnose.
+ * =================================================================== */
+
+/**
+ * Helper: extract a string out of whatever Foundry passes to the hook
+ * (string / object with .content / object with .text).
+ */
+function extractMessageText(arg) {
+  if (typeof arg === "string") return arg;
+  if (arg && typeof arg === "object") {
+    if (typeof arg.content === "string") return arg.content;
+    if (typeof arg.text === "string") return arg.text;
+    if (typeof arg.message === "string") return arg.message;
+  }
+  return "";
+}
+
+/**
+ * Shared command-trigger: returns true iff `text` starts with one of
+ * our `!` commands AND we successfully dispatched the handler.
+ */
+function tryCommandFromText(text, source) {
+  const trimmed = (text || "").trim();
+  if (!trimmed.startsWith("!")) return false;
+  console.log(`${LOG_PREFIX} [${source}] candidate command text:`, JSON.stringify(trimmed));
+  const dispatched = dispatchCommand(trimmed);
+  console.log(`${LOG_PREFIX} [${source}] dispatchCommand returned:`, dispatched);
+  return dispatched;
+}
+
+// --- init: register settings AND chat-command hooks -------------------
 console.log("The Eternal Skald | Registering Hooks.once('init') …");
 Hooks.once("init", () => {
   console.log(LOG_PREFIX, "init hook fired — initialising module …");
@@ -1231,37 +1296,60 @@ Hooks.once("init", () => {
     console.error(LOG_PREFIX, "Settings.register() failed:", err);
   }
 
-  // === Chat command interception ====================================
-  //
-  // Foundry fires the 'chatMessage' hook with the RAW string typed by
-  // the user BEFORE creating any ChatMessage document. The signature is:
-  //
-  //     (chatLog, messageText, chatData) => boolean
-  //
-  // If our handler returns `false` (exactly false — not falsy!) Foundry
-  // aborts the default behaviour and does NOT create the chat message.
-  // For any other return value (including undefined / true / null),
-  // Foundry continues with the default behaviour.
-  //
-  // We use the 'chatMessage' hook — NOT 'preCreateChatMessage' or
-  // 'createChatMessage' — because only 'chatMessage' lets us see the
-  // raw text BEFORE Foundry tries to parse it as a built-in command
-  // (like /r, /roll, /w, /ooc).
-  Hooks.on("chatMessage", (chatLog, messageText, chatData) => {
+  /* === HOOK #1: chatMessage ============================================
+   * The pre-v14 entry point. Fires BEFORE Foundry creates the
+   * ChatMessage document, with the raw text. Cancel with `return false`.
+   * =================================================================== */
+  Hooks.on("chatMessage", (chatLog, message, chatData) => {
+    console.log(`${LOG_PREFIX} [chatMessage] HOOK FIRED`);
+    console.log(`${LOG_PREFIX} [chatMessage] message (type=${typeof message}):`, message);
+    try { console.log(`${LOG_PREFIX} [chatMessage] message JSON:`, JSON.stringify(message)); } catch (_) {}
+    try { console.log(`${LOG_PREFIX} [chatMessage] chatData JSON:`, JSON.stringify(chatData)); } catch (_) {}
     try {
-      const consumed = dispatchCommand(messageText);
-      // Return EXPLICIT false to suppress default behaviour, or undefined
-      // (implicit) to let Foundry handle the message normally.
-      if (consumed) return false;
+      const text = extractMessageText(message);
+      const consumed = tryCommandFromText(text, "chatMessage");
+      if (consumed) {
+        console.log(`${LOG_PREFIX} [chatMessage] returning false to suppress default chat publication`);
+        return false;
+      }
+      console.log(`${LOG_PREFIX} [chatMessage] not our command — letting Foundry handle it`);
       return undefined;
     } catch (err) {
-      console.error(LOG_PREFIX, "chatMessage hook crashed:", err);
-      // Let Foundry handle the message normally on error.
+      console.error(`${LOG_PREFIX} [chatMessage] handler crashed:`, err);
       return undefined;
     }
   });
 
-  console.log(`${LOG_PREFIX} Chat-command hook registered for: ${Object.values(COMMANDS).join(", ")}`);
+  /* === HOOK #2: preCreateChatMessage ===================================
+   * Fires when a ChatMessage document is about to be persisted. The
+   * raw text lives in `document.content` (or `data.content` for legacy).
+   * Cancel persistence with `return false`.
+   * =================================================================== */
+  Hooks.on("preCreateChatMessage", (document, data, options, userId) => {
+    console.log(`${LOG_PREFIX} [preCreateChatMessage] HOOK FIRED`);
+    try { console.log(`${LOG_PREFIX} [preCreateChatMessage] document.content:`, document?.content); } catch (_) {}
+    try { console.log(`${LOG_PREFIX} [preCreateChatMessage] data:`, JSON.stringify(data)); } catch (_) {}
+    try {
+      // Don't intercept our own messages (they have our flags)
+      const flags = document?.flags ?? data?.flags ?? {};
+      if (flags[MODULE_ID]) {
+        console.log(`${LOG_PREFIX} [preCreateChatMessage] message is ours — passing through`);
+        return undefined;
+      }
+      const text = document?.content ?? data?.content ?? "";
+      const consumed = tryCommandFromText(text, "preCreateChatMessage");
+      if (consumed) {
+        console.log(`${LOG_PREFIX} [preCreateChatMessage] returning false to prevent document creation`);
+        return false;
+      }
+      return undefined;
+    } catch (err) {
+      console.error(`${LOG_PREFIX} [preCreateChatMessage] handler crashed:`, err);
+      return undefined;
+    }
+  });
+
+  console.log(`${LOG_PREFIX} Chat-command hooks (chatMessage + preCreateChatMessage) registered for: ${Object.values(COMMANDS).join(", ")}`);
 });
 
 // --- ready: welcome banner & global API ------------------------------
@@ -1309,13 +1397,46 @@ Hooks.on("updateCombat", (combat, changed, options, userId) => {
   });
 });
 
-// --- createChatMessage: optional contextual reactions ----------------
-// (Lightweight — only logs for now; users can extend via game.modules
-// .get('the-eternal-skald').api.)
+/* === HOOK #3: createChatMessage (last-resort fallback) ================
+ * If chatMessage and preCreateChatMessage both fail to intercept the
+ * raw `!` command, the message has already been persisted by the time
+ * we see it here. We can still execute the command and (best-effort)
+ * delete the original user message so it doesn't clutter chat.
+ * ==================================================================== */
 Hooks.on("createChatMessage", (message) => {
-  if (message?.flags?.[MODULE_ID]) return; // ignore our own messages
-  // Future hook: react to specific player triggers (e.g., "Skald,..."), kept
-  // disabled by default to avoid spam.
+  console.log(`${LOG_PREFIX} [createChatMessage] HOOK FIRED`);
+  try {
+    // Ignore our own posts — they always carry our module flag.
+    if (message?.flags?.[MODULE_ID]) {
+      console.log(`${LOG_PREFIX} [createChatMessage] message is ours — ignoring`);
+      return;
+    }
+    const text = message?.content ?? "";
+    console.log(`${LOG_PREFIX} [createChatMessage] content:`, JSON.stringify(text));
+
+    const trimmed = (typeof text === "string" ? text : "").trim();
+    if (!trimmed.startsWith("!")) return;
+
+    // Only the speaker (or the active GM as a safety net) should run
+    // the command — otherwise every connected client would dispatch.
+    const author = message?.author ?? message?.user;
+    const authorId = typeof author === "string" ? author : author?.id;
+    if (authorId && authorId !== game.user.id) {
+      console.log(`${LOG_PREFIX} [createChatMessage] not our message (author=${authorId}, me=${game.user.id}) — skipping dispatch`);
+      return;
+    }
+
+    console.log(`${LOG_PREFIX} [createChatMessage] FALLBACK dispatch for: ${JSON.stringify(trimmed)}`);
+    const dispatched = dispatchCommand(trimmed);
+    console.log(`${LOG_PREFIX} [createChatMessage] dispatchCommand returned:`, dispatched);
+
+    // Best-effort: delete the user's raw "!command" line so chat isn't cluttered.
+    if (dispatched) {
+      try { message.delete?.(); } catch (e) { console.warn(`${LOG_PREFIX} [createChatMessage] couldn't delete original message:`, e); }
+    }
+  } catch (err) {
+    console.error(`${LOG_PREFIX} [createChatMessage] handler crashed:`, err);
+  }
 });
 
 // --- renderChatMessage(HTML): allow CSS class hooks ------------------
