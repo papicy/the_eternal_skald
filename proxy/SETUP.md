@@ -294,13 +294,13 @@ nssm start  SkaldProxy
 **Option A:**
 ```bash
 curl https://your-foundry.example/skald-api/health
-# → {"status":"ok","service":"The Eternal Skald Hook","version":"1.0.8"}
+# → {"status":"ok","service":"The Eternal Skald Hook","version":"1.0.9"}
 ```
 
 **Option B:**
 ```bash
 curl http://localhost:3001/
-# → {"status":"ok","service":"The Eternal Skald Proxy","version":"1.0.8"}
+# → {"status":"ok","service":"The Eternal Skald Proxy","version":"1.0.9"}
 ```
 
 Then in Foundry's chat, type `!skald hello` — you should get a Skald response within ~5 seconds.

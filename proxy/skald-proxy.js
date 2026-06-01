@@ -166,7 +166,7 @@ function forwardToUpstream(targetUrl, payload, apiKey) {
         // Some Abacus deployments accept the raw header instead.
         "apiKey":         apiKey,
         // Identify ourselves to upstream for easier debugging.
-        "User-Agent":     "TheEternalSkaldProxy/1.0.8 (+https://github.com/papicy/eternal_skald)"
+        "User-Agent":     "TheEternalSkaldProxy/1.0.9 (+https://github.com/papicy/eternal_skald)"
       }
     };
 
@@ -289,7 +289,7 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, {
       status:  "ok",
       service: "The Eternal Skald Proxy",
-      version: "1.0.8",
+      version: "1.0.9",
       endpoints: {
         chat:   "POST /api/chat",
         health: "GET /"

@@ -34,7 +34,7 @@
  * module file was never loaded — typically a manifest / install path
  * problem on Foundry's side.
  * =================================================================== */
-console.log("=== The Eternal Skald v1.0.8 — module file loaded ===");
+console.log("=== The Eternal Skald v1.0.9 — module file loaded ===");
 
 import { IronswornData } from "./ironsworn-data.js";
 
@@ -341,7 +341,7 @@ const Client = {
    * Call the configured chat-completions endpoint with the supplied
    * messages array. Returns the assistant's reply text, or throws.
    *
-   * NETWORKING STRATEGY (v1.0.8)
+   * NETWORKING STRATEGY (v1.0.9)
    * ----------------------------
    * Foundry runs in the browser, so it cannot talk to api.abacus.ai
    * directly (CORS). We try two routes, in order:

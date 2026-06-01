@@ -34,7 +34,7 @@ Foundry VTT runs in your browser. Browsers block cross-origin requests to `api.a
 
 Additionally, **if your Foundry runs on HTTPS** (e.g. behind a Cloudflare Tunnel, a Caddy / Nginx reverse proxy, or anything serving `https://...`), the browser blocks insecure `http://localhost:3001` calls as **Mixed Content** — so the standalone proxy alone is not enough.
 
-To solve this universally, v1.0.8 ships **two** options. Pick the one that fits your setup:
+To solve this universally, v1.0.9 ships **two** options. Pick the one that fits your setup:
 
 | Option | When to use | Where requests come from |
 |---|---|---|
@@ -111,7 +111,7 @@ https://your-foundry.example/skald-api/health
 
 You should see:
 ```json
-{"status":"ok","service":"The Eternal Skald Hook","version":"1.0.8"}
+{"status":"ok","service":"The Eternal Skald Hook","version":"1.0.9"}
 ```
 
 If the response is 404 or "Cannot GET /skald-api/health", the hook is not loaded — re-check the `--import` argument and that Foundry was fully restarted.
@@ -159,7 +159,7 @@ See [`proxy/SETUP.md`](proxy/SETUP.md) for **systemd**, **PM2**, **NSSM** (Windo
 curl http://localhost:3001/
 ```
 
-You should get `{"status":"ok","service":"The Eternal Skald Proxy","version":"1.0.8"}`.
+You should get `{"status":"ok","service":"The Eternal Skald Proxy","version":"1.0.9"}`.
 
 ---
 
@@ -234,10 +234,10 @@ Your Skald is calling Abacus AI **directly**. That's never the right thing — a
 Your Foundry is on HTTPS but you're trying to use Option B (`http://localhost:3001`). Browsers block this. **Switch to Option A.**
 
 **No log lines in DevTools when launching a world**
-The module file never loaded. Confirm the install was successful and that the module is activated for the world. As of v1.0.8 the module logs `=== The Eternal Skald v1.0.8 — module file loaded ===` to the console as soon as it begins executing.
+The module file never loaded. Confirm the install was successful and that the module is activated for the world. As of v1.0.9 the module logs `=== The Eternal Skald v1.0.9 — module file loaded ===` to the console as soon as it begins executing.
 
 **`Cannot read properties of undefined (reading 'turnCount')`**
-That was a v1.0.7 bug triggered when the API call failed during NPC turn auto-play (so the session record wasn't saved). Update to **v1.0.8 or newer** — fixed.
+That was a v1.0.7 bug triggered when the API call failed during NPC turn auto-play (so the session record wasn't saved). Update to **v1.0.9 or newer** — fixed.
 
 **"DOCTYPE error" / install fails**
 The release zip must be installed via the manifest URL above. Older versions used GitHub's auto-generated archive zip which wrapped everything in a subfolder; the published release asset (`the-eternal-skald.zip`) has files at the zip root.

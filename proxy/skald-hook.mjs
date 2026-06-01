@@ -52,7 +52,7 @@
 import http  from "node:http";
 import https from "node:https";
 
-const SKALD_HOOK_VERSION   = "1.0.8";
+const SKALD_HOOK_VERSION   = "1.0.9";
 const SKALD_PATH_PREFIX    = "/skald-api/";
 const SKALD_MAX_BODY_BYTES = 2 * 1024 * 1024;   // 2 MiB request limit
 const SKALD_MAX_UP_BYTES   = 8 * 1024 * 1024;   // 8 MiB response limit
