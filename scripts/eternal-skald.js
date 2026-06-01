@@ -34,7 +34,7 @@
  * module file was never loaded — typically a manifest / install path
  * problem on Foundry's side.
  * =================================================================== */
-console.log("=== The Eternal Skald v1.0.4 — module file loaded ===");
+console.log("=== The Eternal Skald v1.0.5 — module file loaded ===");
 
 import { IronswornData } from "./ironsworn-data.js";
 
@@ -1232,7 +1232,7 @@ const SceneContext = {
 /* ===================================================================== */
 
 /* =====================================================================
- * COMMAND-INTERCEPTION STRATEGY (v1.0.4 — heavy debug)
+ * COMMAND-INTERCEPTION STRATEGY (v1.0.5 — HTML-aware)
  * ---------------------------------------------------------------------
  * Foundry VTT v14 changed how chat input is processed. The pre-v14
  * `chatMessage` hook signature was `(chatLog, messageText, chatData)`
@@ -1273,14 +1273,53 @@ function extractMessageText(arg) {
 }
 
 /**
+ * Helper: strip HTML tags from a string and collapse whitespace.
+ *
+ * WHY: Foundry VTT v14 wraps plain chat input in a `<p>...</p>` block
+ * before passing it to the chatMessage / preCreateChatMessage /
+ * createChatMessage hooks. So when the user types `!skald-help` the
+ * value we receive is actually `<p>!skald-help</p>` — which would
+ * never match `startsWith("!")` and would never dispatch.
+ *
+ * We use a deliberately simple regex (rather than a DOMParser) because
+ * it works in any execution context and we only need to remove the
+ * outer wrapper tags. Inner text is preserved.
+ */
+function stripHtml(html) {
+  if (typeof html !== "string") return "";
+  // Decode the most common HTML entities that could appear inside the
+  // wrapped text (e.g. `&amp;` typed by the user, `&nbsp;` injected by
+  // the editor) so the prefix match still works.
+  const withoutTags = html.replace(/<[^>]*>/g, "");
+  const decoded = withoutTags
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+  return decoded.trim();
+}
+
+/**
  * Shared command-trigger: returns true iff `text` starts with one of
  * our `!` commands AND we successfully dispatched the handler.
+ *
+ * IMPORTANT: HTML tags are stripped here so all three hooks
+ * (chatMessage, preCreateChatMessage, createChatMessage) get
+ * consistent behaviour regardless of whether Foundry wrapped the
+ * raw input in `<p>...</p>` or not.
  */
 function tryCommandFromText(text, source) {
-  const trimmed = (text || "").trim();
-  if (!trimmed.startsWith("!")) return false;
-  console.log(`${LOG_PREFIX} [${source}] candidate command text:`, JSON.stringify(trimmed));
-  const dispatched = dispatchCommand(trimmed);
+  const rawIn = text || "";
+  const stripped = stripHtml(rawIn);
+  if (stripped !== rawIn.trim()) {
+    console.log(`${LOG_PREFIX} [${source}] stripped HTML: ${JSON.stringify(rawIn)} -> ${JSON.stringify(stripped)}`);
+  }
+  if (!stripped.startsWith("!")) return false;
+  console.log(`${LOG_PREFIX} [${source}] candidate command text:`, JSON.stringify(stripped));
+  // Pass the STRIPPED text to dispatch — never the HTML-wrapped form.
+  const dispatched = dispatchCommand(stripped);
   console.log(`${LOG_PREFIX} [${source}] dispatchCommand returned:`, dispatched);
   return dispatched;
 }
@@ -1411,11 +1450,16 @@ Hooks.on("createChatMessage", (message) => {
       console.log(`${LOG_PREFIX} [createChatMessage] message is ours — ignoring`);
       return;
     }
-    const text = message?.content ?? "";
-    console.log(`${LOG_PREFIX} [createChatMessage] content:`, JSON.stringify(text));
+    const rawText = message?.content ?? "";
+    console.log(`${LOG_PREFIX} [createChatMessage] raw content:`, JSON.stringify(rawText));
 
-    const trimmed = (typeof text === "string" ? text : "").trim();
-    if (!trimmed.startsWith("!")) return;
+    // Strip HTML (Foundry v14 wraps chat input in <p>...</p>) BEFORE
+    // checking the prefix.
+    const stripped = stripHtml(typeof rawText === "string" ? rawText : "");
+    if (stripped !== (typeof rawText === "string" ? rawText.trim() : "")) {
+      console.log(`${LOG_PREFIX} [createChatMessage] stripped HTML -> ${JSON.stringify(stripped)}`);
+    }
+    if (!stripped.startsWith("!")) return;
 
     // Only the speaker (or the active GM as a safety net) should run
     // the command — otherwise every connected client would dispatch.
@@ -1426,9 +1470,10 @@ Hooks.on("createChatMessage", (message) => {
       return;
     }
 
-    console.log(`${LOG_PREFIX} [createChatMessage] FALLBACK dispatch for: ${JSON.stringify(trimmed)}`);
-    const dispatched = dispatchCommand(trimmed);
-    console.log(`${LOG_PREFIX} [createChatMessage] dispatchCommand returned:`, dispatched);
+    // Use the shared helper so HTML stripping + dispatch stays consistent
+    // with hooks #1 and #2.
+    console.log(`${LOG_PREFIX} [createChatMessage] FALLBACK dispatch for stripped text: ${JSON.stringify(stripped)}`);
+    const dispatched = tryCommandFromText(rawText, "createChatMessage");
 
     // Best-effort: delete the user's raw "!command" line so chat isn't cluttered.
     if (dispatched) {
