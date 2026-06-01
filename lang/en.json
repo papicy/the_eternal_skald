@@ -15,6 +15,10 @@
         "name": "API Endpoint",
         "hint": "Chat-completions endpoint URL. Defaults to https://api.abacus.ai/v1/chat/completions. Override if you proxy through a custom backend."
       },
+      "proxyUrl": {
+        "name": "Proxy URL",
+        "hint": "Local CORS-bypass proxy endpoint. Defaults to http://localhost:3001/api/chat. The Skald cannot call api.abacus.ai directly from the browser — start the bundled helper first: node proxy/skald-proxy.js (Node 18+, no npm install needed). The proxy must run on the same machine as your Foundry browser."
+      },
       "intensity": {
         "name": "Skald Intensity",
         "hint": "How dramatic and verbose the Skald speaks (1 = terse, 10 = full saga-singer operatic)."

@@ -34,7 +34,7 @@
  * module file was never loaded — typically a manifest / install path
  * problem on Foundry's side.
  * =================================================================== */
-console.log("=== The Eternal Skald v1.0.5 — module file loaded ===");
+console.log("=== The Eternal Skald v1.0.6 — module file loaded ===");
 
 import { IronswornData } from "./ironsworn-data.js";
 
@@ -49,8 +49,16 @@ const SKALD_NAME = "The Eternal Skald";
 const LOG_PREFIX = `${SKALD_NAME} |`;
 
 /** Default endpoint — Abacus AI OpenAI-compatible chat-completions API. */
-const DEFAULT_ENDPOINT = "https://api.abacus.ai/v1/chat/completions";
-const DEFAULT_MODEL    = "gemini-3.0-flash";
+const DEFAULT_ENDPOINT  = "https://api.abacus.ai/v1/chat/completions";
+const DEFAULT_MODEL     = "gemini-3.0-flash";
+
+/** Default URL for the local CORS-bypass proxy.
+ *  Browsers cannot call api.abacus.ai directly from a Foundry origin
+ *  because Abacus doesn't send CORS headers. The Skald therefore POSTs
+ *  every chat request to a tiny Node helper (proxy/skald-proxy.js) that
+ *  forwards it to the real endpoint and returns the response with the
+ *  required Access-Control headers attached. */
+const DEFAULT_PROXY_URL = "http://localhost:3001/api/chat";
 
 // Foundry VTT v14 validates messages starting with "/" against an
 // internal command registry BEFORE the `chatMessage` hook fires, and
@@ -100,6 +108,15 @@ const Settings = {
       config: true,
       type: String,
       default: DEFAULT_ENDPOINT
+    });
+
+    game.settings.register(MODULE_ID, "proxyUrl", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.proxyUrl.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.proxyUrl.hint"),
+      scope: "world",
+      config: true,
+      type: String,
+      default: DEFAULT_PROXY_URL
     });
 
     game.settings.register(MODULE_ID, "intensity", {
@@ -230,10 +247,15 @@ const Client = {
    * Call the Abacus AI chat-completions endpoint with the supplied
    * messages array. Returns the assistant's reply text, or throws.
    *
-   * The default endpoint is OpenAI-compatible
-   * (https://api.abacus.ai/v1/chat/completions). Users with a custom
-   * Abacus AI deployment can repoint to any endpoint that accepts the
-   * same OpenAI-style JSON body.
+   * Browsers cannot call api.abacus.ai directly from a Foundry origin
+   * because Abacus AI does not return CORS headers. So the Skald
+   * always POSTs to the local proxy (default http://localhost:3001/api/chat).
+   * The proxy forwards the request to `endpoint` with the configured
+   * API key and returns the upstream JSON response verbatim — plus
+   * permissive Access-Control-Allow-Origin headers.
+   *
+   * Request body sent to the proxy:
+   *   { apiKey, endpoint, payload: { model, messages, temperature, max_tokens, stream } }
    *
    * @param {Array<{role: string, content: string}>} messages
    * @param {object} [opts]
@@ -245,6 +267,7 @@ const Client = {
     const apiKey   = Settings.get("apiKey");
     const model    = Settings.get("modelName")    || DEFAULT_MODEL;
     const endpoint = Settings.get("apiEndpoint")  || DEFAULT_ENDPOINT;
+    const proxyUrl = Settings.get("proxyUrl")     || DEFAULT_PROXY_URL;
 
     if (!apiKey) {
       throw new Error(game.i18n.localize("ETERNAL_SKALD.errors.noApiKey"));
@@ -253,7 +276,7 @@ const Client = {
       throw new Error("Cannot call ChatLLM with empty messages.");
     }
 
-    const body = {
+    const payload = {
       model,
       messages,
       temperature: opts.temperature ?? 0.8,
@@ -261,29 +284,39 @@ const Client = {
       stream: false
     };
 
-    console.log(LOG_PREFIX, "Calling ChatLLM:", { endpoint, model, msgCount: messages.length });
+    console.log(LOG_PREFIX, "Calling ChatLLM via proxy:",
+      { proxyUrl, endpoint, model, msgCount: messages.length });
 
     let response;
     try {
-      response = await fetch(endpoint, {
+      response = await fetch(proxyUrl, {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`,
-          // Some Abacus deployments accept the raw header instead.
-          "apiKey": apiKey
+          "Content-Type": "application/json"
         },
-        body: JSON.stringify(body)
+        body: JSON.stringify({ apiKey, endpoint, payload })
       });
     } catch (netErr) {
-      console.error(LOG_PREFIX, "Network failure", netErr);
-      throw new Error(`Network error contacting the Skald: ${netErr.message}`);
+      console.error(LOG_PREFIX, "Proxy unreachable", netErr);
+      // Specific, actionable error so the GM knows exactly what to do.
+      throw new Error(
+        "The Skald's proxy is not running. Start it with: node proxy/skald-proxy.js"
+      );
     }
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");
-      console.error(LOG_PREFIX, "HTTP error", response.status, text);
-      throw new Error(`Skald API error ${response.status}: ${text.slice(0, 200)}`);
+      console.error(LOG_PREFIX, "Proxy/upstream HTTP error", response.status, text);
+      // The proxy returns JSON errors with shape { error, detail }.
+      // If we can parse one, surface its detail; otherwise show the raw text.
+      let detail = text;
+      try {
+        const j = JSON.parse(text);
+        if (j?.error || j?.detail) {
+          detail = `${j.error ?? "error"}: ${j.detail ?? ""}`.trim();
+        }
+      } catch (_) { /* not JSON, keep raw */ }
+      throw new Error(`Skald API error ${response.status}: ${String(detail).slice(0, 300)}`);
     }
 
     let data;
