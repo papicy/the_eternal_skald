@@ -34,7 +34,7 @@
  * module file was never loaded — typically a manifest / install path
  * problem on Foundry's side.
  * =================================================================== */
-console.log("=== The Eternal Skald v1.0.6 — module file loaded ===");
+console.log("=== The Eternal Skald v1.0.7 — module file loaded ===");
 
 import { IronswornData } from "./ironsworn-data.js";
 

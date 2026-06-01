@@ -43,7 +43,7 @@ Leave that terminal open while you play. You should see:
 
 ### Why a proxy?
 
-Foundry VTT runs in your browser. Browsers block cross-origin requests to `api.abacus.ai` from a Foundry origin (e.g. `http://localhost:30000` or `http://192.168.1.45:30000`) because Abacus AI does not return CORS headers. Without the proxy, every chat call fails with **`CORS Missing Allow Origin`** in DevTools and no Skald reply ever arrives.
+Foundry VTT runs in your browser. Browsers block cross-origin requests to `api.abacus.ai` from a Foundry origin (e.g. `http://localhost:30000`, or whatever LAN address Foundry is served on) because Abacus AI does not return CORS headers. Without the proxy, every chat call fails with **`CORS Missing Allow Origin`** in DevTools and no Skald reply ever arrives.
 
 The proxy is a tiny Node.js HTTP server (`proxy/skald-proxy.js`) bundled with the module. It listens on `localhost:3001`, forwards your request to the configured Abacus AI endpoint with your API key, and returns the upstream response with the right `Access-Control-Allow-Origin` headers attached. **The proxy never persists or logs your API key** — it just passes it through.
 
@@ -59,7 +59,7 @@ Environment variables (set them before `node proxy/skald-proxy.js`):
 | Variable | Default | Effect |
 |---|---|---|
 | `SKALD_PROXY_PORT` | `3001` | Port the proxy listens on |
-| `SKALD_PROXY_HOST` | `127.0.0.1` | Bind address (use `0.0.0.0` to expose to LAN — usually unnecessary) |
+| `SKALD_PROXY_HOST` | `0.0.0.0` | Bind address. The default binds on all interfaces so the proxy works whether your browser talks to it via `localhost` or via the LAN IP your Foundry server is on. Set to `localhost` / `127.0.0.1` to restrict to loopback only. |
 
 If you change the port, update **Configure Settings → The Eternal Skald → Proxy URL** to match (e.g. `http://localhost:4444/api/chat`).
 
@@ -75,7 +75,7 @@ In a second terminal:
 curl http://localhost:3001/
 ```
 
-You should get `{"status":"ok","service":"The Eternal Skald Proxy","version":"1.0.6"}`.
+You should get `{"status":"ok","service":"The Eternal Skald Proxy","version":"1.0.7"}`.
 
 ---
 
@@ -147,7 +147,7 @@ The local CORS proxy is not running. Open a terminal on the same machine as your
 You skipped the proxy. From v1.0.6 onward all Skald requests must go through the bundled proxy on `http://localhost:3001`. Browsers refuse to call Abacus AI directly because Abacus doesn't return CORS headers. Start the proxy, refresh Foundry, try again.
 
 **No log lines in DevTools when launching a world**
-The module file never loaded. Confirm the install was successful and that the module is activated for the world. As of v1.0.6 the module logs `=== The Eternal Skald v1.0.6 — module file loaded ===` to the console as soon as it begins executing.
+The module file never loaded. Confirm the install was successful and that the module is activated for the world. As of v1.0.7 the module logs `=== The Eternal Skald v1.0.7 — module file loaded ===` to the console as soon as it begins executing.
 
 **"DOCTYPE error" / install fails**
 The release zip must be installed via the manifest URL above. Older versions used GitHub's auto-generated archive zip which wrapped everything in a subfolder; the published release asset (`the-eternal-skald.zip`) has files at the zip root.

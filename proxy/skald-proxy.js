@@ -4,8 +4,9 @@
  *  ---------------------------------------------------------------------
  *  Foundry VTT modules run inside the browser, and the browser blocks
  *  cross-origin POST requests to `https://api.abacus.ai/...` from the
- *  Foundry origin (e.g. `http://192.168.1.45:30000`). The ONLY robust
- *  fix is to relay the request through a local server.
+ *  Foundry origin (e.g. `http://localhost:30000` or any LAN address
+ *  Foundry happens to be served on). The ONLY robust fix is to relay
+ *  the request through a local server.
  *
  *  This script is a single-file, zero-dependency Node.js HTTP proxy
  *  that does exactly that. Start it on the SAME machine that runs
@@ -33,7 +34,13 @@
  *
  *  Configuration (environment variables):
  *      SKALD_PROXY_PORT   default: 3001
- *      SKALD_PROXY_HOST   default: 127.0.0.1 (use 0.0.0.0 to expose on LAN)
+ *      SKALD_PROXY_HOST   default: 0.0.0.0  (binds on all interfaces so
+ *                                            the proxy is reachable from
+ *                                            both `localhost` and any
+ *                                            LAN address Foundry might
+ *                                            be served on. Set to
+ *                                            `localhost` / `127.0.0.1`
+ *                                            to restrict to loopback.)
  *
  *  Author: The Eternal Skald Project
  *  License: MIT
@@ -44,7 +51,11 @@ const https = require("https");
 const url   = require("url");
 
 const PORT = parseInt(process.env.SKALD_PROXY_PORT, 10) || 3001;
-const HOST = process.env.SKALD_PROXY_HOST || "127.0.0.1";
+// Bind on all interfaces by default so the proxy is reachable both via
+// `http://localhost:3001` and via the LAN IP Foundry is served on. The
+// module's "Proxy URL" setting still defaults to `localhost` — only the
+// server-side bind is permissive.
+const HOST = process.env.SKALD_PROXY_HOST || "0.0.0.0";
 
 // Maximum body size we'll accept from the Foundry browser side (bytes).
 // 2 MiB is more than enough for any chat-completion payload.
@@ -155,7 +166,7 @@ function forwardToUpstream(targetUrl, payload, apiKey) {
         // Some Abacus deployments accept the raw header instead.
         "apiKey":         apiKey,
         // Identify ourselves to upstream for easier debugging.
-        "User-Agent":     "TheEternalSkaldProxy/1.0.6 (+https://github.com/papicy/eternal_skald)"
+        "User-Agent":     "TheEternalSkaldProxy/1.0.7 (+https://github.com/papicy/eternal_skald)"
       }
     };
 
@@ -278,7 +289,7 @@ const server = http.createServer(async (req, res) => {
     return sendJson(res, 200, {
       status:  "ok",
       service: "The Eternal Skald Proxy",
-      version: "1.0.6",
+      version: "1.0.7",
       endpoints: {
         chat:   "POST /api/chat",
         health: "GET /"
@@ -311,12 +322,18 @@ server.on("error", err => {
 });
 
 server.listen(PORT, HOST, () => {
+  // Friendly URL shown to the user. The server may be listening on
+  // 0.0.0.0 (all interfaces), but for everyday use `localhost` is the
+  // address the module's Proxy URL setting points at by default.
+  const friendlyHost =
+    (HOST === "0.0.0.0" || HOST === "::" || HOST === "::0") ? "localhost" : HOST;
+
   console.log("");
-  console.log(`${COLOR.yellow}⚔️  The Eternal Skald Proxy running on http://localhost:${PORT}${COLOR.reset}`);
+  console.log(`${COLOR.yellow}⚔️  The Eternal Skald Proxy running on http://${friendlyHost}:${PORT}${COLOR.reset}`);
   console.log("");
-  log("ok", `Listening on ${HOST}:${PORT}`);
-  log("info", `Endpoint:  POST http://localhost:${PORT}/api/chat`);
-  log("info", `Health:    GET  http://localhost:${PORT}/`);
+  log("ok",   `Listening on ${HOST}:${PORT}  (all interfaces: ${HOST === "0.0.0.0" ? "yes" : "no"})`);
+  log("info", `Endpoint:  POST http://${friendlyHost}:${PORT}/api/chat`);
+  log("info", `Health:    GET  http://${friendlyHost}:${PORT}/`);
   log("info", "Press Ctrl+C to stop the proxy.");
 });
 
