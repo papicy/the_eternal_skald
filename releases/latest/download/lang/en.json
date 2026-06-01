@@ -1,0 +1,59 @@
+{
+  "ETERNAL_SKALD": {
+    "moduleTitle": "The Eternal Skald",
+
+    "settings": {
+      "apiKey": {
+        "name": "Abacus AI API Key",
+        "hint": "Your ChatLLM API key from Abacus AI. Keep this private — it will be sent with every request. World-scoped, GM-only."
+      },
+      "modelName": {
+        "name": "AI Model",
+        "hint": "Model identifier to use for generation. Defaults to gemini-3.0-flash. Any model exposed by your Abacus AI deployment is acceptable."
+      },
+      "apiEndpoint": {
+        "name": "API Endpoint",
+        "hint": "Chat-completions endpoint URL. Defaults to https://api.abacus.ai/v1/chat/completions. Override if you proxy through a custom backend."
+      },
+      "intensity": {
+        "name": "Skald Intensity",
+        "hint": "How dramatic and verbose the Skald speaks (1 = terse, 10 = full saga-singer operatic)."
+      },
+      "autoNarrateCombat": {
+        "name": "Auto-Narrate Combat",
+        "hint": "When enabled, the Skald posts a short flavour line at the start of each combatant's turn."
+      },
+      "autoControlEnemies": {
+        "name": "AI Controls Enemies",
+        "hint": "When enabled, the Skald takes the turn for any non-player combatant: deciding action, moving the token, rolling the attack, applying harm, then advancing the turn."
+      },
+      "memoryLength": {
+        "name": "Conversation Memory",
+        "hint": "How many recent messages the Skald remembers per conversation channel."
+      }
+    },
+
+    "commands": {
+      "skald": "Speak with The Eternal Skald.",
+      "oracle": "Roll an Ironsworn oracle and have the Skald interpret it.",
+      "npc": "Generate or roleplay an NPC.",
+      "scene": "Generate a vivid scene/location description.",
+      "lore": "Generate world-building lore and create a Journal Entry.",
+      "combat": "Get tactical narration/advice for the current combat.",
+      "help": "Show the Skald's command runes."
+    },
+
+    "errors": {
+      "noApiKey": "No Abacus AI API key is set. Open Module Settings → The Eternal Skald and provide your key.",
+      "emptySkald": "Speak, Ironsworn. Usage: /skald <your question or prompt>",
+      "emptyNpc": "Name the one you would meet. Usage: /npc <name or description>",
+      "emptyLore": "What chronicle shall I write? Usage: /lore <topic>"
+    },
+
+    "ui": {
+      "thinking": "The Eternal Skald listens to the wind…",
+      "arriving": "The Skald arrives.",
+      "noCombat": "There is no battle joined."
+    }
+  }
+}
