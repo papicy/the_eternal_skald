@@ -34,7 +34,7 @@
  * module file was never loaded — typically a manifest / install path
  * problem on Foundry's side.
  * =================================================================== */
-console.log("=== The Eternal Skald v1.0.7 — module file loaded ===");
+console.log("=== The Eternal Skald v1.0.8 — module file loaded ===");
 
 import { IronswornData } from "./ironsworn-data.js";
 
@@ -52,12 +52,24 @@ const LOG_PREFIX = `${SKALD_NAME} |`;
 const DEFAULT_ENDPOINT  = "https://api.abacus.ai/v1/chat/completions";
 const DEFAULT_MODEL     = "gemini-3.0-flash";
 
-/** Default URL for the local CORS-bypass proxy.
- *  Browsers cannot call api.abacus.ai directly from a Foundry origin
- *  because Abacus doesn't send CORS headers. The Skald therefore POSTs
- *  every chat request to a tiny Node helper (proxy/skald-proxy.js) that
- *  forwards it to the real endpoint and returns the response with the
- *  required Access-Control headers attached. */
+/** Two routes to bypass CORS, tried in order:
+ *
+ *   1. SKALD_HOOK_URL — a SAME-ORIGIN path served by proxy/skald-hook.mjs,
+ *      which was monkey-patched into Foundry's own HTTP server at startup
+ *      via `node --import ./modules/the-eternal-skald/proxy/skald-hook.mjs
+ *      resources/app/main.mjs`. No CORS, no Mixed Content, no extra port,
+ *      works through any reverse proxy automatically.
+ *
+ *   2. DEFAULT_PROXY_URL — a standalone Node helper (proxy/skald-proxy.js)
+ *      that the user starts separately. This is the older v1.0.7 path,
+ *      kept as a fallback for users who can't modify Foundry's startup
+ *      command (rare).
+ *
+ *  Client.chat() tries the hook first; if it 404s (hook not loaded),
+ *  it falls back to the proxy URL. The fallback URL is configurable in
+ *  Module Settings; the hook path is hard-coded because it MUST be
+ *  same-origin to work. */
+const SKALD_HOOK_URL    = "/skald-api/chat";
 const DEFAULT_PROXY_URL = "http://localhost:3001/api/chat";
 
 // Foundry VTT v14 validates messages starting with "/" against an
@@ -243,18 +255,108 @@ GUIDELINES:
 /* ===================================================================== */
 
 const Client = {
+  /** Per-session preferred route (so we don't keep retrying a 404'd hook). */
+  _preferredRoute: null,  // null | "hook" | "proxy"
+
   /**
-   * Call the Abacus AI chat-completions endpoint with the supplied
+   * Extract the assistant text from the upstream JSON response, supporting
+   * OpenAI-style `choices[0].message.content` and a few common Abacus AI
+   * variants. Returns null if no usable content was found.
+   */
+  _extractContent(data) {
+    return (
+      data?.choices?.[0]?.message?.content ??
+      data?.result?.messages?.slice(-1)?.[0]?.text ??
+      data?.result?.content ??
+      data?.text ??
+      data?.response ??
+      null
+    );
+  },
+
+  /**
+   * Try a single route once. Returns:
+   *   { ok: true,  content: string }                       on success
+   *   { ok: false, retriable: true,  reason: string }      route absent (try the other)
+   *   { ok: false, retriable: false, error: Error }        upstream/other failure
+   */
+  async _tryRoute(routeLabel, url, body) {
+    let response;
+    try {
+      response = await fetch(url, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify(body)
+      });
+    } catch (netErr) {
+      // TypeError "Failed to fetch" → route unreachable. Could be a same-
+      // origin path that 404s in some weird way, or a Mixed-Content block
+      // on the http://localhost proxy when Foundry is served via HTTPS.
+      // Either way: not-ours → let the caller try the other route.
+      console.warn(LOG_PREFIX, `Route ${routeLabel} unreachable:`, netErr?.message ?? netErr);
+      return { ok: false, retriable: true, reason: `network: ${netErr?.message ?? "fetch failed"}` };
+    }
+
+    // A 404 means "this route isn't installed" — fall through to the other.
+    if (response.status === 404) {
+      console.warn(LOG_PREFIX, `Route ${routeLabel} returned 404 — not installed.`);
+      return { ok: false, retriable: true, reason: "404" };
+    }
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      console.error(LOG_PREFIX, `Route ${routeLabel} HTTP error`, response.status, text);
+      // Errors from upstream LLM are NOT retriable on the other route —
+      // both routes would hit the same upstream and produce the same error.
+      let detail = text;
+      try {
+        const j = JSON.parse(text);
+        if (j?.error || j?.detail || j?.message) {
+          detail = `${j.error ?? "error"}: ${j.detail ?? j.message ?? ""}`.trim();
+        }
+      } catch (_) { /* not JSON, keep raw */ }
+      return {
+        ok: false,
+        retriable: false,
+        error: new Error(`Skald API error ${response.status}: ${String(detail).slice(0, 300)}`)
+      };
+    }
+
+    let data;
+    try { data = await response.json(); }
+    catch (_) {
+      return { ok: false, retriable: false, error: new Error("Skald returned a malformed response.") };
+    }
+    const content = this._extractContent(data);
+    if (!content || typeof content !== "string") {
+      console.error(LOG_PREFIX, `Route ${routeLabel} unexpected response shape`, data);
+      return { ok: false, retriable: false, error: new Error("Skald received an empty or malformed reply.") };
+    }
+    return { ok: true, content: content.trim() };
+  },
+
+  /**
+   * Call the configured chat-completions endpoint with the supplied
    * messages array. Returns the assistant's reply text, or throws.
    *
-   * Browsers cannot call api.abacus.ai directly from a Foundry origin
-   * because Abacus AI does not return CORS headers. So the Skald
-   * always POSTs to the local proxy (default http://localhost:3001/api/chat).
-   * The proxy forwards the request to `endpoint` with the configured
-   * API key and returns the upstream JSON response verbatim — plus
-   * permissive Access-Control-Allow-Origin headers.
+   * NETWORKING STRATEGY (v1.0.8)
+   * ----------------------------
+   * Foundry runs in the browser, so it cannot talk to api.abacus.ai
+   * directly (CORS). We try two routes, in order:
    *
-   * Request body sent to the proxy:
+   *   1. SAME-ORIGIN HOOK — POST /skald-api/chat. This route exists
+   *      only if Foundry was started with `--import ./...skald-hook.mjs`,
+   *      which monkey-patches Foundry's http server. Works through any
+   *      reverse proxy (HTTPS, hostnames, ports — all transparent).
+   *
+   *   2. STANDALONE PROXY — POST <proxyUrl>. The user-configurable
+   *      fallback if they can't modify Foundry's startup (defaults to
+   *      http://localhost:3001/api/chat, requires `node proxy/skald-proxy.js`).
+   *
+   * On the first successful call we remember which route worked and
+   * use it directly for the rest of the session — no more probing.
+   *
+   * Request body sent to either route:
    *   { apiKey, endpoint, payload: { model, messages, temperature, max_tokens, stream } }
    *
    * @param {Array<{role: string, content: string}>} messages
@@ -267,7 +369,7 @@ const Client = {
     const apiKey   = Settings.get("apiKey");
     const model    = Settings.get("modelName")    || DEFAULT_MODEL;
     const endpoint = Settings.get("apiEndpoint")  || DEFAULT_ENDPOINT;
-    const proxyUrl = Settings.get("proxyUrl")     || DEFAULT_PROXY_URL;
+    const proxyUrl = (Settings.get("proxyUrl") || "").trim() || DEFAULT_PROXY_URL;
 
     if (!apiKey) {
       throw new Error(game.i18n.localize("ETERNAL_SKALD.errors.noApiKey"));
@@ -283,64 +385,56 @@ const Client = {
       max_tokens:  opts.maxTokens   ?? 800,
       stream: false
     };
+    const body = { apiKey, endpoint, payload };
 
-    console.log(LOG_PREFIX, "Calling ChatLLM via proxy:",
-      { proxyUrl, endpoint, model, msgCount: messages.length });
+    console.log(LOG_PREFIX, "Calling ChatLLM:", {
+      preferredRoute: this._preferredRoute ?? "auto",
+      hookUrl:        SKALD_HOOK_URL,
+      proxyUrl,
+      endpoint, model, msgCount: messages.length
+    });
 
-    let response;
-    try {
-      response = await fetch(proxyUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({ apiKey, endpoint, payload })
-      });
-    } catch (netErr) {
-      console.error(LOG_PREFIX, "Proxy unreachable", netErr);
-      // Specific, actionable error so the GM knows exactly what to do.
-      throw new Error(
-        "The Skald's proxy is not running. Start it with: node proxy/skald-proxy.js"
-      );
-    }
+    // Order of attempts is: preferred route first (if known), then the
+    // other. If preferred is unset, try hook then proxy.
+    const order = (() => {
+      if (this._preferredRoute === "hook")  return ["hook",  "proxy"];
+      if (this._preferredRoute === "proxy") return ["proxy", "hook" ];
+      return ["hook", "proxy"];
+    })();
 
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      console.error(LOG_PREFIX, "Proxy/upstream HTTP error", response.status, text);
-      // The proxy returns JSON errors with shape { error, detail }.
-      // If we can parse one, surface its detail; otherwise show the raw text.
-      let detail = text;
-      try {
-        const j = JSON.parse(text);
-        if (j?.error || j?.detail) {
-          detail = `${j.error ?? "error"}: ${j.detail ?? ""}`.trim();
+    const failures = [];
+    for (const route of order) {
+      const url   = route === "hook" ? SKALD_HOOK_URL : proxyUrl;
+      // If the proxy URL is identical to the hook URL (user fiddled with
+      // settings), don't double-try.
+      if (route === "proxy" && url === SKALD_HOOK_URL) continue;
+
+      const result = await this._tryRoute(route, url, body);
+      if (result.ok) {
+        if (this._preferredRoute !== route) {
+          console.log(LOG_PREFIX, `Locking onto working route: ${route} (${url})`);
+          this._preferredRoute = route;
         }
-      } catch (_) { /* not JSON, keep raw */ }
-      throw new Error(`Skald API error ${response.status}: ${String(detail).slice(0, 300)}`);
+        return result.content;
+      }
+      if (!result.retriable) {
+        // Real upstream/API error — surface it now, don't masquerade
+        // by switching routes.
+        throw result.error;
+      }
+      failures.push({ route, url, reason: result.reason });
     }
 
-    let data;
-    try { data = await response.json(); }
-    catch (e) {
-      throw new Error("Skald returned a malformed response.");
-    }
-
-    // Support OpenAI-style { choices: [{ message: { content } }] }
-    // as well as a couple of common Abacus AI variants.
-    const content =
-      data?.choices?.[0]?.message?.content ??
-      data?.result?.messages?.slice(-1)?.[0]?.text ??
-      data?.result?.content ??
-      data?.text ??
-      data?.response ??
-      "";
-
-    if (!content || typeof content !== "string") {
-      console.error(LOG_PREFIX, "Unexpected response shape", data);
-      throw new Error("Skald received an empty or malformed reply.");
-    }
-
-    return content.trim();
+    // Both routes failed at the network/404 level. Build a clear,
+    // actionable message that points the GM at the README setup.
+    console.error(LOG_PREFIX, "All Skald routes failed:", failures);
+    throw new Error(
+      "The Skald cannot reach its API.\n" +
+      "  • Same-origin hook (/skald-api/chat): not loaded — start Foundry with " +
+      "'node --import ./Data/modules/the-eternal-skald/proxy/skald-hook.mjs resources/app/main.mjs'.\n" +
+      `  • Fallback proxy (${proxyUrl}): unreachable — run 'node proxy/skald-proxy.js' on your Foundry host.\n` +
+      "See the module's README → 'Proxy Setup' for full instructions."
+    );
   }
 };
 
@@ -666,17 +760,26 @@ const NpcDialogue = {
 
     if (!this._sessions.has(key)) {
       // First contact — generate the NPC's persona and stats.
+      // If _spawn() failed (typically because the LLM/proxy was
+      // unreachable), it logs the error itself and DOES NOT populate
+      // the session map. In that case we just bail out cleanly here
+      // instead of crashing on `session.turnCount` below.
       await this._spawn(key, descriptor);
     }
     const session = this._sessions.get(key);
+    if (!session) {
+      // _spawn already showed a GM-whispered error; nothing more to do.
+      console.warn(LOG_PREFIX, `NPC.invoke: no session for "${descriptor}" (spawn failed).`);
+      return null;
+    }
 
     // Subsequent turns: open-ended player line goes back to the NPC.
-    if (session.turnCount > 0) {
+    if ((session.turnCount ?? 0) > 0) {
       const userLine = descriptor.replace(/^[^:]*:\s*/, ""); // strip "Name:" prefix if given
       return this._respond(key, userLine);
     }
     // First turn already produced a greeting from _spawn().
-    return session.lastReply;
+    return session.lastReply ?? null;
   },
 
   /** Create a brand-new NPC session and post their introduction. */
@@ -1074,18 +1177,22 @@ ${ctx}`;
 
   /** Carry out the chosen action on the canvas. */
   async _executeAction(combat, combatant, decision) {
-    const token = combatant.token?.object ?? canvas.tokens.get(combatant.tokenId);
+    const token = combatant?.token?.object ?? canvas?.tokens?.get?.(combatant?.tokenId);
     if (!token) return;
 
     // Movement
     if (decision.move_to && Number.isFinite(decision.move_to.x) && Number.isFinite(decision.move_to.y)) {
-      // Clamp to scene bounds
-      const scene = canvas.scene;
-      const x = Math.max(0, Math.min(decision.move_to.x, scene.dimensions.width  - token.w));
-      const y = Math.max(0, Math.min(decision.move_to.y, scene.dimensions.height - token.h));
-      try {
-        await token.document.update({ x, y });
-      } catch (e) { console.warn(LOG_PREFIX, "Token move failed", e); }
+      // Clamp to scene bounds (skip if there's no active scene).
+      const scene = canvas?.scene;
+      if (scene?.dimensions) {
+        const w = scene.dimensions.width  ?? Infinity;
+        const h = scene.dimensions.height ?? Infinity;
+        const x = Math.max(0, Math.min(decision.move_to.x, w - (token.w ?? 0)));
+        const y = Math.max(0, Math.min(decision.move_to.y, h - (token.h ?? 0)));
+        try {
+          await token.document.update({ x, y });
+        } catch (e) { console.warn(LOG_PREFIX, "Token move failed", e); }
+      }
     }
 
     // Combat actions — use Ironsworn dice (1d6 vs 2d10)
@@ -1206,35 +1313,51 @@ ${ctx}`;
     });
   },
 
-  /** Compact, LLM-friendly battlefield snapshot. */
+  /** Compact, LLM-friendly battlefield snapshot.
+   *  Defensive against partial Combat state: optional chaining on every
+   *  property access so that an out-of-combat invocation never throws. */
   _combatSnapshot(activeCombatant) {
-    const combat = game.combat;
+    const combat = game?.combat;
     if (!combat) return "(no active combat)";
 
-    const lines = [];
-    lines.push(`Round ${combat.round}, turn ${combat.turn + 1}/${combat.combatants.size}.`);
-    if (canvas.scene) lines.push(`Scene: ${canvas.scene.name}.`);
+    const round       = combat.round ?? 0;
+    const turn        = combat.turn  ?? 0;
+    const combatants  = combat.combatants ?? new Map();
+    const totalCount  = combatants.size ?? combatants.length ?? 0;
 
-    for (const c of combat.combatants) {
-      const tok = c.token?.object ?? canvas.tokens.get(c.tokenId);
-      const actor = c.actor;
-      const x = tok?.x ?? "?";
-      const y = tok?.y ?? "?";
-      const hp = foundry.utils.getProperty(actor ?? {}, "system.health.value") ??
-                 foundry.utils.getProperty(actor ?? {}, "system.attributes.health.value") ??
-                 "?";
-      const role = this._isPlayerOwned(c) ? "HERO" : "FOE";
-      const flag = c === activeCombatant ? " ←ACTIVE" : "";
-      lines.push(`  [${role}] ${c.name} (id=${tok?.id ?? "?"}) pos=(${x},${y}) hp=${hp}${flag}`);
+    const lines = [];
+    lines.push(`Round ${round}, turn ${turn + 1}/${totalCount || "?"}.`);
+    if (canvas?.scene?.name) lines.push(`Scene: ${canvas.scene.name}.`);
+
+    // combatants may be a Collection (Map-like) — iterable in both v12 and v14.
+    try {
+      for (const c of combatants) {
+        if (!c) continue;
+        const tok = c.token?.object ?? canvas?.tokens?.get?.(c.tokenId);
+        const actor = c.actor;
+        const x = tok?.x ?? "?";
+        const y = tok?.y ?? "?";
+        const hp = foundry?.utils?.getProperty?.(actor ?? {}, "system.health.value") ??
+                   foundry?.utils?.getProperty?.(actor ?? {}, "system.attributes.health.value") ??
+                   "?";
+        const role = this._isPlayerOwned(c) ? "HERO" : "FOE";
+        const flag = c === activeCombatant ? " ←ACTIVE" : "";
+        lines.push(`  [${role}] ${c.name ?? "?"} (id=${tok?.id ?? "?"}) pos=(${x},${y}) hp=${hp}${flag}`);
+      }
+    } catch (err) {
+      // Never let combat-iteration errors propagate out of a snapshot.
+      console.warn(LOG_PREFIX, "_combatSnapshot: iteration failed —", err?.message ?? err);
+      lines.push("  (combatant list unavailable)");
     }
+
     return lines.join("\n");
   },
 
   /** Used by the !combat command to give the LLM context. */
   summariseCurrent() {
-    const combat = game.combat;
+    const combat = game?.combat;
     if (!combat?.started) return "(no active combat)";
-    return this._combatSnapshot(combat.combatant);
+    return this._combatSnapshot(combat.combatant ?? null);
   }
 };
 
