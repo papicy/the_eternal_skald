@@ -64,9 +64,7 @@ const Settings = {
       scope: "world",
       config: true,
       type: String,
-      default: "",
-      // 'secret: true' obfuscates the value in v12+ UIs that support it.
-      secret: true
+      default: ""
     });
 
     game.settings.register(MODULE_ID, "modelName", {
