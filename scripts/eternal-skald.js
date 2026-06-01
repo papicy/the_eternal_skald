@@ -27,7 +27,18 @@
  *  gracefully — a failure in the AI layer never blocks Foundry's UI.
  * ===================================================================== */
 
+/* === BOOT DIAGNOSTIC ================================================
+ * IMPORTANT: this log fires as soon as Foundry begins executing this
+ * file as an ES module. If you open the browser DevTools (F12) and do
+ * NOT see this line in the console after launching a world, then the
+ * module file was never loaded — typically a manifest / install path
+ * problem on Foundry's side.
+ * =================================================================== */
+console.log("=== The Eternal Skald v1.0.2 — module file loaded ===");
+
 import { IronswornData } from "./ironsworn-data.js";
+
+console.log("The Eternal Skald | ironsworn-data.js imported successfully");
 
 /* ===================================================================== */
 /*  §1  CONSTANTS                                                         */
@@ -1201,9 +1212,15 @@ const SceneContext = {
 //      any race between module load order and Foundry core.
 //   2. It groups all early-lifecycle wiring in one place so the order
 //      of registration is unambiguous.
+console.log("The Eternal Skald | Registering Hooks.once('init') …");
 Hooks.once("init", () => {
-  console.log(LOG_PREFIX, "Initialising…");
-  Settings.register();
+  console.log(LOG_PREFIX, "init hook fired — initialising module …");
+  try {
+    Settings.register();
+    console.log(LOG_PREFIX, "Settings registered.");
+  } catch (err) {
+    console.error(LOG_PREFIX, "Settings.register() failed:", err);
+  }
 
   // === Chat command interception ====================================
   //
@@ -1239,8 +1256,9 @@ Hooks.once("init", () => {
 });
 
 // --- ready: welcome banner & global API ------------------------------
+console.log("The Eternal Skald | Registering Hooks.once('ready') …");
 Hooks.once("ready", async () => {
-  console.log(LOG_PREFIX, "Ready.");
+  console.log(LOG_PREFIX, "ready hook fired — module fully loaded.");
 
   // Expose a small public API for macros and other modules.
   game.modules.get(MODULE_ID).api = {
