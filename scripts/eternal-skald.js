@@ -417,33 +417,59 @@ function formatMarkdown(text) {
 /* ===================================================================== */
 
 /**
- * Master dispatcher. Returns true if the message was consumed
- * (a Skald command) so Foundry doesn't also publish it verbatim.
+ * Master dispatcher. Returns true if the message was a recognised Skald
+ * command (so the chatMessage hook can return false and suppress the
+ * default publication of the user's command line).
  *
- * @param {ChatLog} chatLog
- * @param {string}  rawText
- * @param {object}  chatData
- * @returns {boolean} true to suppress default chat publication
+ * IMPORTANT: This function MUST be synchronous. Each command handler is
+ * async, but we deliberately fire-and-forget them with `.catch()` to log
+ * any errors. The decision to suppress the default chat post must be
+ * returned synchronously to Foundry — we can't `await` the handler.
+ *
+ * @param {string} rawText - the raw message text typed by the user
+ * @returns {boolean} true if a Skald command was matched and dispatched
  */
-function dispatchCommand(chatLog, rawText, chatData) {
+function dispatchCommand(rawText) {
   if (!rawText || typeof rawText !== "string") return false;
   const trimmed = rawText.trim();
   if (!trimmed.startsWith("/")) return false;
 
-  const [head, ...rest] = trimmed.split(/\s+/);
-  const cmd = head.toLowerCase();
-  const args = rest.join(" ").trim();
+  // Split on the first run of whitespace — "/oracle action" -> ["/oracle", "action"].
+  // Commands without args (e.g. "/skald-help") split to a single-element array.
+  const firstSpace = trimmed.search(/\s/);
+  const head = (firstSpace === -1 ? trimmed : trimmed.slice(0, firstSpace)).toLowerCase();
+  const args = (firstSpace === -1 ? "" : trimmed.slice(firstSpace + 1)).trim();
 
-  switch (cmd) {
-    case COMMANDS.HELP:    Commands.help();                    return true;
-    case COMMANDS.SKALD:   Commands.skald(args);               return true;
-    case COMMANDS.ORACLE:  Commands.oracle(args);              return true;
-    case COMMANDS.NPC:     Commands.npc(args);                 return true;
-    case COMMANDS.SCENE:   Commands.scene(args);               return true;
-    case COMMANDS.LORE:    Commands.lore(args);                return true;
-    case COMMANDS.COMBAT:  Commands.combat(args);              return true;
-    default: return false;
-  }
+  // Map command tokens to their async handler. We use a lookup table so we
+  // can match the prefix exactly (no partial matches, no fall-through).
+  const handler = (() => {
+    switch (head) {
+      case COMMANDS.HELP:    return () => Commands.help();
+      case COMMANDS.SKALD:   return () => Commands.skald(args);
+      case COMMANDS.ORACLE:  return () => Commands.oracle(args);
+      case COMMANDS.NPC:     return () => Commands.npc(args);
+      case COMMANDS.SCENE:   return () => Commands.scene(args);
+      case COMMANDS.LORE:    return () => Commands.lore(args);
+      case COMMANDS.COMBAT:  return () => Commands.combat(args);
+      default:               return null;
+    }
+  })();
+
+  if (!handler) return false;
+
+  console.log(`${LOG_PREFIX} dispatching command "${head}" args="${args}"`);
+
+  // Fire-and-forget: kick off the async handler, log any failure, but
+  // DO NOT await — we have to return synchronously below so the hook
+  // can suppress Foundry's default chat publication.
+  Promise.resolve()
+    .then(handler)
+    .catch(err => {
+      console.error(LOG_PREFIX, `Command "${head}" failed:`, err);
+      ui.notifications?.error(`${SKALD_NAME}: ${err.message ?? err}`);
+    });
+
+  return true;
 }
 
 const Commands = {
@@ -1167,10 +1193,49 @@ const SceneContext = {
 /*  §13 HOOK REGISTRATIONS                                                */
 /* ===================================================================== */
 
-// --- init: register settings -----------------------------------------
+// --- init: register settings AND chat-command hook -------------------
+// We register the chatMessage hook inside 'init' (rather than at the
+// top level of the module) for two reasons:
+//   1. It guarantees the hook is attached AFTER Foundry has finished
+//      initialising its own hook system and chat plumbing — avoiding
+//      any race between module load order and Foundry core.
+//   2. It groups all early-lifecycle wiring in one place so the order
+//      of registration is unambiguous.
 Hooks.once("init", () => {
   console.log(LOG_PREFIX, "Initialising…");
   Settings.register();
+
+  // === Chat command interception ====================================
+  //
+  // Foundry fires the 'chatMessage' hook with the RAW string typed by
+  // the user BEFORE creating any ChatMessage document. The signature is:
+  //
+  //     (chatLog, messageText, chatData) => boolean
+  //
+  // If our handler returns `false` (exactly false — not falsy!) Foundry
+  // aborts the default behaviour and does NOT create the chat message.
+  // For any other return value (including undefined / true / null),
+  // Foundry continues with the default behaviour.
+  //
+  // We use the 'chatMessage' hook — NOT 'preCreateChatMessage' or
+  // 'createChatMessage' — because only 'chatMessage' lets us see the
+  // raw text BEFORE Foundry tries to parse it as a built-in command
+  // (like /r, /roll, /w, /ooc).
+  Hooks.on("chatMessage", (chatLog, messageText, chatData) => {
+    try {
+      const consumed = dispatchCommand(messageText);
+      // Return EXPLICIT false to suppress default behaviour, or undefined
+      // (implicit) to let Foundry handle the message normally.
+      if (consumed) return false;
+      return undefined;
+    } catch (err) {
+      console.error(LOG_PREFIX, "chatMessage hook crashed:", err);
+      // Let Foundry handle the message normally on error.
+      return undefined;
+    }
+  });
+
+  console.log(`${LOG_PREFIX} Chat-command hook registered for: ${Object.values(COMMANDS).join(", ")}`);
 });
 
 // --- ready: welcome banner & global API ------------------------------
@@ -1204,34 +1269,6 @@ Hooks.once("ready", async () => {
       );
     }
   }
-});
-
-// --- chatMessage: intercept slash commands BEFORE Foundry posts them --
-// Returning false from this hook prevents the default behaviour.
-Hooks.on("chatMessage", (chatLog, message, chatData) => {
-  try {
-    const consumed = dispatchCommand(chatLog, message, chatData);
-    return !consumed; // returning false suppresses the default chat post
-  } catch (err) {
-    console.error(LOG_PREFIX, "chatMessage handler crashed", err);
-    return true; // let Foundry handle it normally
-  }
-});
-
-// --- preCreateChatMessage: secondary safety net for command capture ---
-Hooks.on("preCreateChatMessage", (message, data /*, options, userId */) => {
-  const raw = data?.content ?? message?.content;
-  if (typeof raw !== "string") return true;
-  if (!raw.trim().startsWith("/")) return true;
-
-  const head = raw.trim().split(/\s+/)[0].toLowerCase();
-  if (Object.values(COMMANDS).includes(head)) {
-    // Already handled in chatMessage hook — but if a macro pushes a
-    // ChatMessage directly, intercept here too.
-    const consumed = dispatchCommand(null, raw, data);
-    return !consumed;
-  }
-  return true;
 });
 
 // --- updateCombat: enemy turn automation -----------------------------
