@@ -6,35 +6,38 @@ Powered by the **Abacus AI ChatLLM** platform (Gemini 3.0 Flash by default).
 
 ---
 
-## Installation
+## Installation (recommended)
 
-This module is currently distributed as a local-install package (no public manifest URL). Install it by copying the folder directly into your Foundry data directory:
+1. In Foundry VTT, open **Setup → Add-on Modules → Install Module**.
+2. Paste this **Manifest URL** into the bottom field and click **Install**:
+   ```
+   https://raw.githubusercontent.com/papicy/eternal_skald/main/module.json
+   ```
+3. Activate **The Eternal Skald** in your world and open **Configure Settings → The Eternal Skald**.
+4. Enter your **Abacus AI API Key** and save.
+5. In chat, type `!skald-help` to see the full command list.
 
-1. Locate your Foundry VTT data directory:
-   - **Windows:** `%appdata%\FoundryVTT\Data\modules\`
-   - **macOS:** `~/Library/Application Support/FoundryVTT/Data/modules/`
-   - **Linux:** `~/.local/share/FoundryVTT/Data/modules/`
-2. Copy the entire `the-eternal-skald/` folder into the `modules/` directory.
-3. Restart Foundry VTT.
-4. In your world, open **Game Settings → Manage Modules** and enable **The Eternal Skald**.
-5. Open **Configure Settings → The Eternal Skald** and enter your **Abacus AI API Key**.
-6. In chat, type `/skald-help` to see the available commands.
+### Manual install
+If you prefer to install manually, download the release zip:
+`https://github.com/papicy/eternal_skald/releases/latest`
 
-> **Note on "DOCTYPE error on import":** This module ships without a public `manifest`/`download` URL because it's a private/local build. If you try to install it via Foundry's "Install Module → Manifest URL" dialog using a placeholder URL, Foundry receives an HTML 404 page and reports a "DOCTYPE error" while trying to parse it as JSON. Use the local-install method above instead.
+Unzip into your Foundry `Data/modules/` directory (so that `Data/modules/the-eternal-skald/module.json` exists) and restart Foundry.
 
 ---
 
 ## Commands
 
+> All commands use the **`!`** prefix (not `/`). Foundry VTT v14 rejects unknown `/` slash commands before our module ever sees them, so we use `!` to bypass that internal validation.
+
 | Command | Description |
 |---|---|
-| `/skald-help` | Show the command list. |
-| `/skald <prompt>` | Talk to The Eternal Skald freely — rules questions, narration, ideas. |
-| `/oracle <name>` | Roll an Ironsworn oracle and have the Skald interpret. e.g. `/oracle action`, `/oracle theme`, `/oracle npc`, `/oracle price`. |
-| `/npc <name or descriptor>` | Conjure (or continue) an NPC. The Skald rolls an oracle persona on first contact, then stays in character on subsequent calls. |
-| `/scene <subject>` | Generate a vivid scene description, factoring in your current canvas scene. |
-| `/lore <topic>` | Write world-building lore. A JournalEntry is created in the **Skald's Chronicles** folder. |
-| `/combat <note?>` | Get tactical narration and a concrete Ironsworn-move suggestion for the current fight. |
+| `!skald-help` | Show the command list. |
+| `!skald <prompt>` | Talk to The Eternal Skald freely — rules questions, narration, ideas. |
+| `!oracle <name>` | Roll an Ironsworn oracle and have the Skald interpret. e.g. `!oracle action`, `!oracle theme`, `!oracle npc`, `!oracle price`. |
+| `!npc <name or descriptor>` | Conjure (or continue) an NPC. The Skald rolls an oracle persona on first contact, then stays in character on subsequent calls. |
+| `!scene <subject>` | Generate a vivid scene description, factoring in your current canvas scene. |
+| `!lore <topic>` | Write world-building lore. A JournalEntry is created in the **Skald's Chronicles** folder. |
+| `!combat <note?>` | Get tactical narration and a concrete Ironsworn-move suggestion for the current fight. |
 
 ### Available oracles
 `action`, `theme`, `region`, `location`, `coastal`, `npc` (role), `npc-goal`, `npc-descriptor`, `combat`, `mystic`, `price`.
@@ -74,6 +77,19 @@ const { roll, result } = skald.rollOracle(skald.IronswornData.oracles.action);
 // Trigger commands programmatically
 await skald.commands.lore('The Fallen Keep of Vorlund');
 ```
+
+---
+
+## Troubleshooting
+
+**`/skald-help` says "not a valid chat command — no packages detected"**
+That's expected — use `!skald-help` (exclamation mark, not slash). See the explanation above the command table.
+
+**No log lines in DevTools when launching a world**
+The module file never loaded. Confirm the install was successful and that the module is activated for the world. As of v1.0.3 the module logs `=== The Eternal Skald v1.0.3 — module file loaded ===` to the console as soon as it begins executing.
+
+**"DOCTYPE error" / install fails**
+The release zip must be installed via the manifest URL above. Older versions used GitHub's auto-generated archive zip which wrapped everything in a subfolder; the published release asset (`the-eternal-skald.zip`) has files at the zip root.
 
 ---
 

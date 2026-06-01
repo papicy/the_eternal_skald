@@ -14,8 +14,8 @@
  *      §4  ABACUS AI CHATLLM CLIENT
  *      §5  CONVERSATION MEMORY
  *      §6  CHAT MESSAGE HELPERS (styled Skald output)
- *      §7  COMMAND HANDLERS  (/skald, /oracle, /npc, /scene, /lore,
- *                              /combat, /skald-help)
+ *      §7  COMMAND HANDLERS  (!skald, !oracle, !npc, !scene, !lore,
+ *                              !combat, !skald-help)
  *      §8  NPC DIALOGUE SYSTEM
  *      §9  ORACLE INTERPRETER
  *      §10 JOURNAL / LORE GENERATOR
@@ -34,7 +34,7 @@
  * module file was never loaded — typically a manifest / install path
  * problem on Foundry's side.
  * =================================================================== */
-console.log("=== The Eternal Skald v1.0.2 — module file loaded ===");
+console.log("=== The Eternal Skald v1.0.3 — module file loaded ===");
 
 import { IronswornData } from "./ironsworn-data.js";
 
@@ -52,14 +52,20 @@ const LOG_PREFIX = `${SKALD_NAME} |`;
 const DEFAULT_ENDPOINT = "https://api.abacus.ai/v1/chat/completions";
 const DEFAULT_MODEL    = "gemini-3.0-flash";
 
+// Foundry VTT v14 validates messages starting with "/" against an
+// internal command registry BEFORE the `chatMessage` hook fires, and
+// rejects unknown ones with a "not a valid chat message command"
+// error. To bypass that pre-validation we use "!" as our command
+// prefix — Foundry leaves "!" messages alone and our hook gets to
+// inspect them.
 const COMMANDS = Object.freeze({
-  SKALD:  "/skald",
-  ORACLE: "/oracle",
-  NPC:    "/npc",
-  SCENE:  "/scene",
-  LORE:   "/lore",
-  COMBAT: "/combat",
-  HELP:   "/skald-help"
+  SKALD:  "!skald",
+  ORACLE: "!oracle",
+  NPC:    "!npc",
+  SCENE:  "!scene",
+  LORE:   "!lore",
+  COMBAT: "!combat",
+  HELP:   "!skald-help"
 });
 
 /* ===================================================================== */
@@ -443,10 +449,13 @@ function formatMarkdown(text) {
 function dispatchCommand(rawText) {
   if (!rawText || typeof rawText !== "string") return false;
   const trimmed = rawText.trim();
-  if (!trimmed.startsWith("/")) return false;
+  // We use "!" as the command prefix instead of "/" — see the COMMANDS
+  // declaration above for the reason. Messages that don't start with
+  // "!" are ignored here so normal chat passes through untouched.
+  if (!trimmed.startsWith("!")) return false;
 
-  // Split on the first run of whitespace — "/oracle action" -> ["/oracle", "action"].
-  // Commands without args (e.g. "/skald-help") split to a single-element array.
+  // Split on the first run of whitespace — "!oracle action" -> ["!oracle", "action"].
+  // Commands without args (e.g. "!skald-help") split to a single-element array.
   const firstSpace = trimmed.search(/\s/);
   const head = (firstSpace === -1 ? trimmed : trimmed.slice(0, firstSpace)).toLowerCase();
   const args = (firstSpace === -1 ? "" : trimmed.slice(firstSpace + 1)).trim();
@@ -485,13 +494,13 @@ function dispatchCommand(rawText) {
 
 const Commands = {
 
-  /* ----------------------------- /skald-help ----------------------- */
+  /* ----------------------------- !skald-help ----------------------- */
   async help() {
     const rows = [
       [COMMANDS.HELP,   "Show this help card."],
       [COMMANDS.SKALD,  "Speak with the Skald. Ask anything — rules, ideas, narration."],
-      [COMMANDS.ORACLE, "Roll an Ironsworn oracle and let the Skald interpret. e.g. <code>/oracle action</code>"],
-      [COMMANDS.NPC,    "Conjure or roleplay an NPC. e.g. <code>/npc Old Keldra, the bone-witch</code>"],
+      [COMMANDS.ORACLE, "Roll an Ironsworn oracle and let the Skald interpret. e.g. <code>!oracle action</code>"],
+      [COMMANDS.NPC,    "Conjure or roleplay an NPC. e.g. <code>!npc Old Keldra, the bone-witch</code>"],
       [COMMANDS.SCENE,  "Generate a scene/location description."],
       [COMMANDS.LORE,   "Generate world-building lore (and a Journal Entry)."],
       [COMMANDS.COMBAT, "Get tactical narration/advice for the current fight."]
@@ -513,7 +522,7 @@ const Commands = {
     return Chat.postSkald(body, { variant: "help", title: "Commands of the Skald" });
   },
 
-  /* ----------------------------- /skald ---------------------------- */
+  /* ----------------------------- !skald ---------------------------- */
   async skald(args) {
     if (!args) {
       return Chat.postSystem(game.i18n.localize("ETERNAL_SKALD.errors.emptySkald"));
@@ -523,13 +532,13 @@ const Commands = {
     });
   },
 
-  /* ----------------------------- /oracle --------------------------- */
+  /* ----------------------------- !oracle --------------------------- */
   async oracle(args) {
     const key = (args || "action").trim().toLowerCase();
     return OracleInterpreter.roll(key);
   },
 
-  /* ----------------------------- /npc ------------------------------ */
+  /* ----------------------------- !npc ------------------------------ */
   async npc(args) {
     if (!args) {
       return Chat.postSystem(game.i18n.localize("ETERNAL_SKALD.errors.emptyNpc"));
@@ -537,7 +546,7 @@ const Commands = {
     return NpcDialogue.invoke(args);
   },
 
-  /* ----------------------------- /scene ---------------------------- */
+  /* ----------------------------- !scene ---------------------------- */
   async scene(args) {
     const seed = args || "the current scene";
     const ctx = SceneContext.summarise();
@@ -545,7 +554,7 @@ const Commands = {
     return runConversation("scene", seed, { task, label: "Scene", variant: "default" });
   },
 
-  /* ----------------------------- /lore ----------------------------- */
+  /* ----------------------------- !lore ----------------------------- */
   async lore(args) {
     if (!args) {
       return Chat.postSystem(game.i18n.localize("ETERNAL_SKALD.errors.emptyLore"));
@@ -553,7 +562,7 @@ const Commands = {
     return LoreGenerator.write(args);
   },
 
-  /* ----------------------------- /combat --------------------------- */
+  /* ----------------------------- !combat --------------------------- */
   async combat(args) {
     const ctx = CombatController.summariseCurrent();
     const task = `Provide a brief tactical narration AND a concrete suggestion for the current combat moment, grounded in Ironsworn moves (Enter the Fray, Strike, Clash, Secure an Advantage, Endure Harm). Be specific. Situation provided by the GM: ${args || "(unspecified)"}\n\nBattlefield snapshot:\n${ctx}`;
@@ -562,7 +571,7 @@ const Commands = {
 };
 
 /**
- * Generic conversation runner used by /skald, /scene, /combat. Manages
+ * Generic conversation runner used by !skald, !scene, !combat. Manages
  * memory, builds the system prompt, calls the API, and posts the reply.
  */
 async function runConversation(channel, userText, { task, label, variant = "default" } = {}) {
@@ -1170,7 +1179,7 @@ ${ctx}`;
     return lines.join("\n");
   },
 
-  /** Used by the /combat command to give the LLM context. */
+  /** Used by the !combat command to give the LLM context. */
   summariseCurrent() {
     const combat = game.combat;
     if (!combat?.started) return "(no active combat)";
@@ -1179,7 +1188,7 @@ ${ctx}`;
 };
 
 /* ===================================================================== */
-/*  §12 SCENE CONTEXT (for /scene)                                        */
+/*  §12 SCENE CONTEXT (for !scene)                                        */
 /* ===================================================================== */
 
 const SceneContext = {
@@ -1277,12 +1286,12 @@ Hooks.once("ready", async () => {
     const apiKey = Settings.get("apiKey");
     if (!apiKey) {
       await Chat.postSystem(
-        `<strong>${SKALD_NAME}</strong> awaits your key. Open <em>Module Settings → The Eternal Skald</em> and provide your Abacus AI API key, then type <code>/skald-help</code>.`,
+        `<strong>${SKALD_NAME}</strong> awaits your key. Open <em>Module Settings → The Eternal Skald</em> and provide your Abacus AI API key, then type <code>!skald-help</code>.`,
         { gmWhisper: true }
       );
     } else {
       await Chat.postSkald(
-        `<p>I have come, summoned by iron and flame. Type <code>/skald-help</code> for the runes that wake me.</p>`,
+        `<p>I have come, summoned by iron and flame. Type <code>!skald-help</code> for the runes that wake me.</p>`,
         { variant: "default", title: "The Skald Arrives" }
       );
     }

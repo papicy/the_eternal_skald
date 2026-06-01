@@ -45,9 +45,9 @@
 
     "errors": {
       "noApiKey": "No Abacus AI API key is set. Open Module Settings → The Eternal Skald and provide your key.",
-      "emptySkald": "Speak, Ironsworn. Usage: /skald <your question or prompt>",
-      "emptyNpc": "Name the one you would meet. Usage: /npc <name or description>",
-      "emptyLore": "What chronicle shall I write? Usage: /lore <topic>"
+      "emptySkald": "Speak, Ironsworn. Usage: !skald <your question or prompt>",
+      "emptyNpc": "Name the one you would meet. Usage: !npc <name or description>",
+      "emptyLore": "What chronicle shall I write? Usage: !lore <topic>"
     },
 
     "ui": {
