@@ -1,8 +1,8 @@
 {
   "id": "the-eternal-skald",
   "title": "The Eternal Skald",
-  "description": "<p>An AI-powered storyteller, oracle interpreter, and tactical enemy controller for <strong>Ironsworn</strong> and <strong>Ironsworn: Delve</strong> campaigns in Foundry VTT v14. The Eternal Skald is a wise, dramatic norse narrator who serves as the GM at your table — interpreting oracle rolls, voicing NPCs, generating lore, narrating combat, and even taking control of enemy combatants on their turn.</p><p>Powered by the Abacus AI ChatLLM platform (Gemini 3.0 Flash by default). Type <code>!skald-help</code> in chat for the full command list.</p>",
-  "version": "1.0.9",
+  "description": "<p>An AI-powered storyteller, oracle interpreter, and tactical enemy controller for <strong>Ironsworn</strong> and <strong>Ironsworn: Delve</strong> campaigns in Foundry VTT v14. Powered by Abacus AI ChatLLM. Type <code>!skald-help</code> in chat for commands.</p><p>v2.0.0 — server-side API calls. No proxy, no CORS, works everywhere.</p>",
+  "version": "2.0.0",
   "compatibility": {
     "minimum": "13",
     "verified": "14",
@@ -26,9 +26,8 @@
       "path": "lang/en.json"
     }
   ],
-  "socket": false,
   "url": "https://github.com/papicy/eternal_skald",
   "manifest": "https://raw.githubusercontent.com/papicy/eternal_skald/main/module.json",
-  "download": "https://github.com/papicy/eternal_skald/releases/download/v1.0.9/the-eternal-skald.zip",
+  "download": "https://github.com/papicy/eternal_skald/releases/download/v2.0.0/the-eternal-skald.zip",
   "readme": "https://github.com/papicy/eternal_skald/blob/main/README.md"
 }

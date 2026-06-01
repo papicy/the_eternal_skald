@@ -1,40 +1,34 @@
 /* =====================================================================
- *  THE ETERNAL SKALD — Foundry VTT v14 Module
+ *  THE ETERNAL SKALD v2.0.0 — Foundry VTT v14 Module (Client)
  *  ---------------------------------------------------------------------
  *  An AI-powered storytelling and combat-control assistant for Ironsworn
- *  and Ironsworn: Delve campaigns. Powered by Abacus AI ChatLLM
- *  (Gemini 3.0 Flash by default).
+ *  and Ironsworn: Delve campaigns. Powered by Abacus AI ChatLLM.
  *
- *  This single file contains the entire module logic, organised into the
- *  following clearly-delimited sections:
+ *  ARCHITECTURE (v2.0.0)
+ *  ---------------------
+ *  API calls are made SERVER-SIDE by eternal-skald-server.mjs, which
+ *  must be loaded via `node --import ...eternal-skald-server.mjs`.
+ *  That hook exposes /skald-api/chat on Foundry's own HTTP port.
+ *  This client simply does `fetch("/skald-api/chat", ...)` — same
+ *  origin, no CORS, no proxy, no mixed-content. Works everywhere.
  *
+ *  Sections:
  *      §1  CONSTANTS & IMPORTS
  *      §2  MODULE SETTINGS
  *      §3  SYSTEM PROMPT BUILDER
- *      §4  ABACUS AI CHATLLM CLIENT
+ *      §4  API CLIENT (simple fetch to /skald-api/chat)
  *      §5  CONVERSATION MEMORY
- *      §6  CHAT MESSAGE HELPERS (styled Skald output)
- *      §7  COMMAND HANDLERS  (!skald, !oracle, !npc, !scene, !lore,
- *                              !combat, !skald-help)
+ *      §6  CHAT MESSAGE HELPERS
+ *      §7  COMMAND HANDLERS
  *      §8  NPC DIALOGUE SYSTEM
  *      §9  ORACLE INTERPRETER
  *      §10 JOURNAL / LORE GENERATOR
  *      §11 ENEMY COMBAT CONTROLLER
- *      §12 RULES ADJUDICATION HELPERS
+ *      §12 SCENE CONTEXT
  *      §13 HOOK REGISTRATIONS
- *
- *  All API interactions use async/await. All entry points handle errors
- *  gracefully — a failure in the AI layer never blocks Foundry's UI.
  * ===================================================================== */
 
-/* === BOOT DIAGNOSTIC ================================================
- * IMPORTANT: this log fires as soon as Foundry begins executing this
- * file as an ES module. If you open the browser DevTools (F12) and do
- * NOT see this line in the console after launching a world, then the
- * module file was never loaded — typically a manifest / install path
- * problem on Foundry's side.
- * =================================================================== */
-console.log("=== The Eternal Skald v1.0.9 — module file loaded ===");
+console.log("=== The Eternal Skald v2.0.0 — module file loaded ===");
 
 import { IronswornData } from "./ironsworn-data.js";
 
@@ -52,27 +46,13 @@ const LOG_PREFIX = `${SKALD_NAME} |`;
 const DEFAULT_ENDPOINT  = "https://api.abacus.ai/v1/chat/completions";
 const DEFAULT_MODEL     = "gemini-3.0-flash";
 
-/** Two routes to bypass CORS, tried in order:
- *
- *   1. SKALD_HOOK_URL — a RELATIVE path ("/skald-api/chat") served by
- *      proxy/skald-hook.mjs, which was monkey-patched into Foundry's own
- *      HTTP server at startup via `node --import ... skald-hook.mjs`.
- *      Because the path is relative, the browser resolves it against
- *      whatever origin Foundry is being served from — HTTP or HTTPS,
- *      bare IP or domain name, with or without a reverse proxy.
- *      No CORS, no Mixed Content, no extra port, universally compatible.
- *
- *   2. DEFAULT_PROXY_URL — a standalone Node helper (proxy/skald-proxy.js)
- *      that the user starts separately. This is the older v1.0.7 path,
- *      kept as a fallback for users who can't modify Foundry's startup
- *      command (rare).
- *
- *  Client.chat() tries the hook first; if it 404s (hook not loaded),
- *  it falls back to the proxy URL. The fallback URL is configurable in
- *  Module Settings; the hook path is hard-coded and MUST stay relative
- *  (no protocol/host) so it works on every access method. */
-const SKALD_HOOK_URL    = "/skald-api/chat";
-const DEFAULT_PROXY_URL = "http://localhost:3001/api/chat";
+/**
+ * The ONE endpoint this client talks to. It's a relative URL so it
+ * resolves same-origin against whatever host/port/protocol Foundry is
+ * served from. The server-side hook (eternal-skald-server.mjs) handles
+ * this path and forwards to the upstream LLM. No CORS. No proxy. Done.
+ */
+const API_PATH = "/skald-api/chat";
 
 // Foundry VTT v14 validates messages starting with "/" against an
 // internal command registry BEFORE the `chatMessage` hook fires, and
@@ -122,15 +102,6 @@ const Settings = {
       config: true,
       type: String,
       default: DEFAULT_ENDPOINT
-    });
-
-    game.settings.register(MODULE_ID, "proxyUrl", {
-      name: game.i18n.localize("ETERNAL_SKALD.settings.proxyUrl.name"),
-      hint: game.i18n.localize("ETERNAL_SKALD.settings.proxyUrl.hint"),
-      scope: "world",
-      config: true,
-      type: String,
-      default: DEFAULT_PROXY_URL
     });
 
     game.settings.register(MODULE_ID, "intensity", {
@@ -253,17 +224,13 @@ GUIDELINES:
 }
 
 /* ===================================================================== */
-/*  §4  ABACUS AI CHATLLM CLIENT                                          */
+/*  §4  API CLIENT                                                         */
 /* ===================================================================== */
 
 const Client = {
-  /** Per-session preferred route (so we don't keep retrying a 404'd hook). */
-  _preferredRoute: null,  // null | "hook" | "proxy"
-
   /**
-   * Extract the assistant text from the upstream JSON response, supporting
-   * OpenAI-style `choices[0].message.content` and a few common Abacus AI
-   * variants. Returns null if no usable content was found.
+   * Extract the assistant text from the upstream JSON, supporting
+   * OpenAI `choices[0].message.content` and Abacus AI variants.
    */
   _extractContent(data) {
     return (
@@ -277,101 +244,21 @@ const Client = {
   },
 
   /**
-   * Try a single route once. Returns:
-   *   { ok: true,  content: string }                       on success
-   *   { ok: false, retriable: true,  reason: string }      route absent (try the other)
-   *   { ok: false, retriable: false, error: Error }        upstream/other failure
-   */
-  async _tryRoute(routeLabel, url, body) {
-    let response;
-    try {
-      response = await fetch(url, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify(body)
-      });
-    } catch (netErr) {
-      // TypeError "Failed to fetch" → route unreachable. Could be a same-
-      // origin path that 404s in some weird way, or a Mixed-Content block
-      // on the http://localhost proxy when Foundry is served via HTTPS.
-      // Either way: not-ours → let the caller try the other route.
-      console.warn(LOG_PREFIX, `Route ${routeLabel} unreachable:`, netErr?.message ?? netErr);
-      return { ok: false, retriable: true, reason: `network: ${netErr?.message ?? "fetch failed"}` };
-    }
-
-    // A 404 means "this route isn't installed" — fall through to the other.
-    if (response.status === 404) {
-      console.warn(LOG_PREFIX, `Route ${routeLabel} returned 404 — not installed.`);
-      return { ok: false, retriable: true, reason: "404" };
-    }
-
-    if (!response.ok) {
-      const text = await response.text().catch(() => "");
-      console.error(LOG_PREFIX, `Route ${routeLabel} HTTP error`, response.status, text);
-      // Errors from upstream LLM are NOT retriable on the other route —
-      // both routes would hit the same upstream and produce the same error.
-      let detail = text;
-      try {
-        const j = JSON.parse(text);
-        if (j?.error || j?.detail || j?.message) {
-          detail = `${j.error ?? "error"}: ${j.detail ?? j.message ?? ""}`.trim();
-        }
-      } catch (_) { /* not JSON, keep raw */ }
-      return {
-        ok: false,
-        retriable: false,
-        error: new Error(`Skald API error ${response.status}: ${String(detail).slice(0, 300)}`)
-      };
-    }
-
-    let data;
-    try { data = await response.json(); }
-    catch (_) {
-      return { ok: false, retriable: false, error: new Error("Skald returned a malformed response.") };
-    }
-    const content = this._extractContent(data);
-    if (!content || typeof content !== "string") {
-      console.error(LOG_PREFIX, `Route ${routeLabel} unexpected response shape`, data);
-      return { ok: false, retriable: false, error: new Error("Skald received an empty or malformed reply.") };
-    }
-    return { ok: true, content: content.trim() };
-  },
-
-  /**
-   * Call the configured chat-completions endpoint with the supplied
-   * messages array. Returns the assistant's reply text, or throws.
+   * Call the AI via the server-side hook. Dead simple:
+   *   POST /skald-api/chat  (same origin — no CORS, no proxy)
    *
-   * NETWORKING STRATEGY (v1.0.9)
-   * ----------------------------
-   * Foundry runs in the browser, so it cannot talk to api.abacus.ai
-   * directly (CORS). We try two routes, in order:
-   *
-   *   1. SAME-ORIGIN HOOK — POST /skald-api/chat. This route exists
-   *      only if Foundry was started with `--import ./...skald-hook.mjs`,
-   *      which monkey-patches Foundry's http server. Works through any
-   *      reverse proxy (HTTPS, hostnames, ports — all transparent).
-   *
-   *   2. STANDALONE PROXY — POST <proxyUrl>. The user-configurable
-   *      fallback if they can't modify Foundry's startup (defaults to
-   *      http://localhost:3001/api/chat, requires `node proxy/skald-proxy.js`).
-   *
-   * On the first successful call we remember which route worked and
-   * use it directly for the rest of the session — no more probing.
-   *
-   * Request body sent to either route:
-   *   { apiKey, endpoint, payload: { model, messages, temperature, max_tokens, stream } }
+   * The server hook (eternal-skald-server.mjs) must be loaded via
+   * `node --import ...` when starting Foundry. If it's not loaded,
+   * this returns a clear error message telling the user how to fix it.
    *
    * @param {Array<{role: string, content: string}>} messages
    * @param {object} [opts]
-   * @param {number} [opts.temperature]
-   * @param {number} [opts.maxTokens]
-   * @returns {Promise<string>}
+   * @returns {Promise<string>} the assistant's reply text
    */
   async chat(messages, opts = {}) {
     const apiKey   = Settings.get("apiKey");
-    const model    = Settings.get("modelName")    || DEFAULT_MODEL;
-    const endpoint = Settings.get("apiEndpoint")  || DEFAULT_ENDPOINT;
-    const proxyUrl = (Settings.get("proxyUrl") || "").trim() || DEFAULT_PROXY_URL;
+    const model    = Settings.get("modelName")   || DEFAULT_MODEL;
+    const endpoint = Settings.get("apiEndpoint") || DEFAULT_ENDPOINT;
 
     if (!apiKey) {
       throw new Error(game.i18n.localize("ETERNAL_SKALD.errors.noApiKey"));
@@ -387,56 +274,57 @@ const Client = {
       max_tokens:  opts.maxTokens   ?? 800,
       stream: false
     };
-    const body = { apiKey, endpoint, payload };
 
-    console.log(LOG_PREFIX, "Calling ChatLLM:", {
-      preferredRoute: this._preferredRoute ?? "auto",
-      hookUrl:        SKALD_HOOK_URL + " (relative — resolves to same origin)",
-      proxyUrl,
-      endpoint, model, msgCount: messages.length
-    });
+    console.log(LOG_PREFIX, "Calling AI:", { endpoint, model, msgCount: messages.length });
 
-    // Order of attempts is: preferred route first (if known), then the
-    // other. If preferred is unset, try hook then proxy.
-    const order = (() => {
-      if (this._preferredRoute === "hook")  return ["hook",  "proxy"];
-      if (this._preferredRoute === "proxy") return ["proxy", "hook" ];
-      return ["hook", "proxy"];
-    })();
-
-    const failures = [];
-    for (const route of order) {
-      const url   = route === "hook" ? SKALD_HOOK_URL : proxyUrl;
-      // If the proxy URL is identical to the hook URL (user fiddled with
-      // settings), don't double-try.
-      if (route === "proxy" && url === SKALD_HOOK_URL) continue;
-
-      const result = await this._tryRoute(route, url, body);
-      if (result.ok) {
-        if (this._preferredRoute !== route) {
-          console.log(LOG_PREFIX, `Locking onto working route: ${route} (${url})`);
-          this._preferredRoute = route;
-        }
-        return result.content;
-      }
-      if (!result.retriable) {
-        // Real upstream/API error — surface it now, don't masquerade
-        // by switching routes.
-        throw result.error;
-      }
-      failures.push({ route, url, reason: result.reason });
+    let response;
+    try {
+      response = await fetch(API_PATH, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ apiKey, endpoint, payload })
+      });
+    } catch (netErr) {
+      console.error(LOG_PREFIX, "fetch failed:", netErr);
+      throw new Error(
+        "Cannot reach the Skald's server hook.\n" +
+        "Make sure Foundry was started with:\n" +
+        "  node --import ./Data/modules/the-eternal-skald/scripts/eternal-skald-server.mjs resources/app/main.mjs\n" +
+        "See the README for details."
+      );
     }
 
-    // Both routes failed at the network/404 level. Build a clear,
-    // actionable message that points the GM at the README setup.
-    console.error(LOG_PREFIX, "All Skald routes failed:", failures);
-    throw new Error(
-      "The Skald has no network route.\n" +
-      "  • Same-origin hook (/skald-api/chat): not responding — make sure Foundry was started with " +
-      "the --import flag pointing at proxy/skald-hook.mjs (see README → Networking Setup, Option A).\n" +
-      `  • Fallback proxy (${proxyUrl}): unreachable — run 'node proxy/skald-proxy.js' (see README → Networking Setup, Option B).\n` +
-      "Works with HTTP, HTTPS, direct IP, domain names, and reverse proxies — no extra proxy config needed."
-    );
+    // 404 = hook not loaded (Foundry's own 404 page)
+    if (response.status === 404) {
+      throw new Error(
+        "The Eternal Skald server hook is not loaded (404).\n" +
+        "Add --import to your Foundry startup command. See README → Setup."
+      );
+    }
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      let detail = text;
+      try {
+        const j = JSON.parse(text);
+        detail = j?.error || j?.message || j?.detail || text;
+      } catch (_) { /* not JSON */ }
+      throw new Error(`Skald API error ${response.status}: ${String(detail).slice(0, 300)}`);
+    }
+
+    let data;
+    try { data = await response.json(); }
+    catch (_) {
+      throw new Error("The Skald returned a malformed response.");
+    }
+
+    const content = this._extractContent(data);
+    if (!content || typeof content !== "string") {
+      console.error(LOG_PREFIX, "Unexpected response shape:", data);
+      throw new Error("The Skald received an empty or malformed reply from the AI.");
+    }
+
+    return content.trim();
   }
 };
 
@@ -762,7 +650,7 @@ const NpcDialogue = {
 
     if (!this._sessions.has(key)) {
       // First contact — generate the NPC's persona and stats.
-      // If _spawn() failed (typically because the LLM/proxy was
+      // If _spawn() failed (typically because the AI was
       // unreachable), it logs the error itself and DOES NOT populate
       // the session map. In that case we just bail out cleanly here
       // instead of crashing on `session.turnCount` below.
@@ -1390,7 +1278,7 @@ const SceneContext = {
 /* ===================================================================== */
 
 /* =====================================================================
- * COMMAND-INTERCEPTION STRATEGY (v1.0.5 — HTML-aware)
+ * COMMAND-INTERCEPTION STRATEGY (HTML-aware)
  * ---------------------------------------------------------------------
  * Foundry VTT v14 changed how chat input is processed. The pre-v14
  * `chatMessage` hook signature was `(chatLog, messageText, chatData)`
