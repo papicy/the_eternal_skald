@@ -45,6 +45,21 @@ The Skald client tries **A** first (`/skald-api/chat` on the same origin as Foun
 
 ---
 
+### Reverse Proxy Users (Nginx, Caddy, Apache, Cloudflare Tunnel, etc.)
+
+**No extra configuration is needed.** If you use Option A (server hook), the Skald works automatically behind any reverse proxy — no additional proxy rules, location blocks, or header rewrites required.
+
+This works because the Skald client uses a **relative URL** (`/skald-api/chat`) rather than an absolute one. The browser resolves it against whatever origin Foundry is served from:
+
+- `http://192.168.1.45:30000` → `http://192.168.1.45:30000/skald-api/chat` ✅
+- `https://foundry.example.com` → `https://foundry.example.com/skald-api/chat` ✅
+- `https://play.mydomain.net:8443` → `https://play.mydomain.net:8443/skald-api/chat` ✅
+- `http://localhost:30000` → `http://localhost:30000/skald-api/chat` ✅
+
+Same origin = **no CORS**, **no Mixed Content**, works on HTTP/HTTPS, IP addresses, domain names — everything. As long as your reverse proxy forwards unknown paths to Foundry (the standard default), `/skald-api/*` passes through transparently.
+
+---
+
 ### Option A — Server Hook (recommended)
 
 The hook is a single ESM file (`proxy/skald-hook.mjs`) that patches Foundry's HTTP server at startup and exposes `/skald-api/*` on Foundry's own port. Same origin = no CORS, no Mixed Content, **no extra port to open or proxy through.**

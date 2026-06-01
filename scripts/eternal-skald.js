@@ -54,11 +54,13 @@ const DEFAULT_MODEL     = "gemini-3.0-flash";
 
 /** Two routes to bypass CORS, tried in order:
  *
- *   1. SKALD_HOOK_URL — a SAME-ORIGIN path served by proxy/skald-hook.mjs,
- *      which was monkey-patched into Foundry's own HTTP server at startup
- *      via `node --import ./modules/the-eternal-skald/proxy/skald-hook.mjs
- *      resources/app/main.mjs`. No CORS, no Mixed Content, no extra port,
- *      works through any reverse proxy automatically.
+ *   1. SKALD_HOOK_URL — a RELATIVE path ("/skald-api/chat") served by
+ *      proxy/skald-hook.mjs, which was monkey-patched into Foundry's own
+ *      HTTP server at startup via `node --import ... skald-hook.mjs`.
+ *      Because the path is relative, the browser resolves it against
+ *      whatever origin Foundry is being served from — HTTP or HTTPS,
+ *      bare IP or domain name, with or without a reverse proxy.
+ *      No CORS, no Mixed Content, no extra port, universally compatible.
  *
  *   2. DEFAULT_PROXY_URL — a standalone Node helper (proxy/skald-proxy.js)
  *      that the user starts separately. This is the older v1.0.7 path,
@@ -67,8 +69,8 @@ const DEFAULT_MODEL     = "gemini-3.0-flash";
  *
  *  Client.chat() tries the hook first; if it 404s (hook not loaded),
  *  it falls back to the proxy URL. The fallback URL is configurable in
- *  Module Settings; the hook path is hard-coded because it MUST be
- *  same-origin to work. */
+ *  Module Settings; the hook path is hard-coded and MUST stay relative
+ *  (no protocol/host) so it works on every access method. */
 const SKALD_HOOK_URL    = "/skald-api/chat";
 const DEFAULT_PROXY_URL = "http://localhost:3001/api/chat";
 
@@ -389,7 +391,7 @@ const Client = {
 
     console.log(LOG_PREFIX, "Calling ChatLLM:", {
       preferredRoute: this._preferredRoute ?? "auto",
-      hookUrl:        SKALD_HOOK_URL,
+      hookUrl:        SKALD_HOOK_URL + " (relative — resolves to same origin)",
       proxyUrl,
       endpoint, model, msgCount: messages.length
     });
@@ -429,11 +431,11 @@ const Client = {
     // actionable message that points the GM at the README setup.
     console.error(LOG_PREFIX, "All Skald routes failed:", failures);
     throw new Error(
-      "The Skald cannot reach its API.\n" +
-      "  • Same-origin hook (/skald-api/chat): not loaded — start Foundry with " +
-      "'node --import ./Data/modules/the-eternal-skald/proxy/skald-hook.mjs resources/app/main.mjs'.\n" +
-      `  • Fallback proxy (${proxyUrl}): unreachable — run 'node proxy/skald-proxy.js' on your Foundry host.\n` +
-      "See the module's README → 'Proxy Setup' for full instructions."
+      "The Skald has no network route.\n" +
+      "  • Same-origin hook (/skald-api/chat): not responding — make sure Foundry was started with " +
+      "the --import flag pointing at proxy/skald-hook.mjs (see README → Networking Setup, Option A).\n" +
+      `  • Fallback proxy (${proxyUrl}): unreachable — run 'node proxy/skald-proxy.js' (see README → Networking Setup, Option B).\n` +
+      "Works with HTTP, HTTPS, direct IP, domain names, and reverse proxies — no extra proxy config needed."
     );
   }
 };

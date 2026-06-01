@@ -6,8 +6,28 @@ This document gives copy-paste templates for keeping either the **server hook** 
 
 ---
 
+## Reverse Proxy Users (Nginx, Caddy, Apache, Cloudflare Tunnel, etc.)
+
+**No extra configuration is needed.** The server hook (Option A) works automatically behind any reverse proxy.
+
+The Skald client uses a **relative URL** (`/skald-api/chat`) for the hook endpoint — it never constructs an absolute URL with a specific protocol, host, or port. The browser resolves the relative path against whatever origin it loaded Foundry from:
+
+| How you access Foundry | What the browser fetches |
+|---|---|
+| `http://192.168.1.45:30000` | `http://192.168.1.45:30000/skald-api/chat` |
+| `https://foundry.example.com` | `https://foundry.example.com/skald-api/chat` |
+| `https://foundry.example.com:8443` | `https://foundry.example.com:8443/skald-api/chat` |
+| `http://localhost:30000` | `http://localhost:30000/skald-api/chat` |
+
+Because the request is always same-origin, there are **no CORS headers**, **no Mixed Content blocks**, and **no additional proxy rules** to add. As long as your reverse proxy forwards unknown paths to Foundry (which is the standard default), `/skald-api/*` passes through transparently.
+
+> **Tip:** If you use Cloudflare with strict WAF rules or path-based routing, make sure `/skald-api/*` is not blocked by a firewall rule. Most default configurations pass it through without issue.
+
+---
+
 ## Table of contents
 
+- [Reverse Proxy Users](#reverse-proxy-users-nginx-caddy-apache-cloudflare-tunnel-etc)
 - [Option A — Server Hook](#option-a--server-hook)
   - [systemd (Linux)](#systemd-linux--option-a)
   - [PM2 (Linux / macOS / Windows)](#pm2--option-a)
