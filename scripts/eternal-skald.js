@@ -1,10 +1,10 @@
 /* =====================================================================
- *  THE ETERNAL SKALD v2.2.0 — Foundry VTT v14 Module (Client)
+ *  THE ETERNAL SKALD v2.2.1 — Foundry VTT v14 Module (Client)
  *  ---------------------------------------------------------------------
  *  An AI-powered storytelling and combat-control assistant for Ironsworn
  *  and Ironsworn: Delve campaigns. Powered by Abacus AI ChatLLM.
  *
- *  ARCHITECTURE (v2.2.0)
+ *  ARCHITECTURE (v2.2.1)
  *  ---------------------
  *  API calls are made SERVER-SIDE by eternal-skald-server.mjs, which
  *  must be loaded via `node --import ...eternal-skald-server.mjs`.
@@ -28,7 +28,7 @@
  *      §13 HOOK REGISTRATIONS
  * ===================================================================== */
 
-console.log("=== The Eternal Skald v2.2.0 — module file loaded ===");
+console.log("=== The Eternal Skald v2.2.1 — module file loaded ===");
 
 import { IronswornData } from "./ironsworn-data.js";
 import { IronswornController } from "./ironsworn-controller.js";
@@ -144,7 +144,7 @@ const Settings = {
       range: { min: 4, max: 60, step: 2 }
     });
 
-    /* ---- Ironsworn system integration (v2.2.0) ---- */
+    /* ---- Ironsworn system integration (v2.2.1) ---- */
 
     game.settings.register(MODULE_ID, "ironswornIntegration", {
       name: game.i18n.localize("ETERNAL_SKALD.settings.ironswornIntegration.name"),
@@ -1070,40 +1070,111 @@ const Integration = {
 
   /* ---------------- Roll-result listener ---------------- */
 
-  /**
-   * Inspect a freshly-created ChatMessage. If it is an Ironsworn move
-   * roll (or our own manual move roll), parse the outcome and feed it to
-   * the AI for narration + optional mechanical consequences.
-   */
-  async onIronswornRoll(message) {
+  /** Verbose log gated behind the debugLogging world setting. */
+  _dbg(...args) {
     try {
-      if (!this.active()) return;
-      if (!(Settings.get("autoNarrateMoves") ?? true)) return;
-      if (!game.user?.isGM) return;             // only one client narrates
-      if (!message?.id || this._processedRolls.has(message.id)) return;
+      if (Settings.get("debugLogging")) console.log(LOG_PREFIX, "[Ironsworn]", ...args);
+    } catch (_) { /* settings may not be ready */ }
+  },
+
+  /**
+   * Inspect a freshly-created (or updated) ChatMessage. If it is an
+   * Ironsworn move roll (or our own manual move roll), parse the outcome
+   * and feed it to the AI for narration + optional mechanical effects.
+   *
+   * IMPORTANT — how the modern foundry-ironsworn system stores rolls:
+   * It does NOT tag its move cards with `flags["foundry-ironsworn"]`.
+   * Instead it serialises the roll into the card's HTML as
+   *   <article class="ironsworn-roll" data-ironswornroll='{…json…}'>…
+   * and attaches the Foundry Roll on `message.rolls`. We therefore detect
+   * on those signals, not on a flag namespace (which is what the earlier
+   * version checked — that is why auto-narration never fired).
+   *
+   * @param {ChatMessage} message
+   * @param {{viaUpdate?: boolean}} [opts]
+   */
+  async onIronswornRoll(message, { viaUpdate = false } = {}) {
+    try {
+      this._dbg(`onIronswornRoll fired (viaUpdate=${viaUpdate}, id=${message?.id})`);
+
+      if (!this.active())                              { this._dbg("→ skip: integration inactive"); return; }
+      if (!(Settings.get("autoNarrateMoves") ?? true)) { this._dbg("→ skip: autoNarrateMoves disabled"); return; }
+      if (!game.user?.isGM)                            { this._dbg("→ skip: not the GM client"); return; }
+      if (!message?.id)                                { this._dbg("→ skip: message has no id"); return; }
+      if (this._processedRolls.has(message.id))        { this._dbg("→ skip: already narrated this roll"); return; }
 
       const ourFlags = message?.flags?.[MODULE_ID];
       // Skip our own non-roll cards (narration, suggestions, etc.).
-      if (ourFlags && !ourFlags.manualMove) return;
+      if (ourFlags && !ourFlags.manualMove) { this._dbg("→ skip: our own non-roll card"); return; }
 
-      const isIronswornCard = !!message?.flags?.["foundry-ironsworn"];
-      const isManualCard     = !!ourFlags?.manualMove;
-      if (!isIronswornCard && !isManualCard) return;
+      const detection = this._detectIronswornRoll(message);
+      if (!detection.isRoll) { this._dbg("→ skip: not an Ironsworn roll card"); return; }
+      this._dbg(`→ Ironsworn roll card detected (source=${detection.source})`);
 
       const parsed = this._parseRollOutcome(message);
-      if (!parsed) return;
+      if (!parsed) { this._dbg("→ skip: could not parse roll outcome from card"); return; }
+      if (!parsed.resolved) {
+        // e.g. extra challenge dice not yet resolved — wait for the
+        // updateChatMessage hook to fire with the resolved content.
+        this._dbg(`→ roll not yet resolved (move="${parsed.moveName}"); awaiting update`);
+        return;
+      }
 
+      // Mark processed up-front so re-renders / the update hook don't
+      // double-narrate the same roll.
       this._processedRolls.add(message.id);
-      await this._narrateOutcome(message, parsed);
+      console.log(LOG_PREFIX, `Detected Ironsworn roll: ${parsed.moveName} → ${parsed.outcome}`);
+
+      // Let the dice settle (incl. Dice So Nice 3D animation) before the
+      // Skald speaks over the result.
+      const delay = this._narrationDelayMs();
+      this._dbg(`→ auto-narration scheduled in ${delay}ms`);
+      setTimeout(() => {
+        this._narrateOutcome(message, parsed).catch(e =>
+          console.warn(LOG_PREFIX, "delayed _narrateOutcome failed", e));
+      }, delay);
     } catch (e) {
       console.warn(LOG_PREFIX, "onIronswornRoll failed", e);
     }
   },
 
-  /** Derive { moveName, outcome, score, challenge, match } from a message. */
+  /** How long to wait before narrating, accounting for 3D dice animation. */
+  _narrationDelayMs() {
+    try { if (game.modules?.get("dice-so-nice")?.active) return 2800; } catch (_) {}
+    return 1500;
+  },
+
+  /**
+   * Decide whether a chat message is an Ironsworn roll card.
+   * @returns {{isRoll: boolean, source: string|null}}
+   */
+  _detectIronswornRoll(message) {
+    const ourFlags = message?.flags?.[MODULE_ID];
+    if (ourFlags?.manualMove) return { isRoll: true, source: "manual" };
+
+    // Some/legacy versions DO set namespaced flags — honour them if present.
+    const isFlags = message?.flags?.["foundry-ironsworn"];
+    if (isFlags && (isFlags.moveDfId || isFlags.moveId || isFlags.dsid || isFlags.moveDsId)) {
+      return { isRoll: true, source: "flags" };
+    }
+
+    // Modern system: the roll is serialised into the card HTML.
+    const content = typeof message?.content === "string" ? message.content : "";
+    if (/data-ironswornroll\s*=/.test(content) ||
+        /class\s*=\s*['"][^'"]*\bironsworn-roll\b/.test(content)) {
+      return { isRoll: true, source: "html" };
+    }
+
+    return { isRoll: false, source: null };
+  },
+
+  /**
+   * Derive { moveName, outcome, score, challenge, match, resolved } from a
+   * message. Tries, in order: our manual card flag → the serialised
+   * `data-ironswornroll` HTML blob → the attached Foundry Roll dice.
+   */
   _parseRollOutcome(message) {
     const ourFlags = message?.flags?.[MODULE_ID];
-    const isFlags  = message?.flags?.["foundry-ironsworn"] ?? {};
 
     // Manual move card: outcome already computed by the controller.
     if (ourFlags?.manualMove) {
@@ -1112,35 +1183,129 @@ const Integration = {
         outcome:   ourFlags.outcome ?? "",
         score:     ourFlags.score ?? null,
         challenge: ourFlags.challenge ?? [],
-        match:     !!ourFlags.match
+        match:     !!ourFlags.match,
+        resolved:  true
       };
     }
 
-    const rolls = message.rolls ?? [];
+    const fromHtml = this._parseFromHtml(message);
+    if (fromHtml) { this._dbg("parsed outcome from card HTML:", JSON.stringify(fromHtml)); return fromHtml; }
+
+    const fromRolls = this._parseFromRolls(message);
+    if (fromRolls) { this._dbg("parsed outcome from message.rolls:", JSON.stringify(fromRolls)); return fromRolls; }
+
+    return null;
+  },
+
+  /** Parse the serialised `data-ironswornroll` blob (+ rendered text) from card HTML. */
+  _parseFromHtml(message) {
+    const content = typeof message?.content === "string" ? message.content : "";
+    if (!content) return null;
+
+    let doc = null;
+    try { doc = new DOMParser().parseFromString(content, "text/html"); } catch (_) { doc = null; }
+
+    const titleText = doc?.querySelector?.(".ironsworn-roll-title")?.textContent?.trim();
+    const outcomeText = doc?.querySelector?.(".outcome-text")?.textContent?.trim();
+
+    // Pull the serialised roll JSON out of the article's data attribute.
+    let serialized = null;
+    const raw = doc?.querySelector?.("[data-ironswornroll]")?.getAttribute?.("data-ironswornroll");
+    if (raw) { try { serialized = JSON.parse(raw); } catch (e) { this._dbg("data-ironswornroll JSON parse failed", e); } }
+
+    if (serialized) {
+      const pre  = serialized.preRollOptions  ?? {};
+      const post = serialized.postRollOptions ?? {};
+      const isProgress = pre.progress != null;
+
+      const adds    = Number(pre.adds ?? 0) || 0;
+      const statVal = Number(pre.stat?.value ?? 0) || 0;
+      const action  = isProgress
+        ? Number(pre.progress?.value ?? NaN)
+        : Number(serialized.rawActionDieValue ?? NaN);
+
+      // Challenge dice — post-roll replacements (momentum burn / resolve) win.
+      const challenge = Array.isArray(serialized.rawChallengeDiceValues)
+        ? serialized.rawChallengeDiceValues.slice(0, 2).map(Number)
+        : [];
+      if (post.replacedChallenge1?.value != null) challenge[0] = Number(post.replacedChallenge1.value);
+      if (post.replacedChallenge2?.value != null) challenge[1] = Number(post.replacedChallenge2.value);
+
+      const moveName =
+        this._moveNameFromTitle(titleText) ??
+        this._prettyMoveName(pre.moveDsId ?? pre.moveId ?? "their move");
+
+      const haveAction = Number.isFinite(action);
+      const haveChallenge = challenge.length === 2 && challenge.every(Number.isFinite);
+
+      if (haveAction && haveChallenge) {
+        const score = isProgress ? action : Math.min(action + statVal + adds, 10);
+        const beats = challenge.filter(c => score > c).length;
+        // Honour an explicit replaced/automatic outcome when the system set one.
+        const forced =
+          (typeof post.replacedOutcome?.value === "number") ? post.replacedOutcome.value :
+          (typeof pre.automaticOutcome?.value === "number")  ? pre.automaticOutcome.value  : null;
+        const ov = forced != null ? forced : (beats === 2 ? 2 : beats === 1 ? 1 : 0);
+        const outcome = ov === 2 ? "Strong Hit" : ov === 1 ? "Weak Hit" : "Miss";
+        return { moveName, outcome, score, challenge, match: challenge[0] === challenge[1], resolved: true };
+      }
+
+      // Dice not fully resolved yet — but if the system already rendered an
+      // outcome label, trust it.
+      const norm = this._normalizeOutcomeText(outcomeText);
+      if (norm) return { moveName, outcome: norm, score: null, challenge, match: false, resolved: true };
+      return { moveName, outcome: "", score: null, challenge, match: false, resolved: false };
+    }
+
+    // No serialised blob — fall back to the rendered title + outcome text.
+    const norm = this._normalizeOutcomeText(outcomeText);
+    if (titleText || norm) {
+      const moveName = this._moveNameFromTitle(titleText) ?? "their move";
+      if (norm) return { moveName, outcome: norm, score: null, challenge: [], match: false, resolved: true };
+      return { moveName, outcome: "", score: null, challenge: [], match: false, resolved: false };
+    }
+    return null;
+  },
+
+  /** Fallback: derive an outcome from the attached Foundry Roll dice. */
+  _parseFromRolls(message) {
+    const rolls = message?.rolls ?? [];
     if (!rolls.length) return null;
 
     const allDice = rolls.flatMap(r => r.dice ?? []);
     const d10s = allDice.filter(d => d.faces === 10).flatMap(d => (d.results ?? []).map(r => r.result));
     const d6   = allDice.find(d => d.faces === 6);
-    if (!d6 || d10s.length < 2) {
-      // Not a standard action roll we understand — let it pass silently.
-      return null;
-    }
+    if (!d6 || d10s.length < 2) return null;
 
     const score = Math.min(rolls[0]?.total ?? d6.results?.[0]?.result ?? 0, 10);
     const challenge = d10s.slice(0, 2);
     const beats = challenge.filter(c => score > c).length;
     const outcome = beats === 2 ? "Strong Hit" : beats === 1 ? "Weak Hit" : "Miss";
-    const match = challenge[0] === challenge[1];
 
-    // Try to recover a move name from the Ironsworn flags.
-    const moveName =
-      isFlags?.moveName ??
-      isFlags?.move?.name ??
-      isFlags?.dsid ?? isFlags?.moveId ?? isFlags?.moveDfId ??
-      "their move";
+    const isFlags = message?.flags?.["foundry-ironsworn"] ?? {};
+    const moveName = this._prettyMoveName(
+      isFlags.moveName ?? isFlags.move?.name ?? isFlags.dsid ?? isFlags.moveId ?? isFlags.moveDfId ?? "their move"
+    );
+    return { moveName, outcome, score, challenge, match: challenge[0] === challenge[1], resolved: true };
+  },
 
-    return { moveName: this._prettyMoveName(moveName), outcome, score, challenge, match };
+  /** "Face Danger +iron" → "Face Danger"; "Fulfill Your Vow: X" → "Fulfill Your Vow". */
+  _moveNameFromTitle(title) {
+    if (!title || typeof title !== "string") return null;
+    let t = title.split(/\s+\+/)[0];   // strip " +stat"
+    t = t.split(":")[0];               // strip ": <progress source>"
+    t = t.trim();
+    return t || null;
+  },
+
+  /** Map a rendered outcome label to canonical text. */
+  _normalizeOutcomeText(text) {
+    if (!text || typeof text !== "string") return null;
+    const lc = text.toLowerCase();
+    if (lc.includes("strong")) return "Strong Hit";
+    if (lc.includes("weak"))   return "Weak Hit";
+    if (lc.includes("miss"))   return "Miss";
+    return null;
   },
 
   _prettyMoveName(raw) {
@@ -2060,7 +2225,7 @@ Hooks.once("ready", async () => {
     lore: LoreGenerator,
     resetMemory: (ch) => Memory.reset(ch),
     IronswornData,
-    // --- Ironsworn rules-engine integration (v2.2.0) ---
+    // --- Ironsworn rules-engine integration (v2.2.1) ---
     ironsworn: IronswornController,
     integration: Integration
   };
@@ -2160,6 +2325,25 @@ Hooks.on("createChatMessage", (message) => {
     }
   } catch (err) {
     console.error(`${LOG_PREFIX} [createChatMessage] handler crashed:`, err);
+  }
+});
+
+/* === updateChatMessage: catch rolls that resolve after creation ======
+ * Ironsworn rolls can be created in an unresolved state (extra challenge
+ * dice) or have their outcome changed (resolve challenge / momentum burn).
+ * The system updates the existing card's content via msg.update({content}),
+ * which fires updateChatMessage rather than createChatMessage. Re-run the
+ * detector so those late-resolved rolls still get narrated exactly once
+ * (the _processedRolls guard prevents double-narration).
+ * ==================================================================== */
+Hooks.on("updateChatMessage", (message, changed /*, options, userId */) => {
+  try {
+    if (message?.flags?.[MODULE_ID] && !message.flags[MODULE_ID].manualMove) return;
+    // Only react when the rendered content actually changed.
+    if (changed && !("content" in changed) && !("rolls" in changed)) return;
+    Integration.onIronswornRoll(message, { viaUpdate: true });
+  } catch (e) {
+    console.warn(`${LOG_PREFIX} [updateChatMessage] onIronswornRoll dispatch failed:`, e);
   }
 });
 

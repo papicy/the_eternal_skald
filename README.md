@@ -4,7 +4,7 @@ An AI-powered storyteller, oracle interpreter, and tactical enemy controller for
 
 Powered by the **Abacus AI ChatLLM** platform (Gemini 3.0 Flash by default).
 
-As of **v2.2.0**, the Skald integrates directly with the official [**foundry-ironsworn**](https://foundryvtt.com/packages/foundry-ironsworn) system: it reads your character's stats and meters, *suggests* the right Ironsworn move, triggers the system's own dice mechanics on one click, narrates the official strong-hit / weak-hit / miss outcome, and can optionally apply mechanical effects. See [Ironsworn Integration](#ironsworn-integration) below. The module still works standalone in any system — Ironsworn features simply activate when the system is present.
+As of **v2.2.1**, the Skald integrates directly with the official [**foundry-ironsworn**](https://foundryvtt.com/packages/foundry-ironsworn) system: it reads your character's stats and meters, *suggests* the right Ironsworn move, triggers the system's own dice mechanics on one click, narrates the official strong-hit / weak-hit / miss outcome, and can optionally apply mechanical effects. See [Ironsworn Integration](#ironsworn-integration) below. The module still works standalone in any system — Ironsworn features simply activate when the system is present.
 
 ---
 
@@ -67,7 +67,7 @@ node --import "./Data/modules/the-eternal-skald/scripts/eternal-skald-server.mjs
 When Foundry starts, you should see this in the console/logs:
 
 ```
-⚔️  Skald | v2.2.0 — server hook active. /skald-api/* routes ready.
+⚔️  Skald | v2.2.1 — server hook active. /skald-api/* routes ready.
 ```
 
 ### 3. Set your API key
@@ -89,7 +89,7 @@ http://your-foundry:30000/skald-api/health
 You should see:
 
 ```json
-{"status":"ok","service":"The Eternal Skald","version":"2.2.0"}
+{"status":"ok","service":"The Eternal Skald","version":"2.2.1"}
 ```
 
 If you get a 404 or Foundry's normal HTML page, the `--import` flag isn't taking effect. Double-check:
@@ -252,7 +252,7 @@ const { roll, result } = skald.rollOracle(skald.IronswornData.oracles.action);
 // Trigger commands programmatically
 await skald.commands.lore('The Fallen Keep of Vorlund');
 
-// --- Ironsworn integration (v2.2.0) ---
+// --- Ironsworn integration (v2.2.1) ---
 // Read the active character's state
 const char = skald.ironsworn.describeCharacter();   // { name, stats, meters, ... } or null
 const caps = skald.ironsworn.capabilities();         // feature-detection report
@@ -276,7 +276,7 @@ await skald.integration.showMoveSelector();
 **"The Eternal Skald server hook is not loaded (404)"**
 The `--import` flag isn't in your Foundry startup command, or the path is wrong. See [Setup step 2](#2-add---import-to-your-foundry-startup).
 
-**No `⚔️ Skald | v2.2.0` line in Foundry's console output**
+**No `⚔️ Skald | v2.2.1` line in Foundry's console output**
 The hook file isn't being loaded. Check the path is absolute and correct. Run it in a terminal to see Node.js errors.
 
 **"No Abacus AI API key is set"**
@@ -287,6 +287,9 @@ Use `!skald-help` (exclamation mark, not slash).
 
 **Hosted Foundry (The Forge, etc.)**
 If you can't modify the startup command, this module won't work on hosted platforms that don't support `--import`. Contact your hosting provider to ask about custom Node flags.
+
+**Auto-narration doesn't fire after an Ironsworn roll**
+Enable **Debug Logging** in Module Settings and check the browser console. As of **v2.2.1**, roll detection reads the `foundry-ironsworn` roll card HTML (the system no longer attaches module flags), logs every detection step, and waits for the dice animation to finish (~1.5–2.8s) before narrating. Make sure **Auto-Narrate Moves** is enabled and you're logged in as the GM. If you still see no `Detected Ironsworn roll` log line, copy the console output and open an issue.
 
 ---
 
