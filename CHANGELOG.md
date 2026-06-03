@@ -12,6 +12,40 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.3.0] — 2026-06-03
+
+### Added
+- **Automatic combat system.** The Skald now runs Ironsworn fights end-to-end.
+  When a fight begins it creates a **combat progress track per foe**; landing a
+  blow marks that track **by the foe's rank** (troublesome +12 … epic +1 ticks);
+  and the single **initiative** state ("in control" vs "in a bad spot") is
+  tracked automatically.
+- **Deterministic resolution of core combat moves.** *Enter the Fray*, *Strike*,
+  and *Clash* are resolved by the client itself: Enter the Fray hit → gain
+  initiative (miss → bad spot); Strike/Clash hit → mark the active foe's track,
+  strong hit keeps initiative / weak hit loses it; miss → lose initiative. The AI
+  is told these are already applied so it never double-marks.
+- **New effect directives:** `[[EFFECT: create_combat <Foe> <rank>]]`,
+  `[[EFFECT: create_vow <Name> <rank> <description>]]`,
+  `[[EFFECT: initiative <gain|lose>]]`, and `[[EFFECT: end_combat <Foe>]]`.
+- **`IronswornController` combat/track API:** `createProgressTrack` (combat /
+  vow / journey / bond, positional or options style), `getProgressTrack`,
+  `completeTrack`, `getCombatTracks`, `getActiveCombatTrack`, `hasInitiative`,
+  `setInitiative`, `normalizeRank`, and `describeCombatState`.
+- **Live combat context** (initiative holder, active foes + progress, recently
+  ended fights) injected into the AI prompt every turn.
+- **UI notifications** for combat-track creation, progress marks, and initiative
+  changes.
+- **New settings:** *Auto-Create Combat Tracks* (default on) and *Default Enemy
+  Rank* (default Dangerous), with localization.
+
+### Changed
+- **"AI Applies Mechanical Effects" now defaults to ON**, enabling the combat
+  automation out of the box. Turn it off to keep the player in full control of
+  the sheet.
+- System prompt now documents the combat-track syntax, rank guidance, initiative
+  mechanics, and that core combat moves are auto-resolved.
+
 ## [0.2.3] — 2026-06-03
 
 ### Added
@@ -75,5 +109,6 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.3.0]: https://github.com/papicy/eternal_skald/releases/tag/v0.3.0
 [0.2.3]: https://github.com/papicy/eternal_skald/releases/tag/v0.2.3
 [0.2.2]: https://github.com/papicy/eternal_skald/releases/tag/v0.2.2

@@ -1,10 +1,10 @@
 /* =====================================================================
- *  THE ETERNAL SKALD v0.2.3 — Foundry VTT v14 Module (Client)
+ *  THE ETERNAL SKALD v0.3.0 — Foundry VTT v14 Module (Client)
  *  ---------------------------------------------------------------------
  *  An AI-powered storytelling and combat-control assistant for Ironsworn
  *  and Ironsworn: Delve campaigns. Powered by Abacus AI ChatLLM.
  *
- *  ARCHITECTURE (v0.2.3)
+ *  ARCHITECTURE (v0.3.0)
  *  ---------------------
  *  API calls are made SERVER-SIDE by eternal-skald-server.mjs, which
  *  must be loaded via `node --import ...eternal-skald-server.mjs`.
@@ -28,7 +28,7 @@
  *      §13 HOOK REGISTRATIONS
  * ===================================================================== */
 
-console.log("=== The Eternal Skald v0.2.3 — module file loaded ===");
+console.log("=== The Eternal Skald v0.3.0 — module file loaded ===");
 
 import { IronswornData } from "./ironsworn-data.js";
 import { IronswornController } from "./ironsworn-controller.js";
@@ -144,7 +144,7 @@ const Settings = {
       range: { min: 4, max: 60, step: 2 }
     });
 
-    /* ---- Ironsworn system integration (v0.2.3) ---- */
+    /* ---- Ironsworn system integration (v0.3.0) ---- */
 
     game.settings.register(MODULE_ID, "ironswornIntegration", {
       name: game.i18n.localize("ETERNAL_SKALD.settings.ironswornIntegration.name"),
@@ -189,7 +189,34 @@ const Settings = {
       scope: "world",
       config: true,
       type: Boolean,
-      default: false
+      default: true
+    });
+
+    /* ---- Combat automation (v0.3.0) ---- */
+
+    game.settings.register(MODULE_ID, "autoCreateCombatTracks", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.autoCreateCombatTracks.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.autoCreateCombatTracks.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true
+    });
+
+    game.settings.register(MODULE_ID, "defaultEnemyRank", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.defaultEnemyRank.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.defaultEnemyRank.hint"),
+      scope: "world",
+      config: true,
+      type: String,
+      choices: {
+        troublesome: "Troublesome",
+        dangerous: "Dangerous",
+        formidable: "Formidable",
+        extreme: "Extreme",
+        epic: "Epic"
+      },
+      default: "dangerous"
     });
 
     game.settings.register(MODULE_ID, "debugLogging", {
@@ -352,7 +379,36 @@ WEAK HIT = you succeed at a cost (lose supply/momentum, partial info).
 MISS = you fail and "pay the price" (harm, stress, lost ground, a twist).
 MATCH (both challenge dice equal) = introduce a dramatic complication.
 Only emit effects that the rules/fiction actually call for. Never invent
-dice results — you only react to the outcome you are given.`);
+dice results — you only react to the outcome you are given.
+
+COMBAT AUTOMATION (progress tracks, initiative):
+A fight in Ironsworn is run on a PROGRESS TRACK per foe, plus a single
+INITIATIVE state telling who is in control. You drive these with:
+   [[EFFECT: create_combat <Foe Name> <rank>]]
+        Create a combat progress track for a foe the moment a fight with
+        them begins (the first time the character Enters the Fray, or a
+        new foe joins). <rank> is the foe's threat:
+          troublesome (trivial), dangerous (real threat — DEFAULT),
+          formidable (tough), extreme (deadly), epic (legendary).
+        Pick the rank from the fiction; omit it to use the default.
+   [[EFFECT: create_vow <Name> <rank> <description>]]
+        Create a vow/quest progress track when the character swears an iron vow.
+   [[EFFECT: initiative <gain|lose>]]
+        Record whether the character now has initiative ("in control",
+        gain) or has lost it ("in a bad spot", lose).
+   [[EFFECT: end_combat <Foe Name>]]
+        Mark a foe's combat track complete when they are defeated, flee,
+        yield, or the fight otherwise ends.
+IMPORTANT — combat moves are AUTOMATED for you. When the resolved move is
+"Enter the Fray", "Strike", or "Clash", the client AUTOMATICALLY:
+  • on a hit to Enter the Fray → grants initiative,
+  • on a hit to Strike/Clash → marks progress on the active foe's track by
+    its rank (strong hit keeps initiative, weak hit loses it),
+  • on a miss → loses initiative.
+So for those moves, do NOT emit [[EFFECT: initiative ...]] or
+[[EFFECT: progress ...]] yourself — they would double-apply. You SHOULD
+still emit [[EFFECT: create_combat ...]] when a fight first starts (so the
+track exists to mark), and [[EFFECT: end_combat ...]] when a foe is finished.`);
   }
 
   if (context && typeof context === "string" && context.trim()) {
@@ -827,6 +883,11 @@ const Integration = {
     } catch (e) { console.warn(LOG_PREFIX, "gatherContext: character read failed", e); }
 
     try {
+      const combatState = IronswornController.describeCombatState();
+      if (combatState) blocks.push(combatState);
+    } catch (e) { console.warn(LOG_PREFIX, "gatherContext: combat state read failed", e); }
+
+    try {
       if (game?.combat?.started) {
         blocks.push("Battlefield:\n" + CombatController.summariseCurrent());
       } else {
@@ -908,7 +969,61 @@ const Integration = {
       const name = body.slice(6).trim();
       return name ? { kind: "oracle", name } : null;
     }
+
+    // ---- Combat / quest track directives (v0.3.0) ----
+    // Accept underscores or spaces: "create_combat" or "create combat".
+    const m = body.match(/^(create[_\s]combat|create[_\s]vow|initiative|end[_\s]combat)\b\s*(.*)$/i);
+    if (m) {
+      const verb = m[1].toLowerCase().replace(/\s+/g, "_");
+      const rest = (m[2] || "").trim();
+
+      if (verb === "initiative") {
+        const r = rest.toLowerCase();
+        if (/\b(gain|win|seize|seized|take|taken|control|in[-\s]?control)\b/.test(r)) return { kind: "initiative", value: "gain" };
+        if (/\b(lose|lost|los[et]|forgo|forgone|forfeit|bad[-\s]?spot|out)\b/.test(r)) return { kind: "initiative", value: "lose" };
+        return null;
+      }
+
+      if (verb === "create_combat") {
+        const { name, rank } = this._splitNameRank(rest);
+        return name ? { kind: "create_combat", name, rank } : null;
+      }
+
+      if (verb === "create_vow") {
+        const { name, rank, desc } = this._splitNameRank(rest);
+        return name ? { kind: "create_vow", name, rank, description: desc } : null;
+      }
+
+      if (verb === "end_combat") {
+        const { name } = this._splitNameRank(rest);
+        return name ? { kind: "end_combat", name } : null;
+      }
+    }
     return null;
+  },
+
+  /** Ironsworn rank words, used to split "Name <rank> [description]". */
+  _RANKS: ["troublesome", "dangerous", "formidable", "extreme", "epic"],
+
+  /**
+   * Split a directive tail of the form "<Name...> [rank] [description...]".
+   * The rank token (if any of the canonical ranks appears) separates the
+   * track name from an optional trailing description. When no rank token is
+   * present, the whole string is treated as the name (rank=null).
+   * @returns {{name:string, rank:string|null, desc:string}}
+   */
+  _splitNameRank(rest) {
+    if (!rest) return { name: "", rank: null, desc: "" };
+    const tokens = rest.split(/\s+/);
+    const idx = tokens.findIndex(t =>
+      this._RANKS.includes(t.toLowerCase().replace(/[^a-z]/g, "")));
+    if (idx === -1) {
+      return { name: rest.replace(/[:\-—|]+$/, "").trim(), rank: null, desc: "" };
+    }
+    const name = tokens.slice(0, idx).join(" ").replace(/[:\-—|]+$/, "").trim();
+    const rank = tokens[idx].toLowerCase().replace(/[^a-z]/g, "");
+    const desc = tokens.slice(idx + 1).join(" ").replace(/^[:\-—|]+/, "").trim();
+    return { name, rank, desc };
   },
 
   /* ---------------- AI reply posting (with suggestion card) ---------------- */
@@ -1085,6 +1200,30 @@ const Integration = {
     try {
       if (Settings.get("debugLogging")) console.log(LOG_PREFIX, "[Ironsworn]", ...args);
     } catch (_) { /* settings may not be ready */ }
+  },
+
+  /* ---------------- Combat UI feedback ---------------- */
+
+  /** Toast for combat-track lifecycle events (create / vow / end). */
+  _notifyCombat(msg) {
+    try { ui.notifications?.info(`${SKALD_NAME}: ${msg}`); } catch (_) {}
+    this._dbg(`notify: ${msg}`);
+  },
+
+  /** Toast + flavour for an initiative change. */
+  _notifyInitiative(gained) {
+    const msg = gained
+      ? "⚔ You seize the initiative — you are in control."
+      : "⚠ You lose the initiative — you are in a bad spot.";
+    try { gained ? ui.notifications?.info(`${SKALD_NAME}: ${msg}`)
+                 : ui.notifications?.warn(`${SKALD_NAME}: ${msg}`); } catch (_) {}
+    this._dbg(`notify: initiative ${gained ? "gained" : "lost"}`);
+  },
+
+  /** Toast for a progress mark on a combat track. */
+  _notifyProgress(trackName, boxes) {
+    try { ui.notifications?.info(`${SKALD_NAME}: progress on ${trackName} — ${boxes}/10 boxes.`); } catch (_) {}
+    this._dbg(`notify: progress on ${trackName} → ${boxes}/10`);
   },
 
   /**
@@ -1336,15 +1475,28 @@ const Integration = {
   /** Ask the AI to narrate an outcome and (optionally) apply effects. */
   async _narrateOutcome(message, parsed) {
     const actor = message.speakerActor ?? IronswornController.getActiveCharacter();
-    const allowEffects = Settings.get("aiAppliesEffects") ?? false;
+    const allowEffects = Settings.get("aiAppliesEffects") ?? true;
+
+    // 1. Apply the deterministic combat mechanics FIRST (initiative on
+    //    Enter the Fray; harm/progress + initiative on Strike/Clash). This
+    //    keeps the rules correct regardless of what the AI narrates, and
+    //    gives us a factual summary to feed into the narration prompt.
+    let autoSummary = "";
+    if (allowEffects) {
+      try { autoSummary = await this._autoCombatFlow(parsed, actor); }
+      catch (e) { console.warn(LOG_PREFIX, "_autoCombatFlow failed", e); }
+    }
 
     const ctx = this.gatherContext();
     const intent = this._lastIntent ? `\nThe player's intent: ${this._lastIntent}` : "";
+    const autoLine = autoSummary
+      ? `\nMechanical effects ALREADY applied automatically (do NOT re-emit initiative or progress effects for this move): ${autoSummary}`
+      : "";
     const task = `A move has just been resolved by the dice.
 Move: ${parsed.moveName}
 Outcome: ${parsed.outcome}${parsed.match ? " (MATCH — add a twist)" : ""}
-Action score: ${parsed.score ?? "?"} vs challenge dice ${(parsed.challenge ?? []).join(" / ") || "?"}.${intent}
-Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " Then append any warranted [[EFFECT:…]] directives." : " Do not emit effect directives; simply narrate."}`;
+Action score: ${parsed.score ?? "?"} vs challenge dice ${(parsed.challenge ?? []).join(" / ") || "?"}.${intent}${autoLine}
+Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " Then append any warranted [[EFFECT:…]] directives that were NOT already applied above." : " Do not emit effect directives; simply narrate."}`;
 
     try {
       Memory.push("general", "user", `(${parsed.moveName} → ${parsed.outcome})`);
@@ -1361,12 +1513,83 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
         title: `${parsed.moveName} — ${parsed.outcome}`
       });
 
-      if (allowEffects && effects.length) {
-        await this.applyEffects(effects, actor);
+      // Strip effects the auto-combat flow already handled, to avoid
+      // double-marking progress or flipping initiative twice.
+      const safeEffects = this._filterRedundantCombatEffects(effects, parsed, autoSummary);
+      if (allowEffects && safeEffects.length) {
+        await this.applyEffects(safeEffects, actor);
       }
     } catch (e) {
       console.warn(LOG_PREFIX, "_narrateOutcome failed", e);
     }
+  },
+
+  /**
+   * Is this move name one of the core combat moves whose mechanics the
+   * Skald resolves deterministically (initiative / progress)?
+   */
+  _isCombatMove(moveName) {
+    return /\b(enter the fray|strike|clash)\b/i.test(String(moveName || ""));
+  },
+
+  /**
+   * Apply Ironsworn combat mechanics for the resolved move, deterministically:
+   *   • Enter the Fray  → strong/weak hit grants initiative; miss = bad spot.
+   *   • Strike          → hit inflicts harm (mark foe progress); strong keeps
+   *                       initiative, weak loses it; miss loses initiative.
+   *   • Clash           → hit inflicts harm (mark foe progress); strong keeps
+   *                       initiative, weak/miss loses it.
+   * Returns a short human-readable summary of what changed (for the prompt
+   * and the GM whisper), or "" when nothing applied.
+   */
+  async _autoCombatFlow(parsed, actor) {
+    if (!actor) return "";
+    const move = String(parsed.moveName || "").toLowerCase();
+    if (!this._isCombatMove(move)) return "";
+
+    const out    = String(parsed.outcome || "").toLowerCase();
+    const strong = out.includes("strong");
+    const hit    = strong || out.includes("weak");
+    const notes  = [];
+
+    if (/enter the fray/.test(move)) {
+      const r = await IronswornController.setInitiative(actor, hit);
+      if (r?.ok) { this._notifyInitiative(hit); notes.push(hit ? "seized initiative" : "in a bad spot (no initiative)"); }
+      return notes.join("; ");
+    }
+
+    // Strike / Clash
+    if (hit) {
+      const track = IronswornController.getActiveCombatTrack(actor);
+      if (track) {
+        const pr = await IronswornController.markProgressByRank(actor, track.id);
+        if (pr?.ok) { this._notifyProgress(pr.track, pr.boxes); notes.push(`inflicted harm on ${pr.track} (now ${pr.boxes}/10 boxes)`); }
+      } else {
+        notes.push("no active foe track to mark — create one with [[EFFECT: create_combat …]]");
+      }
+      // Strong hit keeps initiative; weak hit loses it (per Strike/Clash).
+      const keep = strong;
+      const ir = await IronswornController.setInitiative(actor, keep);
+      if (ir?.ok) { this._notifyInitiative(keep); notes.push(keep ? "kept initiative" : "lost initiative"); }
+    } else {
+      const ir = await IronswornController.setInitiative(actor, false);
+      if (ir?.ok) { this._notifyInitiative(false); notes.push("lost initiative — pay the price"); }
+    }
+    return notes.join("; ");
+  },
+
+  /**
+   * Remove progress / initiative effects the auto-combat flow already
+   * applied for a core combat move, so the AI can't double-apply them.
+   * Non-combat moves (or non-progress/initiative effects) pass through.
+   */
+  _filterRedundantCombatEffects(effects, parsed, autoSummary) {
+    if (!autoSummary || !this._isCombatMove(parsed?.moveName)) return effects;
+    return (effects || []).filter(e => {
+      if (e.kind === "initiative") { this._dbg("→ dropping redundant initiative effect (auto-applied)"); return false; }
+      if (e.kind === "progress")   { this._dbg("→ dropping redundant progress effect (auto-applied)"); return false; }
+      return true;
+    });
   },
 
   /** Apply parsed [[EFFECT:…]] directives via the Ironsworn controller. */
@@ -1403,6 +1626,59 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
             r = await IronswornController.rollOracle(eff.name);
             if (r) applied.push(`oracle “${eff.name}” → ${r}`);
             break;
+          case "create_combat": {
+            if (!(Settings.get("autoCreateCombatTracks") ?? true)) {
+              this._dbg("→ create_combat skipped: autoCreateCombatTracks disabled");
+              break;
+            }
+            const rank = IronswornController.normalizeRank(
+              eff.rank || (Settings.get("defaultEnemyRank") ?? "dangerous"));
+            // Don't duplicate an already-active fight with the same foe.
+            const existing = IronswornController.getProgressTrack(actor, eff.name);
+            const existingDone = existing && foundry.utils.getProperty(existing, "system.completed");
+            if (existing && !existingDone) {
+              this._dbg(`→ create_combat skipped: "${eff.name}" already active`);
+              applied.push(`combat “${eff.name}” already underway`);
+              break;
+            }
+            r = await IronswornController.createProgressTrack(actor, eff.name, "combat", rank);
+            if (r?.ok) {
+              applied.push(`⚔ began combat “${eff.name}” [${rank}]`);
+              this._notifyCombat(`⚔ Combat track created: ${eff.name} (${rank})`);
+            }
+            break;
+          }
+          case "create_vow": {
+            const rank = IronswornController.normalizeRank(eff.rank || "formidable");
+            const existing = IronswornController.getProgressTrack(actor, eff.name);
+            if (existing && !foundry.utils.getProperty(existing, "system.completed")) {
+              applied.push(`vow “${eff.name}” already sworn`);
+              break;
+            }
+            r = await IronswornController.createProgressTrack(actor, eff.name, "vow", rank, eff.description);
+            if (r?.ok) {
+              applied.push(`vow “${eff.name}” sworn [${rank}]`);
+              this._notifyCombat(`📜 Vow sworn: ${eff.name} (${rank})`);
+            }
+            break;
+          }
+          case "initiative": {
+            const gain = eff.value === "gain";
+            r = await IronswornController.setInitiative(actor, gain);
+            if (r?.ok) {
+              applied.push(gain ? "seized initiative" : "lost initiative");
+              this._notifyInitiative(gain);
+            }
+            break;
+          }
+          case "end_combat": {
+            r = await IronswornController.completeTrack(actor, eff.name);
+            if (r?.ok) {
+              applied.push(`ended combat “${r.name}”`);
+              this._notifyCombat(`🏆 Combat ended: ${r.name}`);
+            }
+            break;
+          }
         }
         if (r && r.ok === false && r.error) {
           console.warn(LOG_PREFIX, `effect ${eff.kind} skipped:`, r.error);
@@ -2240,7 +2516,7 @@ Hooks.once("ready", async () => {
     lore: LoreGenerator,
     resetMemory: (ch) => Memory.reset(ch),
     IronswornData,
-    // --- Ironsworn rules-engine integration (v0.2.3) ---
+    // --- Ironsworn rules-engine integration (v0.3.0) ---
     ironsworn: IronswornController,
     integration: Integration
   };

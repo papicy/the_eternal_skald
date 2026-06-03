@@ -1,5 +1,5 @@
 /* =====================================================================
- *  THE ETERNAL SKALD — Ironsworn System Controller (v0.2.3)
+ *  THE ETERNAL SKALD — Ironsworn System Controller (v0.3.0)
  *  ---------------------------------------------------------------------
  *  This module is the bridge between The Eternal Skald (the "GM brain")
  *  and the official `foundry-ironsworn` system (the "rules engine",
@@ -27,6 +27,17 @@
 
 const SYSTEM_ID = "foundry-ironsworn";
 const LOG_PREFIX = "The Eternal Skald | Ironsworn |";
+
+/* The Skald's flag scope on actors/items (initiative state, track kind). */
+const ES_SCOPE = "the-eternal-skald";
+
+/* Canonical Ironsworn progress-track ranks, lowest → highest danger. */
+const RANKS = Object.freeze(["troublesome", "dangerous", "formidable", "extreme", "epic"]);
+
+/* Ticks marked per "mark progress" action, by rank (4 ticks = 1 box). */
+const RANK_TICKS = Object.freeze({
+  troublesome: 12, dangerous: 8, formidable: 4, extreme: 2, epic: 1
+});
 
 /* Debug logging is toggled by eternal-skald.js via setDebug(). */
 let DEBUG = false;
@@ -493,41 +504,208 @@ export const IronswornController = {
   async markProgressByRank(actor, trackRef, times = 1) {
     const track = this.findTrack(actor, trackRef);
     if (!track) return { ok: false, error: `Track "${trackRef}" not found.` };
-    const rank = String(foundry.utils.getProperty(track, "system.rank") ?? "formidable").toLowerCase();
-    const perMark = { troublesome: 12, dangerous: 8, formidable: 4, extreme: 2, epic: 1 }[rank] ?? 4;
+    const rank = this.normalizeRank(foundry.utils.getProperty(track, "system.rank"));
+    const perMark = RANK_TICKS[rank] ?? 4;
     return this.markProgress(actor, track.id, perMark * Math.max(1, times));
   },
 
   /**
    * Create a new progress-track Item on the actor — used to enact
-   * "Swear an Iron Vow", "Begin a Journey", "Forge a Bond", etc. The item
-   * `type` is probed against the system's registered Item types so we
-   * create something the system will render; falls back to "progress".
+   * "Swear an Iron Vow", "Begin a Journey", "Forge a Bond", or to spin up
+   * a combat (foe) progress track when a fight begins.
    *
-   * @returns {Promise<{ok:boolean, id?:string, error?:string}>}
+   * Two call styles are supported for convenience:
+   *   createProgressTrack(actor, name, trackType, rank, description)
+   *   createProgressTrack(actor, { name, trackType|type, rank, description })
+   *
+   * @param {Actor}  actor
+   * @param {string|object} nameOrOpts  track name, or an options object.
+   * @param {string} [trackType='vow']  'combat' | 'vow' | 'journey' | 'bond'.
+   * @param {string} [rank='formidable'] one of RANKS.
+   * @param {string} [description='']
+   * @returns {Promise<{ok:boolean, id?:string, name?:string, type?:string, rank?:string, error?:string}>}
    */
-  async createProgressTrack(actor, { name, rank = "formidable", type = "vow", subtype } = {}) {
+  async createProgressTrack(actor, nameOrOpts, trackType = "vow", rank = "formidable", description = "") {
     if (!actor) return { ok: false, error: "No actor." };
-    if (!name)  return { ok: false, error: "A track name is required." };
 
-    const wantType = subtype || type;
-    const itemType = this._pickItemType([wantType, "vow", "progress"]);
+    // Normalise the two call styles.
+    let name = nameOrOpts;
+    if (nameOrOpts && typeof nameOrOpts === "object") {
+      const o = nameOrOpts;
+      name        = o.name;
+      trackType   = o.trackType || o.type || o.subtype || "vow";
+      rank        = o.rank || "formidable";
+      description = o.description || "";
+    }
+    if (!name) return { ok: false, error: "A track name is required." };
+
+    const kind = String(trackType).toLowerCase();
+    rank = this.normalizeRank(rank);
+
+    // Ironsworn stores vows/bonds/foes/journeys as embedded Items. The
+    // concrete `type` and `subtype` vary by data-model revision, so probe
+    // the registered types and tag what the system actually expects.
+    //   combat/journey → progress-style track (subtype "progress")
+    //   vow            → subtype "vow"
+    //   bond           → subtype "bond"
+    const subtypeMap = { combat: "progress", journey: "progress", vow: "vow", bond: "bond" };
+    const subtype = subtypeMap[kind] ?? "progress";
+    const itemType = this._pickItemType(
+      kind === "vow"  ? ["vow", "progress"]
+    : kind === "bond" ? ["bond", "bondset", "progress"]
+    :                   ["progress", "foe", "vow"]
+    );
+
     const data = {
       name,
       type: itemType,
-      system: { rank: String(rank).toLowerCase(), current: 0, completed: false }
+      system: { rank, current: 0, completed: false, subtype },
+      flags: { [ES_SCOPE]: { trackKind: kind, createdBy: "eternal-skald" } }
     };
-    // Some data models distinguish vow/journey/bond via a subtype field.
-    if (subtype) data.system.subtype = subtype;
+    if (description) {
+      // Different data models name the notes field differently; set the
+      // common ones harmlessly.
+      data.system.description = description;
+      data.system.notes = description;
+    }
 
     try {
       const [created] = await actor.createEmbeddedDocuments("Item", [data]);
-      dbg(`createProgressTrack: created "${name}" as type "${itemType}" (id=${created?.id})`);
-      return { ok: true, id: created?.id, type: itemType, name };
+      dbg(`createProgressTrack: "${name}" kind=${kind} type=${itemType} rank=${rank} (id=${created?.id})`);
+      return { ok: true, id: created?.id, name, type: itemType, rank, kind };
     } catch (e) {
       warn("createProgressTrack failed:", e?.message ?? e);
       return { ok: false, error: e?.message ?? String(e) };
     }
+  },
+
+  /**
+   * Find an existing progress-track Item by (case-insensitive) name or id.
+   * Returns the Item document (or null). Thin semantic wrapper over
+   * findTrack() so callers reading "a progress track" are explicit.
+   */
+  getProgressTrack(actor, trackName) {
+    return this.findTrack(actor, trackName);
+  },
+
+  /** Normalise an arbitrary rank string to a canonical rank (default given). */
+  normalizeRank(rank, fallback = "formidable") {
+    const r = String(rank ?? "").toLowerCase().replace(/[^a-z]/g, "");
+    return RANKS.includes(r) ? r : fallback;
+  },
+
+  /**
+   * Mark a track complete (e.g. when a combat ends or a vow is fulfilled).
+   * @returns {Promise<{ok:boolean, name?:string, error?:string}>}
+   */
+  async completeTrack(actor, trackRef) {
+    const track = this.findTrack(actor, trackRef);
+    if (!track) return { ok: false, error: `Track "${trackRef}" not found.` };
+    try {
+      await track.update({ "system.completed": true });
+      dbg(`completeTrack: "${track.name}" marked completed`);
+      return { ok: true, name: track.name };
+    } catch (e) {
+      return { ok: false, error: e?.message ?? String(e) };
+    }
+  },
+
+  /* =================================================================
+   *  COMBAT TRACKS & INITIATIVE
+   * ================================================================= */
+
+  /**
+   * All combat (foe) progress tracks on the actor — i.e. tracks the Skald
+   * created with trackKind "combat". Each entry: { id, name, rank, current,
+   * boxes, completed }. Most-recently-created first.
+   */
+  getCombatTracks(actor) {
+    if (!actor?.items) return [];
+    const out = [];
+    for (const item of actor.items) {
+      const kind = item.getFlag?.(ES_SCOPE, "trackKind")
+                ?? foundry.utils.getProperty(item, `flags.${ES_SCOPE}.trackKind`);
+      if (kind !== "combat") continue;
+      const current = foundry.utils.getProperty(item, "system.current") ?? 0;
+      out.push({
+        id: item.id,
+        name: item.name,
+        rank: foundry.utils.getProperty(item, "system.rank") ?? null,
+        current,
+        boxes: Math.floor(current / 4),
+        completed: foundry.utils.getProperty(item, "system.completed") ?? false
+      });
+    }
+    // createEmbeddedDocuments preserves order; reverse for newest-first.
+    return out.reverse();
+  },
+
+  /** The newest active (not-completed) combat track, or null. */
+  getActiveCombatTrack(actor) {
+    return this.getCombatTracks(actor).find(t => !t.completed) ?? null;
+  },
+
+  /**
+   * Whether the character currently has initiative ("in control" in
+   * Ironsworn terms). Stored as a Skald flag on the actor so it persists
+   * across sessions. Also honours the system's own field if present.
+   */
+  hasInitiative(actor = this.getActiveCharacter()) {
+    if (!actor) return false;
+    try {
+      const flag = actor.getFlag?.(ES_SCOPE, "hasInitiative");
+      if (typeof flag === "boolean") return flag;
+      // Best-effort: some data models expose an initiative/inControl field.
+      const sys = foundry.utils.getProperty(actor, "system.initiative");
+      if (typeof sys === "boolean") return sys;
+    } catch (_) {}
+    return false;
+  },
+
+  /**
+   * Set the character's initiative (in-control) state.
+   * @returns {Promise<{ok:boolean, value?:boolean, error?:string}>}
+   */
+  async setInitiative(actor = this.getActiveCharacter(), value = true) {
+    if (!actor) return { ok: false, error: "No actor." };
+    const v = !!value;
+    try {
+      await actor.setFlag?.(ES_SCOPE, "hasInitiative", v);
+      dbg(`setInitiative: ${actor.name} → ${v ? "in control" : "in a bad spot"}`);
+      return { ok: true, value: v };
+    } catch (e) {
+      warn("setInitiative failed:", e?.message ?? e);
+      return { ok: false, error: e?.message ?? String(e) };
+    }
+  },
+
+  /**
+   * Compact, AI-friendly description of the live combat state: who has
+   * initiative, active foe tracks with progress, and recently-finished
+   * fights. Returns "" when there is nothing combat-related to report.
+   */
+  describeCombatState(actor = this.getActiveCharacter()) {
+    if (!this.isActive() || !actor) return "";
+    const tracks = this.getCombatTracks(actor);
+    if (!tracks.length) return "";
+
+    const active = tracks.filter(t => !t.completed);
+    const done   = tracks.filter(t => t.completed);
+    const lines = [];
+
+    lines.push(`Initiative: ${this.hasInitiative(actor) ? "YOU are in control" : "you are in a bad spot (foe has initiative)"}.`);
+
+    if (active.length) {
+      lines.push("Active foes (combat progress tracks):");
+      for (const t of active) {
+        const rank = t.rank ? ` [${t.rank}]` : "";
+        lines.push(`  - ${t.name}${rank}: ${t.boxes}/10 boxes filled (${t.current}/40 ticks)`);
+      }
+    }
+    if (done.length) {
+      lines.push(`Recently ended fights: ${done.slice(0, 5).map(t => t.name).join(", ")}.`);
+    }
+    return lines.join("\n");
   },
 
   /* =================================================================

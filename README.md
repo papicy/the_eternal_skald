@@ -4,9 +4,9 @@ An AI-powered storyteller, oracle interpreter, and tactical enemy controller for
 
 Powered by the **Abacus AI ChatLLM** platform (Gemini 3.0 Flash by default).
 
-> ⚠️ **Alpha / Development Version (v0.2.3)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
+> ⚠️ **Alpha / Development Version (v0.3.0)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
 
-As of **v0.2.3**, the Skald integrates directly with the official [**foundry-ironsworn**](https://foundryvtt.com/packages/foundry-ironsworn) system: it reads your character's stats and meters, *suggests* the right Ironsworn move, triggers the system's own dice mechanics on one click, narrates the official strong-hit / weak-hit / miss outcome, and can optionally apply mechanical effects. See [Ironsworn Integration](#ironsworn-integration) below. The module still works standalone in any system — Ironsworn features simply activate when the system is present.
+As of **v0.3.0**, the Skald integrates directly with the official [**foundry-ironsworn**](https://foundryvtt.com/packages/foundry-ironsworn) system: it reads your character's stats and meters, *suggests* the right Ironsworn move, triggers the system's own dice mechanics on one click, narrates the official strong-hit / weak-hit / miss outcome, and can optionally apply mechanical effects. See [Ironsworn Integration](#ironsworn-integration) below. The module still works standalone in any system — Ironsworn features simply activate when the system is present.
 
 ---
 
@@ -69,7 +69,7 @@ node --import "./Data/modules/the-eternal-skald/scripts/eternal-skald-server.mjs
 When Foundry starts, you should see this in the console/logs:
 
 ```
-⚔️  Skald | v0.2.3 — server hook active. /skald-api/* routes ready.
+⚔️  Skald | v0.3.0 — server hook active. /skald-api/* routes ready.
 ```
 
 ### 3. Set your API key
@@ -91,7 +91,7 @@ http://your-foundry:30000/skald-api/health
 You should see:
 
 ```json
-{"status":"ok","service":"The Eternal Skald","version":"0.2.3"}
+{"status":"ok","service":"The Eternal Skald","version":"0.3.0"}
 ```
 
 If you get a 404 or Foundry's normal HTML page, the `--import` flag isn't taking effect. Double-check:
@@ -175,9 +175,9 @@ The active character's stats (`edge`, `heart`, `iron`, `shadow`, `wits`), meters
 
 The full classic Ironsworn move set plus the Delve and Ironsworn moves — Face Danger, Secure an Advantage, Gather Information, Compel, Strike, Clash, Turn the Tide, Battle, Endure Harm, Endure Stress, Face Death, Swear an Iron Vow, Reach a Milestone, Fulfill Your Vow, Undertake a Journey, Reach Your Destination, Make Camp, Sojourn, Discover a Site, Delve the Depths, Locate Your Objective, and more — each mapped to its Datasworn move ID and default stat(s).
 
-### Effect directives (opt-in)
+### Effect directives
 
-With **AI Applies Mechanical Effects** enabled, the Skald may follow its narration with mechanical changes to the active character — adjusting momentum, dealing harm/stress, spending or restoring supply, marking progress on a track, or rolling an oracle. This is **off by default** so the player retains full control of the sheet; turn it on only if you want a more automated table.
+With **AI Applies Mechanical Effects** enabled (now **on by default**), the Skald may follow its narration with mechanical changes to the active character — adjusting momentum, dealing harm/stress, spending or restoring supply, marking progress on a track, rolling an oracle, or running the [combat automation](#combat-system). Turn it **off** if you'd rather keep the player in full control of the sheet.
 
 ### Settings that govern integration
 
@@ -187,8 +187,65 @@ With **AI Applies Mechanical Effects** enabled, the Skald may follow its narrati
 | Suggest Moves | On | Show the interactive move-suggestion card after narration. |
 | Auto-Narrate Move Outcomes | On | Automatically narrate any Ironsworn roll's result. |
 | Narration Delay (ms) | 2000 | How long to wait after a roll before auto-narrating, so dice animations can finish. ~2000ms with Dice So Nice, ~500ms without. Range 0–5000. |
-| AI Applies Mechanical Effects | Off | *Experimental.* Let the Skald apply momentum/harm/stress/supply/progress/oracle effects. |
+| AI Applies Mechanical Effects | **On** | Let the Skald apply momentum/harm/stress/supply/progress/oracle effects **and** drive the combat automation. |
+| Auto-Create Combat Tracks | On | Auto-create a combat progress track per foe when a fight begins. Requires *AI Applies Mechanical Effects*. |
+| Default Enemy Rank | Dangerous | Challenge rank for auto-created combat tracks when the Skald doesn't specify one. |
 | Debug Logging | Off | Verbose integration diagnostics in the browser console (F12). |
+
+---
+
+## Combat System
+
+From **v0.3.0**, the Skald runs Ironsworn fights for you. Combat in Ironsworn is tracked with a **progress track per foe** (filled by landing blows) plus a single **initiative** state telling you whether you're *in control* or *in a bad spot*. The Skald creates and advances these automatically.
+
+### Automatic combat-track creation
+
+When the fiction starts a fight, the Skald emits `[[EFFECT: create_combat <Foe Name> <rank>]]` and a combat progress track is created on your character sheet for that foe. Each new foe gets its own track, so multi-enemy fights just work. Rank sets how much progress each hit marks:
+
+| Rank | Threat | Progress per harm | Boxes to fill |
+|---|---|---|---|
+| Troublesome | trivial | +12 ticks (3 boxes) | ~4 hits |
+| Dangerous *(default)* | a real threat | +8 ticks (2 boxes) | ~5 hits |
+| Formidable | tough | +4 ticks (1 box) | 10 hits |
+| Extreme | deadly | +2 ticks | 20 hits |
+| Epic | legendary | +1 tick | 40 hits |
+
+If the Skald doesn't name a rank, **Default Enemy Rank** (Dangerous) is used. Turn off **Auto-Create Combat Tracks** to disable this and create foe tracks manually.
+
+### Initiative & deterministic move resolution
+
+When you roll **Enter the Fray**, **Strike**, or **Clash**, the Skald applies the mechanics itself (so the rules stay correct no matter how it narrates):
+
+- **Enter the Fray** — strong/weak hit → you **gain initiative**; miss → you're in a **bad spot**.
+- **Strike / Clash** — on a hit, the active foe's track is **marked by its rank**; a **strong hit keeps** initiative, a **weak hit loses** it; a **miss loses** initiative.
+
+Because these are auto-applied, the AI is instructed *not* to also emit `[[EFFECT: initiative …]]` or `[[EFFECT: progress …]]` for those moves — no double-marking.
+
+### Example flow
+
+```
+Player: !skald three reavers ambush us on the cliff path
+Skald:  …narrates the ambush…           → [[EFFECT: create_combat Reaver Captain dangerous]]
+                                          → [[EFFECT: create_combat Reaver formidable]]  (×2)
+
+Player rolls Enter the Fray → Strong Hit
+Skald:  "You read the charge and strike first."   (auto: initiative gained)
+
+Player rolls Strike → Strong Hit
+Skald:  "Your axe bites deep."   (auto: Reaver Captain +8 ticks, initiative kept)
+
+Player rolls Strike → Weak Hit
+Skald:  "A glancing blow — they wheel on you."   (auto: +8 ticks, initiative lost)
+
+…the captain falls…
+Skald:  "The captain drops to one knee and yields."  → [[EFFECT: end_combat Reaver Captain]]
+```
+
+`[[EFFECT: end_combat <Foe Name>]]` marks that foe's track complete when they're defeated, flee, or yield. Completed tracks persist on the sheet for the chronicle; only un-completed foes count as "active". Live combat state — who holds initiative, each active foe's progress, recently-ended fights — is fed back into the AI's context every turn.
+
+### Vows
+
+The same machinery powers quests: `[[EFFECT: create_vow <Name> <rank> <description>]]` creates a vow/quest progress track when you Swear an Iron Vow.
 
 ### Graceful by design
 
@@ -232,7 +289,9 @@ All in **Configure Settings → The Eternal Skald** (world-scoped, GM-only):
 | Suggest Moves | On | Show the interactive move-suggestion card after narration. |
 | Auto-Narrate Move Outcomes | On | Automatically narrate any Ironsworn roll's result. |
 | Narration Delay (ms) | 2000 | How long to wait after a roll before auto-narrating, so dice animations can finish. ~2000ms with Dice So Nice, ~500ms without. Range 0–5000. |
-| AI Applies Mechanical Effects | Off | *Experimental.* Let the Skald apply momentum/harm/stress/supply/progress/oracle effects. |
+| AI Applies Mechanical Effects | **On** | Let the Skald apply momentum/harm/stress/supply/progress/oracle effects and run the combat automation. |
+| Auto-Create Combat Tracks | On | Auto-create a combat progress track per foe when a fight begins. |
+| Default Enemy Rank | Dangerous | Challenge rank for auto-created combat tracks when none is specified. |
 | Debug Logging | Off | Verbose Ironsworn integration diagnostics in the browser console. |
 
 ---
@@ -256,7 +315,7 @@ const { roll, result } = skald.rollOracle(skald.IronswornData.oracles.action);
 // Trigger commands programmatically
 await skald.commands.lore('The Fallen Keep of Vorlund');
 
-// --- Ironsworn integration (v0.2.3) ---
+// --- Ironsworn integration (v0.3.0) ---
 // Read the active character's state
 const char = skald.ironsworn.describeCharacter();   // { name, stats, meters, ... } or null
 const caps = skald.ironsworn.capabilities();         // feature-detection report
@@ -267,6 +326,16 @@ await skald.ironsworn.triggerMove('Face Danger', { stat: 'iron' });
 // Adjust mechanics directly
 await skald.ironsworn.adjustMomentum(+1);
 await skald.ironsworn.markProgress('Find the lost ship');
+
+// --- Combat system (v0.3.0) ---
+const actor = skald.ironsworn.getActiveCharacter();
+await skald.ironsworn.createProgressTrack(actor, 'Frost Wolf', 'combat', 'dangerous');
+await skald.ironsworn.markProgressByRank(actor, 'Frost Wolf'); // +8 ticks (dangerous)
+await skald.ironsworn.setInitiative(actor, true);             // you are in control
+skald.ironsworn.hasInitiative(actor);                          // → true
+skald.ironsworn.getActiveCombatTrack(actor);                   // newest un-finished foe
+skald.ironsworn.describeCombatState(actor);                    // AI-friendly summary
+await skald.ironsworn.completeTrack(actor, 'Frost Wolf');      // end the fight
 
 // Drive the suggestion / selector UI
 await skald.integration.postSuggestionCard({ name: 'Secure an Advantage', stat: 'wits' });
@@ -280,7 +349,7 @@ await skald.integration.showMoveSelector();
 **"The Eternal Skald server hook is not loaded (404)"**
 The `--import` flag isn't in your Foundry startup command, or the path is wrong. See [Setup step 2](#2-add---import-to-your-foundry-startup).
 
-**No `⚔️ Skald | v0.2.3` line in Foundry's console output**
+**No `⚔️ Skald | v0.3.0` line in Foundry's console output**
 The hook file isn't being loaded. Check the path is absolute and correct. Run it in a terminal to see Node.js errors.
 
 **"No Abacus AI API key is set"**
@@ -293,7 +362,7 @@ Use `!skald-help` (exclamation mark, not slash).
 If you can't modify the startup command, this module won't work on hosted platforms that don't support `--import`. Contact your hosting provider to ask about custom Node flags.
 
 **Auto-narration doesn't fire after an Ironsworn roll**
-Enable **Debug Logging** in Module Settings and check the browser console. As of **v0.2.3**, roll detection reads the `foundry-ironsworn` roll card HTML (the system no longer attaches module flags), logs every detection step, and waits for the configurable **Narration Delay** (default 2000ms) before narrating so dice animations can finish. Make sure **Auto-Narrate Moves** is enabled and you're logged in as the GM. If you still see no `Detected Ironsworn roll` log line, copy the console output and open an issue.
+Enable **Debug Logging** in Module Settings and check the browser console. As of **v0.3.0**, roll detection reads the `foundry-ironsworn` roll card HTML (the system no longer attaches module flags), logs every detection step, and waits for the configurable **Narration Delay** (default 2000ms) before narrating so dice animations can finish. Make sure **Auto-Narrate Moves** is enabled and you're logged in as the GM. If you still see no `Detected Ironsworn roll` log line, copy the console output and open an issue.
 
 ---
 

@@ -49,7 +49,15 @@
       },
       "aiAppliesEffects": {
         "name": "AI Applies Mechanical Effects",
-        "hint": "EXPERIMENTAL. Permit the Skald to apply mechanical effects it proposes — adjusting momentum, harm, stress, supply, marking progress, or rolling oracles — directly to the active character. Leave OFF to keep the player in full control of the sheet."
+        "hint": "Permit the Skald to apply mechanical effects it proposes — adjusting momentum, harm, stress, supply, marking progress, rolling oracles, and running the combat automation (combat tracks & initiative). On by default. Turn OFF to keep the player in full control of the sheet."
+      },
+      "autoCreateCombatTracks": {
+        "name": "Auto-Create Combat Tracks",
+        "hint": "When the Skald narrates the start of a fight, automatically create a combat progress track for each foe so attacks can be marked against it. Requires AI Applies Mechanical Effects."
+      },
+      "defaultEnemyRank": {
+        "name": "Default Enemy Rank",
+        "hint": "Challenge rank assigned to auto-created combat tracks when the Skald does not specify one. Higher ranks take more progress to fill (troublesome = quickest, epic = longest)."
       },
       "debugLogging": {
         "name": "Debug Logging",
