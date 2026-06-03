@@ -9,11 +9,11 @@
       },
       "modelName": {
         "name": "AI Model",
-        "hint": "Model identifier to use for generation. Defaults to gemini-3.0-flash. Any model exposed by your Abacus AI deployment is acceptable."
+        "hint": "Model identifier to use for generation. Defaults to gemini-3-flash-preview. Any model exposed by your Abacus AI deployment is acceptable."
       },
       "apiEndpoint": {
         "name": "API Endpoint",
-        "hint": "Chat-completions endpoint URL. Defaults to https://api.abacus.ai/v1/chat/completions. Override only if you use a custom AI backend."
+        "hint": "Chat-completions endpoint URL. Defaults to https://routellm.abacus.ai/v1/chat/completions. Override only if you use a custom AI backend."
       },
       "intensity": {
         "name": "Skald Intensity",

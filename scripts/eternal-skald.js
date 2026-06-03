@@ -1,10 +1,10 @@
 /* =====================================================================
- *  THE ETERNAL SKALD v2.0.0 — Foundry VTT v14 Module (Client)
+ *  THE ETERNAL SKALD v2.0.1 — Foundry VTT v14 Module (Client)
  *  ---------------------------------------------------------------------
  *  An AI-powered storytelling and combat-control assistant for Ironsworn
  *  and Ironsworn: Delve campaigns. Powered by Abacus AI ChatLLM.
  *
- *  ARCHITECTURE (v2.0.0)
+ *  ARCHITECTURE (v2.0.1)
  *  ---------------------
  *  API calls are made SERVER-SIDE by eternal-skald-server.mjs, which
  *  must be loaded via `node --import ...eternal-skald-server.mjs`.
@@ -28,7 +28,7 @@
  *      §13 HOOK REGISTRATIONS
  * ===================================================================== */
 
-console.log("=== The Eternal Skald v2.0.0 — module file loaded ===");
+console.log("=== The Eternal Skald v2.0.1 — module file loaded ===");
 
 import { IronswornData } from "./ironsworn-data.js";
 
@@ -43,8 +43,8 @@ const SKALD_NAME = "The Eternal Skald";
 const LOG_PREFIX = `${SKALD_NAME} |`;
 
 /** Default endpoint — Abacus AI OpenAI-compatible chat-completions API. */
-const DEFAULT_ENDPOINT  = "https://api.abacus.ai/v1/chat/completions";
-const DEFAULT_MODEL     = "gemini-3.0-flash";
+const DEFAULT_ENDPOINT  = "https://routellm.abacus.ai/v1/chat/completions";
+const DEFAULT_MODEL     = "gemini-3-flash-preview";
 
 /**
  * The ONE endpoint this client talks to. It's a relative URL so it

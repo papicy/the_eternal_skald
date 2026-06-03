@@ -65,7 +65,7 @@ node --import "./Data/modules/the-eternal-skald/scripts/eternal-skald-server.mjs
 When Foundry starts, you should see this in the console/logs:
 
 ```
-⚔️  Skald | v2.0.0 — server hook active. /skald-api/* routes ready.
+⚔️  Skald | v2.0.1 — server hook active. /skald-api/* routes ready.
 ```
 
 ### 3. Set your API key
@@ -87,7 +87,7 @@ http://your-foundry:30000/skald-api/health
 You should see:
 
 ```json
-{"status":"ok","service":"The Eternal Skald","version":"2.0.0"}
+{"status":"ok","service":"The Eternal Skald","version":"2.0.1"}
 ```
 
 If you get a 404 or Foundry's normal HTML page, the `--import` flag isn't taking effect. Double-check:
@@ -106,7 +106,7 @@ Browser (Foundry)                    Foundry Server (Node.js)
      │ ─────────────────────────────────────►│
      │   (same origin — no CORS)             │
      │                                       │  HTTPS request to
-     │                                       │  api.abacus.ai
+     │                                       │  routellm.abacus.ai
      │                                       │ ──────────────────►  Abacus AI
      │                                       │ ◄──────────────────
      │  JSON response                        │
@@ -153,8 +153,8 @@ All in **Configure Settings → The Eternal Skald** (world-scoped, GM-only):
 | Setting | Default | Description |
 |---|---|---|
 | Abacus AI API Key | *(empty)* | Required. Get from your Abacus AI account. |
-| AI Model | `gemini-3.0-flash` | Any model your Abacus AI deployment exposes. |
-| API Endpoint | `https://api.abacus.ai/v1/chat/completions` | Override only for custom AI backends. |
+| AI Model | `gemini-3-flash-preview` | Any model your Abacus AI deployment exposes. |
+| API Endpoint | `https://routellm.abacus.ai/v1/chat/completions` | Override only for custom AI backends. |
 | Skald Intensity | 6 | 1 (terse) to 10 (full saga-singer operatic). |
 | Auto-Narrate Combat | On | Short flavour line at each combatant's turn. |
 | AI Controls Enemies | Off | Full AI turn for non-player combatants. |
@@ -189,7 +189,7 @@ await skald.commands.lore('The Fallen Keep of Vorlund');
 **"The Eternal Skald server hook is not loaded (404)"**
 The `--import` flag isn't in your Foundry startup command, or the path is wrong. See [Setup step 2](#2-add---import-to-your-foundry-startup).
 
-**No `⚔️ Skald | v2.0.0` line in Foundry's console output**
+**No `⚔️ Skald | v2.0.1` line in Foundry's console output**
 The hook file isn't being loaded. Check the path is absolute and correct. Run it in a terminal to see Node.js errors.
 
 **"No Abacus AI API key is set"**
@@ -205,7 +205,7 @@ If you can't modify the startup command, this module won't work on hosted platfo
 
 ## Upgrading from v1.x
 
-v2.0.0 is a clean architectural rebuild:
+v2.0.1 is a clean architectural rebuild:
 
 1. **Delete the old proxy** — if you were running `skald-proxy.js` or had systemd/PM2 units for it, remove them.
 2. **Update your startup command** — the `--import` path changed from `proxy/skald-hook.mjs` to `scripts/eternal-skald-server.mjs`.
