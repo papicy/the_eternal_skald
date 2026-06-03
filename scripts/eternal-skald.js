@@ -1,10 +1,10 @@
 /* =====================================================================
- *  THE ETERNAL SKALD v0.2.2 — Foundry VTT v14 Module (Client)
+ *  THE ETERNAL SKALD v0.2.3 — Foundry VTT v14 Module (Client)
  *  ---------------------------------------------------------------------
  *  An AI-powered storytelling and combat-control assistant for Ironsworn
  *  and Ironsworn: Delve campaigns. Powered by Abacus AI ChatLLM.
  *
- *  ARCHITECTURE (v0.2.2)
+ *  ARCHITECTURE (v0.2.3)
  *  ---------------------
  *  API calls are made SERVER-SIDE by eternal-skald-server.mjs, which
  *  must be loaded via `node --import ...eternal-skald-server.mjs`.
@@ -28,7 +28,7 @@
  *      §13 HOOK REGISTRATIONS
  * ===================================================================== */
 
-console.log("=== The Eternal Skald v0.2.2 — module file loaded ===");
+console.log("=== The Eternal Skald v0.2.3 — module file loaded ===");
 
 import { IronswornData } from "./ironsworn-data.js";
 import { IronswornController } from "./ironsworn-controller.js";
@@ -144,7 +144,7 @@ const Settings = {
       range: { min: 4, max: 60, step: 2 }
     });
 
-    /* ---- Ironsworn system integration (v0.2.2) ---- */
+    /* ---- Ironsworn system integration (v0.2.3) ---- */
 
     game.settings.register(MODULE_ID, "ironswornIntegration", {
       name: game.i18n.localize("ETERNAL_SKALD.settings.ironswornIntegration.name"),
@@ -171,6 +171,16 @@ const Settings = {
       config: true,
       type: Boolean,
       default: true
+    });
+
+    game.settings.register(MODULE_ID, "narrationDelay", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.narrationDelay.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.narrationDelay.hint"),
+      scope: "world",
+      config: true,
+      type: Number,
+      range: { min: 0, max: 5000, step: 100 },
+      default: 2000
     });
 
     game.settings.register(MODULE_ID, "aiAppliesEffects", {
@@ -1138,10 +1148,15 @@ const Integration = {
     }
   },
 
-  /** How long to wait before narrating, accounting for 3D dice animation. */
+  /**
+   * How long to wait before narrating, allowing dice animations to finish.
+   * Reads the configurable "narrationDelay" world setting (ms), clamped to
+   * the 0–5000 range. Falls back to 2000ms if the setting isn't available.
+   */
   _narrationDelayMs() {
-    try { if (game.modules?.get("dice-so-nice")?.active) return 2800; } catch (_) {}
-    return 1500;
+    let ms = Settings.get("narrationDelay");
+    if (typeof ms !== "number" || Number.isNaN(ms)) ms = 2000;
+    return Math.max(0, Math.min(5000, ms));
   },
 
   /**
@@ -2225,7 +2240,7 @@ Hooks.once("ready", async () => {
     lore: LoreGenerator,
     resetMemory: (ch) => Memory.reset(ch),
     IronswornData,
-    // --- Ironsworn rules-engine integration (v0.2.2) ---
+    // --- Ironsworn rules-engine integration (v0.2.3) ---
     ironsworn: IronswornController,
     integration: Integration
   };

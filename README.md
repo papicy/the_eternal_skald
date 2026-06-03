@@ -4,9 +4,9 @@ An AI-powered storyteller, oracle interpreter, and tactical enemy controller for
 
 Powered by the **Abacus AI ChatLLM** platform (Gemini 3.0 Flash by default).
 
-> ⚠️ **Alpha / Development Version (v0.2.2)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
+> ⚠️ **Alpha / Development Version (v0.2.3)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
 
-As of **v0.2.2**, the Skald integrates directly with the official [**foundry-ironsworn**](https://foundryvtt.com/packages/foundry-ironsworn) system: it reads your character's stats and meters, *suggests* the right Ironsworn move, triggers the system's own dice mechanics on one click, narrates the official strong-hit / weak-hit / miss outcome, and can optionally apply mechanical effects. See [Ironsworn Integration](#ironsworn-integration) below. The module still works standalone in any system — Ironsworn features simply activate when the system is present.
+As of **v0.2.3**, the Skald integrates directly with the official [**foundry-ironsworn**](https://foundryvtt.com/packages/foundry-ironsworn) system: it reads your character's stats and meters, *suggests* the right Ironsworn move, triggers the system's own dice mechanics on one click, narrates the official strong-hit / weak-hit / miss outcome, and can optionally apply mechanical effects. See [Ironsworn Integration](#ironsworn-integration) below. The module still works standalone in any system — Ironsworn features simply activate when the system is present.
 
 ---
 
@@ -69,7 +69,7 @@ node --import "./Data/modules/the-eternal-skald/scripts/eternal-skald-server.mjs
 When Foundry starts, you should see this in the console/logs:
 
 ```
-⚔️  Skald | v0.2.2 — server hook active. /skald-api/* routes ready.
+⚔️  Skald | v0.2.3 — server hook active. /skald-api/* routes ready.
 ```
 
 ### 3. Set your API key
@@ -91,7 +91,7 @@ http://your-foundry:30000/skald-api/health
 You should see:
 
 ```json
-{"status":"ok","service":"The Eternal Skald","version":"0.2.2"}
+{"status":"ok","service":"The Eternal Skald","version":"0.2.3"}
 ```
 
 If you get a 404 or Foundry's normal HTML page, the `--import` flag isn't taking effect. Double-check:
@@ -186,6 +186,7 @@ With **AI Applies Mechanical Effects** enabled, the Skald may follow its narrati
 | Ironsworn Rules Integration | On | Master switch. Read state, trigger moves, narrate outcomes. No effect if the Ironsworn system isn't installed. |
 | Suggest Moves | On | Show the interactive move-suggestion card after narration. |
 | Auto-Narrate Move Outcomes | On | Automatically narrate any Ironsworn roll's result. |
+| Narration Delay (ms) | 2000 | How long to wait after a roll before auto-narrating, so dice animations can finish. ~2000ms with Dice So Nice, ~500ms without. Range 0–5000. |
 | AI Applies Mechanical Effects | Off | *Experimental.* Let the Skald apply momentum/harm/stress/supply/progress/oracle effects. |
 | Debug Logging | Off | Verbose integration diagnostics in the browser console (F12). |
 
@@ -230,6 +231,7 @@ All in **Configure Settings → The Eternal Skald** (world-scoped, GM-only):
 | Ironsworn Rules Integration | On | Integrate with the foundry-ironsworn rules engine (see [Ironsworn Integration](#ironsworn-integration)). |
 | Suggest Moves | On | Show the interactive move-suggestion card after narration. |
 | Auto-Narrate Move Outcomes | On | Automatically narrate any Ironsworn roll's result. |
+| Narration Delay (ms) | 2000 | How long to wait after a roll before auto-narrating, so dice animations can finish. ~2000ms with Dice So Nice, ~500ms without. Range 0–5000. |
 | AI Applies Mechanical Effects | Off | *Experimental.* Let the Skald apply momentum/harm/stress/supply/progress/oracle effects. |
 | Debug Logging | Off | Verbose Ironsworn integration diagnostics in the browser console. |
 
@@ -254,7 +256,7 @@ const { roll, result } = skald.rollOracle(skald.IronswornData.oracles.action);
 // Trigger commands programmatically
 await skald.commands.lore('The Fallen Keep of Vorlund');
 
-// --- Ironsworn integration (v0.2.2) ---
+// --- Ironsworn integration (v0.2.3) ---
 // Read the active character's state
 const char = skald.ironsworn.describeCharacter();   // { name, stats, meters, ... } or null
 const caps = skald.ironsworn.capabilities();         // feature-detection report
@@ -278,7 +280,7 @@ await skald.integration.showMoveSelector();
 **"The Eternal Skald server hook is not loaded (404)"**
 The `--import` flag isn't in your Foundry startup command, or the path is wrong. See [Setup step 2](#2-add---import-to-your-foundry-startup).
 
-**No `⚔️ Skald | v0.2.2` line in Foundry's console output**
+**No `⚔️ Skald | v0.2.3` line in Foundry's console output**
 The hook file isn't being loaded. Check the path is absolute and correct. Run it in a terminal to see Node.js errors.
 
 **"No Abacus AI API key is set"**
@@ -291,7 +293,7 @@ Use `!skald-help` (exclamation mark, not slash).
 If you can't modify the startup command, this module won't work on hosted platforms that don't support `--import`. Contact your hosting provider to ask about custom Node flags.
 
 **Auto-narration doesn't fire after an Ironsworn roll**
-Enable **Debug Logging** in Module Settings and check the browser console. As of **v0.2.2**, roll detection reads the `foundry-ironsworn` roll card HTML (the system no longer attaches module flags), logs every detection step, and waits for the dice animation to finish (~1.5–2.8s) before narrating. Make sure **Auto-Narrate Moves** is enabled and you're logged in as the GM. If you still see no `Detected Ironsworn roll` log line, copy the console output and open an issue.
+Enable **Debug Logging** in Module Settings and check the browser console. As of **v0.2.3**, roll detection reads the `foundry-ironsworn` roll card HTML (the system no longer attaches module flags), logs every detection step, and waits for the configurable **Narration Delay** (default 2000ms) before narrating so dice animations can finish. Make sure **Auto-Narrate Moves** is enabled and you're logged in as the GM. If you still see no `Detected Ironsworn roll` log line, copy the console output and open an issue.
 
 ---
 

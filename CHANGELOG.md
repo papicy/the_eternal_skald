@@ -12,6 +12,15 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.2.3] — 2026-06-03
+
+### Added
+- **Configurable "Narration Delay (ms)" setting.** The wait between a roll
+  resolving and the Skald narrating its outcome is now a world setting in the
+  module configuration UI (default `2000ms`, range `0–5000`), instead of a
+  hardcoded value. Recommended ~2000ms with Dice So Nice, ~500ms without, so
+  narration lines up with the dice animation. Includes localization strings.
+
 ## [0.2.2] — 2026-06-03
 
 ### Added
@@ -66,4 +75,5 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.2.3]: https://github.com/papicy/eternal_skald/releases/tag/v0.2.3
 [0.2.2]: https://github.com/papicy/eternal_skald/releases/tag/v0.2.2
