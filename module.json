@@ -1,8 +1,8 @@
 {
   "id": "the-eternal-skald",
   "title": "The Eternal Skald",
-  "description": "<p>An AI-powered storyteller, oracle interpreter, and tactical enemy controller for <strong>Ironsworn</strong> and <strong>Ironsworn: Delve</strong> campaigns in Foundry VTT v14. Powered by Abacus AI ChatLLM. Type <code>!skald-help</code> in chat for commands.</p><p>v2.2.1 — deep integration with the <strong>foundry-ironsworn</strong> rules engine: the Skald suggests moves, triggers the system's own roll mechanics, narrates the official roll outcomes, and (optionally) applies mechanical effects (momentum, harm, stress, supply, progress, oracles). Works standalone too — Ironsworn features activate automatically when the system is present.</p>",
-  "version": "2.2.1",
+  "description": "<p>An AI-powered storyteller, oracle interpreter, and tactical enemy controller for <strong>Ironsworn</strong> and <strong>Ironsworn: Delve</strong> campaigns in Foundry VTT v14. Powered by Abacus AI ChatLLM. Type <code>!skald-help</code> in chat for commands.</p><p>v0.2.2 — deep integration with the <strong>foundry-ironsworn</strong> rules engine: the Skald suggests moves, triggers the system's own roll mechanics, narrates the official roll outcomes, and (optionally) applies mechanical effects (momentum, harm, stress, supply, progress, oracles). Works standalone too — Ironsworn features activate automatically when the system is present.</p>",
+  "version": "0.2.2",
   "compatibility": {
     "minimum": "13",
     "verified": "14",
@@ -37,6 +37,6 @@
   },
   "url": "https://github.com/papicy/eternal_skald",
   "manifest": "https://raw.githubusercontent.com/papicy/eternal_skald/main/module.json",
-  "download": "https://github.com/papicy/eternal_skald/releases/download/v2.2.1/the-eternal-skald.zip",
+  "download": "https://github.com/papicy/eternal_skald/releases/download/v0.2.2/the-eternal-skald.zip",
   "readme": "https://github.com/papicy/eternal_skald/blob/main/README.md"
 }

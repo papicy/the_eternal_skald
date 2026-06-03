@@ -4,7 +4,9 @@ An AI-powered storyteller, oracle interpreter, and tactical enemy controller for
 
 Powered by the **Abacus AI ChatLLM** platform (Gemini 3.0 Flash by default).
 
-As of **v2.2.1**, the Skald integrates directly with the official [**foundry-ironsworn**](https://foundryvtt.com/packages/foundry-ironsworn) system: it reads your character's stats and meters, *suggests* the right Ironsworn move, triggers the system's own dice mechanics on one click, narrates the official strong-hit / weak-hit / miss outcome, and can optionally apply mechanical effects. See [Ironsworn Integration](#ironsworn-integration) below. The module still works standalone in any system — Ironsworn features simply activate when the system is present.
+> ⚠️ **Alpha / Development Version (v0.2.2)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
+
+As of **v0.2.2**, the Skald integrates directly with the official [**foundry-ironsworn**](https://foundryvtt.com/packages/foundry-ironsworn) system: it reads your character's stats and meters, *suggests* the right Ironsworn move, triggers the system's own dice mechanics on one click, narrates the official strong-hit / weak-hit / miss outcome, and can optionally apply mechanical effects. See [Ironsworn Integration](#ironsworn-integration) below. The module still works standalone in any system — Ironsworn features simply activate when the system is present.
 
 ---
 
@@ -67,7 +69,7 @@ node --import "./Data/modules/the-eternal-skald/scripts/eternal-skald-server.mjs
 When Foundry starts, you should see this in the console/logs:
 
 ```
-⚔️  Skald | v2.2.1 — server hook active. /skald-api/* routes ready.
+⚔️  Skald | v0.2.2 — server hook active. /skald-api/* routes ready.
 ```
 
 ### 3. Set your API key
@@ -89,7 +91,7 @@ http://your-foundry:30000/skald-api/health
 You should see:
 
 ```json
-{"status":"ok","service":"The Eternal Skald","version":"2.2.1"}
+{"status":"ok","service":"The Eternal Skald","version":"0.2.2"}
 ```
 
 If you get a 404 or Foundry's normal HTML page, the `--import` flag isn't taking effect. Double-check:
@@ -252,7 +254,7 @@ const { roll, result } = skald.rollOracle(skald.IronswornData.oracles.action);
 // Trigger commands programmatically
 await skald.commands.lore('The Fallen Keep of Vorlund');
 
-// --- Ironsworn integration (v2.2.1) ---
+// --- Ironsworn integration (v0.2.2) ---
 // Read the active character's state
 const char = skald.ironsworn.describeCharacter();   // { name, stats, meters, ... } or null
 const caps = skald.ironsworn.capabilities();         // feature-detection report
@@ -276,7 +278,7 @@ await skald.integration.showMoveSelector();
 **"The Eternal Skald server hook is not loaded (404)"**
 The `--import` flag isn't in your Foundry startup command, or the path is wrong. See [Setup step 2](#2-add---import-to-your-foundry-startup).
 
-**No `⚔️ Skald | v2.2.1` line in Foundry's console output**
+**No `⚔️ Skald | v0.2.2` line in Foundry's console output**
 The hook file isn't being loaded. Check the path is absolute and correct. Run it in a terminal to see Node.js errors.
 
 **"No Abacus AI API key is set"**
@@ -289,17 +291,32 @@ Use `!skald-help` (exclamation mark, not slash).
 If you can't modify the startup command, this module won't work on hosted platforms that don't support `--import`. Contact your hosting provider to ask about custom Node flags.
 
 **Auto-narration doesn't fire after an Ironsworn roll**
-Enable **Debug Logging** in Module Settings and check the browser console. As of **v2.2.1**, roll detection reads the `foundry-ironsworn` roll card HTML (the system no longer attaches module flags), logs every detection step, and waits for the dice animation to finish (~1.5–2.8s) before narrating. Make sure **Auto-Narrate Moves** is enabled and you're logged in as the GM. If you still see no `Detected Ironsworn roll` log line, copy the console output and open an issue.
+Enable **Debug Logging** in Module Settings and check the browser console. As of **v0.2.2**, roll detection reads the `foundry-ironsworn` roll card HTML (the system no longer attaches module flags), logs every detection step, and waits for the dice animation to finish (~1.5–2.8s) before narrating. Make sure **Auto-Narrate Moves** is enabled and you're logged in as the GM. If you still see no `Detected Ironsworn roll` log line, copy the console output and open an issue.
 
 ---
 
-## Upgrading from v1.x
+## Versioning & Release Strategy
 
-v2.0.1 is a clean architectural rebuild:
+The Eternal Skald follows [Semantic Versioning](https://semver.org/) with a deliberately conservative pre-1.0 policy:
 
-1. **Delete the old proxy** — if you were running `skald-proxy.js` or had systemd/PM2 units for it, remove them.
-2. **Update your startup command** — the `--import` path changed from `proxy/skald-hook.mjs` to `scripts/eternal-skald-server.mjs`.
-3. **Remove the Proxy URL setting** — it no longer exists. The module has only one networking path now.
+- **`0.x.y` — pre-release (alpha/beta).** The entire `0.x` series is experimental. APIs, settings, and behavior may change without notice, and stability is not guaranteed. The project is here today.
+- **Patch — `0.2.x`** → bug fixes, small tweaks, and polish. No new headline features.
+- **Minor — `0.x.0`** → major new features or significant changes (and possibly breaking changes while still in `0.x`).
+- **`1.0.0` — first official, production-ready release.** This will only be tagged once the module is feature-complete, well-tested across real campaigns, and stable enough to recommend for everyday play.
+
+In short: until you see `1.0.0`, treat every release as a development build.
+
+> **Note on earlier tags:** Some early builds were mistakenly published under `2.x` (e.g. `v2.0.0`, `v2.2.0`, `v2.2.1`). Those version numbers were never appropriate for a pre-release project and have been retired. The correct lineage is `0.1.x` → `0.2.0` → `0.2.2` (see [CHANGELOG.md](CHANGELOG.md)).
+
+---
+
+## Upgrading from older builds
+
+The current architecture loads a server-side hook via Node's `--import` flag:
+
+1. **Delete any old proxy** — if you were running `skald-proxy.js` or had systemd/PM2 units for it, remove them.
+2. **Update your startup command** — the `--import` path is `scripts/eternal-skald-server.mjs` (older builds used `proxy/skald-hook.mjs`).
+3. **Remove the old Proxy URL setting** — it no longer exists. The module has only one networking path now.
 
 ---
 

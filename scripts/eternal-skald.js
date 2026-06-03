@@ -1,10 +1,10 @@
 /* =====================================================================
- *  THE ETERNAL SKALD v2.2.1 — Foundry VTT v14 Module (Client)
+ *  THE ETERNAL SKALD v0.2.2 — Foundry VTT v14 Module (Client)
  *  ---------------------------------------------------------------------
  *  An AI-powered storytelling and combat-control assistant for Ironsworn
  *  and Ironsworn: Delve campaigns. Powered by Abacus AI ChatLLM.
  *
- *  ARCHITECTURE (v2.2.1)
+ *  ARCHITECTURE (v0.2.2)
  *  ---------------------
  *  API calls are made SERVER-SIDE by eternal-skald-server.mjs, which
  *  must be loaded via `node --import ...eternal-skald-server.mjs`.
@@ -28,7 +28,7 @@
  *      §13 HOOK REGISTRATIONS
  * ===================================================================== */
 
-console.log("=== The Eternal Skald v2.2.1 — module file loaded ===");
+console.log("=== The Eternal Skald v0.2.2 — module file loaded ===");
 
 import { IronswornData } from "./ironsworn-data.js";
 import { IronswornController } from "./ironsworn-controller.js";
@@ -144,7 +144,7 @@ const Settings = {
       range: { min: 4, max: 60, step: 2 }
     });
 
-    /* ---- Ironsworn system integration (v2.2.1) ---- */
+    /* ---- Ironsworn system integration (v0.2.2) ---- */
 
     game.settings.register(MODULE_ID, "ironswornIntegration", {
       name: game.i18n.localize("ETERNAL_SKALD.settings.ironswornIntegration.name"),
@@ -2225,7 +2225,7 @@ Hooks.once("ready", async () => {
     lore: LoreGenerator,
     resetMemory: (ch) => Memory.reset(ch),
     IronswornData,
-    // --- Ironsworn rules-engine integration (v2.2.1) ---
+    // --- Ironsworn rules-engine integration (v0.2.2) ---
     ironsworn: IronswornController,
     integration: Integration
   };
