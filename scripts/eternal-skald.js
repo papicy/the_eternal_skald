@@ -1,10 +1,10 @@
 /* =====================================================================
- *  THE ETERNAL SKALD v2.0.1 — Foundry VTT v14 Module (Client)
+ *  THE ETERNAL SKALD v2.2.0 — Foundry VTT v14 Module (Client)
  *  ---------------------------------------------------------------------
  *  An AI-powered storytelling and combat-control assistant for Ironsworn
  *  and Ironsworn: Delve campaigns. Powered by Abacus AI ChatLLM.
  *
- *  ARCHITECTURE (v2.0.1)
+ *  ARCHITECTURE (v2.2.0)
  *  ---------------------
  *  API calls are made SERVER-SIDE by eternal-skald-server.mjs, which
  *  must be loaded via `node --import ...eternal-skald-server.mjs`.
@@ -28,11 +28,13 @@
  *      §13 HOOK REGISTRATIONS
  * ===================================================================== */
 
-console.log("=== The Eternal Skald v2.0.1 — module file loaded ===");
+console.log("=== The Eternal Skald v2.2.0 — module file loaded ===");
 
 import { IronswornData } from "./ironsworn-data.js";
+import { IronswornController } from "./ironsworn-controller.js";
 
 console.log("The Eternal Skald | ironsworn-data.js imported successfully");
+console.log("The Eternal Skald | ironsworn-controller.js imported successfully");
 
 /* ===================================================================== */
 /*  §1  CONSTANTS                                                         */
@@ -141,6 +143,54 @@ const Settings = {
       default: 20,
       range: { min: 4, max: 60, step: 2 }
     });
+
+    /* ---- Ironsworn system integration (v2.2.0) ---- */
+
+    game.settings.register(MODULE_ID, "ironswornIntegration", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.ironswornIntegration.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.ironswornIntegration.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true
+    });
+
+    game.settings.register(MODULE_ID, "suggestMoves", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.suggestMoves.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.suggestMoves.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true
+    });
+
+    game.settings.register(MODULE_ID, "autoNarrateMoves", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.autoNarrateMoves.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.autoNarrateMoves.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true
+    });
+
+    game.settings.register(MODULE_ID, "aiAppliesEffects", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.aiAppliesEffects.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.aiAppliesEffects.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: false
+    });
+
+    game.settings.register(MODULE_ID, "debugLogging", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.debugLogging.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.debugLogging.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: false,
+      onChange: (v) => { try { IronswornController.setDebug(!!v); } catch (_) {} }
+    });
   },
 
   /** Convenience accessor — returns undefined if the setting isn't ready. */
@@ -220,7 +270,86 @@ GUIDELINES:
 
   const taskAddendum = extras.task ? `\n\nTASK FOR THIS RESPONSE:\n${extras.task}` : "";
 
-  return [persona, rulesDigest, guidance].join("\n\n") + taskAddendum;
+  // Ironsworn system-integration guidance + live game state. Only added
+  // when the foundry-ironsworn system is active and integration is on.
+  const ironswornBlock = buildIronswornPromptBlock({
+    allowMoves: !!extras.allowMoves,
+    allowEffects: !!extras.allowEffects,
+    context: extras.context
+  });
+
+  return [persona, rulesDigest, guidance, ironswornBlock]
+    .filter(Boolean)
+    .join("\n\n") + taskAddendum;
+}
+
+/**
+ * Build the Ironsworn-integration portion of the system prompt. This
+ * teaches the model that it can drive the real foundry-ironsworn rules
+ * engine, lists the moves it may call for, defines the structured
+ * directive syntax the client parses, and (optionally) injects the live
+ * character/battlefield state.
+ *
+ * Returns "" when integration is unavailable so the prompt stays clean.
+ */
+function buildIronswornPromptBlock({ allowMoves = false, allowEffects = false, context = "" } = {}) {
+  if (!Integration.active()) return "";
+
+  const moveList = IronswornController.moves
+    .filter(m => m.cat !== "Fate")
+    .map(m => {
+      const stats = m.stats.filter(s => s !== "progress" && s !== "supply");
+      return `  • ${m.name}${stats.length ? ` (+${stats.join("/")})` : ""}`;
+    })
+    .join("\n");
+
+  const parts = [];
+
+  parts.push(`\
+IRONSWORN SYSTEM INTEGRATION (you are wired to the real rules engine):
+You are running atop the official "foundry-ironsworn" system. You do NOT
+roll dice yourself — the system rolls them. Your role is to decide WHICH
+move fits the fiction, suggest it, and then narrate and apply the
+consequences of whatever the dice say.`);
+
+  if (allowMoves) {
+    parts.push(`\
+WHEN A MOVE IS WARRANTED:
+End your reply with EXACTLY ONE suggestion directive on its own line:
+  [[MOVE: <Move Name> | <Stat> | <one short reason>]]
+Use a Stat from {Edge, Heart, Iron, Shadow, Wits} — or "—" for moves that
+take no stat (e.g. progress moves). Suggest a move only when the fiction
+demands a roll; for pure conversation or rules questions, omit it.
+Moves you may suggest:
+${moveList}`);
+  }
+
+  if (allowEffects) {
+    parts.push(`\
+AFTER A ROLL RESOLVES (you will be told the outcome — strong hit / weak
+hit / miss / match):
+1. Narrate the outcome in your Skald voice (2–4 sentences).
+2. Then, if mechanical consequences follow from the fiction, append any
+   of these effect directives, each on its own line:
+   [[EFFECT: momentum <+N|-N|reset>]]
+   [[EFFECT: harm <N>]]              (damage to the active character)
+   [[EFFECT: stress <N>]]
+   [[EFFECT: supply <+N|-N>]]
+   [[EFFECT: progress <Track Name> <+N ticks | rank>]]
+   [[EFFECT: oracle <Oracle Name>]] (ask the system to roll an oracle)
+Outcome semantics: STRONG HIT = you get what you want, often +momentum.
+WEAK HIT = you succeed at a cost (lose supply/momentum, partial info).
+MISS = you fail and "pay the price" (harm, stress, lost ground, a twist).
+MATCH (both challenge dice equal) = introduce a dramatic complication.
+Only emit effects that the rules/fiction actually call for. Never invent
+dice results — you only react to the outcome you are given.`);
+  }
+
+  if (context && typeof context === "string" && context.trim()) {
+    parts.push(`LIVE GAME STATE (authoritative — read from the sheet):\n${context.trim()}`);
+  }
+
+  return parts.join("\n\n");
 }
 
 /* ===================================================================== */
@@ -400,7 +529,7 @@ const Chat = {
     const data = {
       content: html,
       speaker: ChatMessage.getSpeaker({ alias }),
-      flags: { [MODULE_ID]: { variant, alias } }
+      flags: { [MODULE_ID]: { variant, alias, ...(opts.flags ?? {}) } }
     };
     if (opts.gmWhisper) {
       data.whisper = game.users.filter(u => u.isGM).map(u => u.id);
@@ -563,7 +692,9 @@ const Commands = {
       return Chat.postSystem(game.i18n.localize("ETERNAL_SKALD.errors.emptySkald"));
     }
     return runConversation("general", args, {
-      task: "Respond to the user as the Skald. If they ask a rules question, answer clearly; if they invite narration, narrate."
+      task: "Respond to the user as the Skald. If they ask a rules question, answer clearly; if they invite narration, narrate. If the fiction calls for a dice roll, suggest the appropriate Ironsworn move and stat using the [[MOVE:…]] directive.",
+      allowMoves: true,
+      includeContext: true
     });
   },
 
@@ -609,17 +740,28 @@ const Commands = {
  * Generic conversation runner used by !skald, !scene, !combat. Manages
  * memory, builds the system prompt, calls the API, and posts the reply.
  */
-async function runConversation(channel, userText, { task, label, variant = "default" } = {}) {
+async function runConversation(channel, userText, { task, label, variant = "default", allowMoves = false, includeContext = false } = {}) {
   try {
     Memory.push(channel, "user", userText);
+    // Inject the live Ironsworn game state when requested and available.
+    const context = includeContext ? Integration.gatherContext() : "";
     const messages = [
-      { role: "system", content: buildSystemPrompt({ task }) },
+      { role: "system", content: buildSystemPrompt({ task, allowMoves, context }) },
       ...Memory.get(channel)
     ];
     await Chat.postSystem(`<em>${SKALD_NAME} listens to the wind…</em>`, { gmWhisper: true });
     const reply = await Client.chat(messages);
     Memory.push(channel, "assistant", reply);
-    await Chat.postSkald(formatMarkdown(reply), { variant, title: label });
+
+    // When moves are allowed, route through the integration so any
+    // [[MOVE:…]] directive becomes an interactive suggestion card.
+    if (allowMoves && Integration.active()) {
+      await Integration.postReplyWithSuggestion(reply, { variant, title: label });
+    } else {
+      // Strip any stray directive so it never leaks into the chat card.
+      const { clean } = Integration.parseMoveSuggestion(reply);
+      await Chat.postSkald(formatMarkdown(clean || reply), { variant, title: label });
+    }
     return reply;
   } catch (err) {
     console.error(LOG_PREFIX, err);
@@ -631,6 +773,469 @@ async function runConversation(channel, userText, { task, label, variant = "defa
     return null;
   }
 }
+
+/* ===================================================================== */
+/*  §7.5  IRONSWORN INTEGRATION ORCHESTRATOR                             */
+/* ===================================================================== */
+
+/**
+ * The Integration object is the glue between the Skald's AI brain and the
+ * foundry-ironsworn rules engine (via IronswornController). It:
+ *   • gathers live character/battlefield context for prompts,
+ *   • parses the AI's structured directives ([[MOVE:…]] / [[EFFECT:…]]),
+ *   • renders interactive move-suggestion cards with Roll / Choose buttons,
+ *   • shows a move-selector dialog for overrides,
+ *   • listens for Ironsworn roll results and feeds them back to the AI for
+ *     narration + (optional) mechanical consequences.
+ *
+ * Everything degrades gracefully when the Ironsworn system is absent.
+ */
+const Integration = {
+  /** ChatMessage ids whose roll we've already narrated (anti-double-fire). */
+  _processedRolls: new Set(),
+  /** A short note of what the player was trying to do, for narration context. */
+  _lastIntent: "",
+
+  /** True iff the Ironsworn system is active AND integration is enabled. */
+  active() {
+    try {
+      if (!IronswornController.isActive()) return false;
+      return Settings.get("ironswornIntegration") ?? true;
+    } catch (_) { return false; }
+  },
+
+  /**
+   * Build the live game-state context string injected into prompts:
+   * active character sheet + combat snapshot or scene summary.
+   */
+  gatherContext() {
+    if (!this.active()) return "";
+    const blocks = [];
+    try {
+      const charDesc = IronswornController.describeCharacter();
+      if (charDesc) blocks.push(charDesc);
+    } catch (e) { console.warn(LOG_PREFIX, "gatherContext: character read failed", e); }
+
+    try {
+      if (game?.combat?.started) {
+        blocks.push("Battlefield:\n" + CombatController.summariseCurrent());
+      } else {
+        const scene = SceneContext.summarise();
+        if (scene && scene !== "(no active scene)") blocks.push("Scene:\n" + scene);
+      }
+    } catch (e) { console.warn(LOG_PREFIX, "gatherContext: scene/combat read failed", e); }
+
+    return blocks.join("\n\n");
+  },
+
+  /* ---------------- Directive parsing ---------------- */
+
+  /**
+   * Extract a single [[MOVE: Name | Stat | reason]] directive.
+   * @returns {{ suggestion: {name,stat,reason}|null, clean: string }}
+   */
+  parseMoveSuggestion(text) {
+    if (typeof text !== "string") return { suggestion: null, clean: "" };
+    const re = /\[\[\s*MOVE\s*:\s*([^|\]]+?)\s*\|\s*([^|\]]+?)\s*(?:\|\s*([^\]]*?))?\s*\]\]/i;
+    const m = text.match(re);
+    if (!m) return { suggestion: null, clean: text };
+    const name = m[1].trim();
+    let stat = (m[2] || "").trim().toLowerCase();
+    if (stat === "—" || stat === "-" || stat === "none" || stat === "n/a") stat = "";
+    const reason = (m[3] || "").trim();
+    const clean = text.replace(m[0], "").trim();
+    return { suggestion: { name, stat, reason }, clean };
+  },
+
+  /**
+   * Extract all [[EFFECT: …]] directives.
+   * @returns {{ effects: Array<object>, clean: string }}
+   */
+  parseEffects(text) {
+    if (typeof text !== "string") return { effects: [], clean: "" };
+    const effects = [];
+    const re = /\[\[\s*EFFECT\s*:\s*([^\]]+?)\s*\]\]/gi;
+    let clean = text;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const body = m[1].trim();
+      const parsed = this._parseOneEffect(body);
+      if (parsed) effects.push(parsed);
+    }
+    clean = text.replace(re, "").trim();
+    return { effects, clean };
+  },
+
+  _parseOneEffect(body) {
+    // body examples: "momentum +2", "momentum reset", "harm 1", "stress 2",
+    // "supply -1", "progress Vengeance on the Iron King +8", "oracle Pay the Price"
+    const lc = body.toLowerCase();
+    const firstWord = lc.split(/\s+/)[0];
+
+    if (firstWord === "momentum") {
+      const rest = body.slice(8).trim();
+      if (/reset/i.test(rest)) return { kind: "momentum", op: "reset" };
+      const n = parseInt(rest, 10);
+      if (Number.isFinite(n)) return { kind: "momentum", op: "delta", value: n };
+      return null;
+    }
+    if (firstWord === "harm")   { const n = parseInt(body.slice(4), 10); return Number.isFinite(n) ? { kind: "harm",   value: Math.abs(n) } : null; }
+    if (firstWord === "stress") { const n = parseInt(body.slice(6), 10); return Number.isFinite(n) ? { kind: "stress", value: Math.abs(n) } : null; }
+    if (firstWord === "supply") { const n = parseInt(body.slice(6), 10); return Number.isFinite(n) ? { kind: "supply", value: n } : null; }
+    if (firstWord === "progress") {
+      // "progress <Track Name> <+N | rank>"
+      const rest = body.slice(8).trim();
+      const tickMatch = rest.match(/([+-]?\d+)\s*(?:ticks?)?\s*$/i);
+      const rankMatch = /\brank\b\s*$/i.test(rest);
+      let name = rest, value = 4, byRank = false;
+      if (rankMatch) { byRank = true; name = rest.replace(/\brank\b\s*$/i, "").trim(); }
+      else if (tickMatch) { value = parseInt(tickMatch[1], 10); name = rest.slice(0, tickMatch.index).trim(); }
+      name = name.replace(/^on\s+/i, "").replace(/[:\-—]+$/, "").trim();
+      if (!name) return null;
+      return { kind: "progress", track: name, value, byRank };
+    }
+    if (firstWord === "oracle") {
+      const name = body.slice(6).trim();
+      return name ? { kind: "oracle", name } : null;
+    }
+    return null;
+  },
+
+  /* ---------------- AI reply posting (with suggestion card) ---------------- */
+
+  /**
+   * Post the Skald's reply, stripping any [[MOVE:…]] directive into a
+   * separate interactive suggestion card (when move-suggestion is on and
+   * the system is active).
+   */
+  async postReplyWithSuggestion(reply, { variant = "default", title } = {}) {
+    const { suggestion, clean } = this.parseMoveSuggestion(reply);
+    await Chat.postSkald(formatMarkdown(clean || reply), { variant, title });
+
+    if (suggestion && this.active() && (Settings.get("suggestMoves") ?? true)) {
+      this._lastIntent = suggestion.reason || this._lastIntent;
+      await this.postSuggestionCard(suggestion);
+    }
+    return { suggestion, clean };
+  },
+
+  /** Post the interactive "Roll this move / Choose different" card. */
+  async postSuggestionCard(suggestion) {
+    const move = IronswornController._resolveMove(suggestion.name);
+    const label = move?.name ?? suggestion.name;
+    const stat = suggestion.stat || (move?.stats?.find(s => s !== "progress" && s !== "supply")) || "";
+    const statLabel = stat ? ` <span class="es-move-stat">+${escapeHtml(stat)}</span>` : "";
+    const reason = suggestion.reason ? `<p class="es-move-reason"><em>${escapeHtml(suggestion.reason)}</em></p>` : "";
+
+    const body = `
+      <div class="es-move-suggest">
+        <p>The Skald counsels a move:</p>
+        <p class="es-move-name"><strong>${escapeHtml(label)}</strong>${statLabel}</p>
+        ${reason}
+        <div class="es-move-buttons">
+          <button type="button" class="es-btn es-btn-roll"
+                  data-skald-action="roll-move"
+                  data-move="${escapeHtml(label)}"
+                  data-stat="${escapeHtml(stat)}">⚔ Roll ${escapeHtml(label)}</button>
+          <button type="button" class="es-btn es-btn-choose"
+                  data-skald-action="choose-move"
+                  data-stat="${escapeHtml(stat)}">🎲 Choose Different Move</button>
+        </div>
+      </div>`;
+
+    return Chat.postSkald(body, {
+      variant: "suggest",
+      title: "A Move Beckons",
+      flags: { suggestion: { name: label, stat } }
+    });
+  },
+
+  /**
+   * Wire up the buttons on a rendered suggestion card. Called from the
+   * renderChatMessageHTML hook for messages carrying our suggestion flag.
+   */
+  wireSuggestionCard(message, html) {
+    const root = (html instanceof HTMLElement) ? html : html?.[0];
+    if (!root) return;
+    const buttons = root.querySelectorAll?.("[data-skald-action]") ?? [];
+    for (const btn of buttons) {
+      if (btn.dataset.skaldWired === "1") continue;
+      btn.dataset.skaldWired = "1";
+      btn.addEventListener("click", async (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const action = btn.dataset.skaldAction;
+        const move = btn.dataset.move;
+        const stat = btn.dataset.stat;
+        try {
+          if (action === "roll-move") {
+            await this.doTriggerMove(move, stat);
+          } else if (action === "choose-move") {
+            await this.showMoveSelector(stat);
+          }
+        } catch (e) {
+          console.error(LOG_PREFIX, "suggestion button failed", e);
+          ui.notifications?.error(`${SKALD_NAME}: ${e?.message ?? e}`);
+        }
+      });
+    }
+  },
+
+  /* ---------------- Move triggering & selector ---------------- */
+
+  /** Trigger a move through the Ironsworn controller (or manual fallback). */
+  async doTriggerMove(moveName, stat) {
+    if (!this.active()) {
+      ui.notifications?.warn(`${SKALD_NAME}: Ironsworn system not active — cannot roll moves.`);
+      return null;
+    }
+    this._lastIntent = `${moveName}${stat ? ` +${stat}` : ""}` + (this._lastIntent ? ` — ${this._lastIntent}` : "");
+    const actor = IronswornController.getActiveCharacter();
+    const res = await IronswornController.triggerMove(moveName, { actor, stat });
+    if (!res?.ok) {
+      await Chat.postSystem(
+        `<strong>The dice would not answer:</strong> ${escapeHtml(res?.error ?? "unknown error")}`,
+        { gmWhisper: true }
+      );
+    }
+    // The resulting Ironsworn roll card (or manual card) is picked up by
+    // onIronswornRoll(), which narrates the outcome.
+    return res;
+  },
+
+  /** Show a dialog letting the user pick any catalogued move + stat. */
+  async showMoveSelector(prefillStat = "") {
+    const grouped = {};
+    for (const m of IronswornController.moves) {
+      (grouped[m.cat] ??= []).push(m);
+    }
+    const optgroups = Object.entries(grouped).map(([cat, moves]) => {
+      const opts = moves.map(m => `<option value="${escapeHtml(m.name)}" data-stats="${escapeHtml(m.stats.join(','))}">${escapeHtml(m.name)}</option>`).join("");
+      return `<optgroup label="${escapeHtml(cat)}">${opts}</optgroup>`;
+    }).join("");
+
+    const statOpts = ["", "edge", "heart", "iron", "shadow", "wits"].map(s =>
+      `<option value="${s}"${s === prefillStat ? " selected" : ""}>${s ? s[0].toUpperCase() + s.slice(1) : "— (no stat)"}</option>`
+    ).join("");
+
+    const content = `
+      <form class="es-move-selector">
+        <div class="form-group">
+          <label>Move</label>
+          <select name="move">${optgroups}</select>
+        </div>
+        <div class="form-group">
+          <label>Stat</label>
+          <select name="stat">${statOpts}</select>
+        </div>
+      </form>`;
+
+    const doRoll = async (htmlEl) => {
+      const root = (htmlEl instanceof HTMLElement) ? htmlEl : htmlEl?.[0] ?? document;
+      const move = root.querySelector?.('select[name="move"]')?.value;
+      const stat = root.querySelector?.('select[name="stat"]')?.value ?? "";
+      if (move) await this.doTriggerMove(move, stat);
+    };
+
+    // Prefer DialogV2 (v13+) but fall back to the classic Dialog.
+    try {
+      const DV2 = foundry?.applications?.api?.DialogV2;
+      if (DV2) {
+        await DV2.prompt({
+          window: { title: "Choose a Move" },
+          content,
+          ok: { label: "Roll Move", callback: (_ev, button) => doRoll(button.form) },
+          rejectClose: false
+        });
+        return;
+      }
+    } catch (e) { console.warn(LOG_PREFIX, "DialogV2 failed, trying classic Dialog", e); }
+
+    try {
+      // eslint-disable-next-line no-undef
+      new Dialog({
+        title: "Choose a Move",
+        content,
+        buttons: {
+          roll:   { icon: '<i class="fas fa-dice-d20"></i>', label: "Roll Move", callback: (html) => doRoll(html) },
+          cancel: { icon: '<i class="fas fa-times"></i>', label: "Cancel" }
+        },
+        default: "roll"
+      }).render(true);
+    } catch (e) {
+      console.error(LOG_PREFIX, "No dialog API available", e);
+      ui.notifications?.error(`${SKALD_NAME}: cannot open move selector.`);
+    }
+  },
+
+  /* ---------------- Roll-result listener ---------------- */
+
+  /**
+   * Inspect a freshly-created ChatMessage. If it is an Ironsworn move
+   * roll (or our own manual move roll), parse the outcome and feed it to
+   * the AI for narration + optional mechanical consequences.
+   */
+  async onIronswornRoll(message) {
+    try {
+      if (!this.active()) return;
+      if (!(Settings.get("autoNarrateMoves") ?? true)) return;
+      if (!game.user?.isGM) return;             // only one client narrates
+      if (!message?.id || this._processedRolls.has(message.id)) return;
+
+      const ourFlags = message?.flags?.[MODULE_ID];
+      // Skip our own non-roll cards (narration, suggestions, etc.).
+      if (ourFlags && !ourFlags.manualMove) return;
+
+      const isIronswornCard = !!message?.flags?.["foundry-ironsworn"];
+      const isManualCard     = !!ourFlags?.manualMove;
+      if (!isIronswornCard && !isManualCard) return;
+
+      const parsed = this._parseRollOutcome(message);
+      if (!parsed) return;
+
+      this._processedRolls.add(message.id);
+      await this._narrateOutcome(message, parsed);
+    } catch (e) {
+      console.warn(LOG_PREFIX, "onIronswornRoll failed", e);
+    }
+  },
+
+  /** Derive { moveName, outcome, score, challenge, match } from a message. */
+  _parseRollOutcome(message) {
+    const ourFlags = message?.flags?.[MODULE_ID];
+    const isFlags  = message?.flags?.["foundry-ironsworn"] ?? {};
+
+    // Manual move card: outcome already computed by the controller.
+    if (ourFlags?.manualMove) {
+      return {
+        moveName:  ourFlags.moveName ?? "Move",
+        outcome:   ourFlags.outcome ?? "",
+        score:     ourFlags.score ?? null,
+        challenge: ourFlags.challenge ?? [],
+        match:     !!ourFlags.match
+      };
+    }
+
+    const rolls = message.rolls ?? [];
+    if (!rolls.length) return null;
+
+    const allDice = rolls.flatMap(r => r.dice ?? []);
+    const d10s = allDice.filter(d => d.faces === 10).flatMap(d => (d.results ?? []).map(r => r.result));
+    const d6   = allDice.find(d => d.faces === 6);
+    if (!d6 || d10s.length < 2) {
+      // Not a standard action roll we understand — let it pass silently.
+      return null;
+    }
+
+    const score = Math.min(rolls[0]?.total ?? d6.results?.[0]?.result ?? 0, 10);
+    const challenge = d10s.slice(0, 2);
+    const beats = challenge.filter(c => score > c).length;
+    const outcome = beats === 2 ? "Strong Hit" : beats === 1 ? "Weak Hit" : "Miss";
+    const match = challenge[0] === challenge[1];
+
+    // Try to recover a move name from the Ironsworn flags.
+    const moveName =
+      isFlags?.moveName ??
+      isFlags?.move?.name ??
+      isFlags?.dsid ?? isFlags?.moveId ?? isFlags?.moveDfId ??
+      "their move";
+
+    return { moveName: this._prettyMoveName(moveName), outcome, score, challenge, match };
+  },
+
+  _prettyMoveName(raw) {
+    if (typeof raw !== "string") return "their move";
+    // Turn "move:classic/adventure/face_danger" → "Face Danger".
+    const tail = raw.split("/").pop() ?? raw;
+    if (/^[a-z_]+$/.test(tail)) {
+      return tail.split("_").map(w => w[0].toUpperCase() + w.slice(1)).join(" ");
+    }
+    return raw;
+  },
+
+  /** Ask the AI to narrate an outcome and (optionally) apply effects. */
+  async _narrateOutcome(message, parsed) {
+    const actor = message.speakerActor ?? IronswornController.getActiveCharacter();
+    const allowEffects = Settings.get("aiAppliesEffects") ?? false;
+
+    const ctx = this.gatherContext();
+    const intent = this._lastIntent ? `\nThe player's intent: ${this._lastIntent}` : "";
+    const task = `A move has just been resolved by the dice.
+Move: ${parsed.moveName}
+Outcome: ${parsed.outcome}${parsed.match ? " (MATCH — add a twist)" : ""}
+Action score: ${parsed.score ?? "?"} vs challenge dice ${(parsed.challenge ?? []).join(" / ") || "?"}.${intent}
+Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " Then append any warranted [[EFFECT:…]] directives." : " Do not emit effect directives; simply narrate."}`;
+
+    try {
+      Memory.push("general", "user", `(${parsed.moveName} → ${parsed.outcome})`);
+      const messages = [
+        { role: "system", content: buildSystemPrompt({ task, context: ctx, allowEffects }) },
+        ...Memory.get("general")
+      ];
+      const reply = await Client.chat(messages, { temperature: 0.85, maxTokens: 500 });
+      Memory.push("general", "assistant", reply);
+
+      const { effects, clean } = this.parseEffects(reply);
+      await Chat.postSkald(formatMarkdown(clean || reply), {
+        variant: "combat",
+        title: `${parsed.moveName} — ${parsed.outcome}`
+      });
+
+      if (allowEffects && effects.length) {
+        await this.applyEffects(effects, actor);
+      }
+    } catch (e) {
+      console.warn(LOG_PREFIX, "_narrateOutcome failed", e);
+    }
+  },
+
+  /** Apply parsed [[EFFECT:…]] directives via the Ironsworn controller. */
+  async applyEffects(effects, actor) {
+    const applied = [];
+    for (const eff of effects) {
+      try {
+        let r = null;
+        switch (eff.kind) {
+          case "momentum":
+            if (eff.op === "reset") r = await IronswornController.resetMomentum(actor);
+            else r = await IronswornController.adjustMomentum(actor, eff.value);
+            if (r?.ok) applied.push(`momentum ${eff.op === "reset" ? "reset" : (eff.value >= 0 ? "+" : "") + eff.value}`);
+            break;
+          case "harm":
+            r = await IronswornController.applyHarm(actor, eff.value);
+            if (r?.ok) applied.push(`-${eff.value} health`);
+            break;
+          case "stress":
+            r = await IronswornController.applyStress(actor, eff.value);
+            if (r?.ok) applied.push(`-${eff.value} spirit`);
+            break;
+          case "supply":
+            r = await IronswornController.adjustSupply(actor, eff.value);
+            if (r?.ok) applied.push(`supply ${eff.value >= 0 ? "+" : ""}${eff.value}`);
+            break;
+          case "progress":
+            r = eff.byRank
+              ? await IronswornController.markProgressByRank(actor, eff.track)
+              : await IronswornController.markProgress(actor, eff.track, eff.value);
+            if (r?.ok) applied.push(`progress on ${r.track}`);
+            break;
+          case "oracle":
+            r = await IronswornController.rollOracle(eff.name);
+            if (r) applied.push(`oracle “${eff.name}” → ${r}`);
+            break;
+        }
+        if (r && r.ok === false && r.error) {
+          console.warn(LOG_PREFIX, `effect ${eff.kind} skipped:`, r.error);
+        }
+      } catch (e) {
+        console.warn(LOG_PREFIX, "applyEffect failed", eff, e);
+      }
+    }
+    if (applied.length) {
+      await Chat.postSystem(`<em>The Skald enacts: ${escapeHtml(applied.join("; "))}.</em>`, { gmWhisper: true });
+    }
+  }
+};
 
 /* ===================================================================== */
 /*  §8  NPC DIALOGUE SYSTEM                                               */
@@ -1442,6 +2047,9 @@ console.log("The Eternal Skald | Registering Hooks.once('ready') …");
 Hooks.once("ready", async () => {
   console.log(LOG_PREFIX, "ready hook fired — module fully loaded.");
 
+  // Sync debug logging flag into the Ironsworn controller.
+  try { IronswornController.setDebug(Settings.get("debugLogging")); } catch (_) {}
+
   // Expose a small public API for macros and other modules.
   game.modules.get(MODULE_ID).api = {
     chat: Client.chat.bind(Client),
@@ -1451,8 +2059,21 @@ Hooks.once("ready", async () => {
     combat: CombatController,
     lore: LoreGenerator,
     resetMemory: (ch) => Memory.reset(ch),
-    IronswornData
+    IronswornData,
+    // --- Ironsworn rules-engine integration (v2.2.0) ---
+    ironsworn: IronswornController,
+    integration: Integration
   };
+
+  // Log Ironsworn integration status for diagnostics.
+  try {
+    if (Integration.active()) {
+      const caps = IronswornController.capabilities();
+      console.log(LOG_PREFIX, "Ironsworn integration ACTIVE —", JSON.stringify(caps));
+    } else {
+      console.log(LOG_PREFIX, "Ironsworn integration inactive (system not detected or disabled).");
+    }
+  } catch (_) {}
 
   // Welcome card — once per session, GM only.
   if (game.user.isGM) {
@@ -1496,6 +2117,18 @@ Hooks.on("createChatMessage", (message) => {
       console.log(`${LOG_PREFIX} [createChatMessage] message is ours — ignoring`);
       return;
     }
+
+    // --- Ironsworn roll detection -------------------------------------
+    // If this message is a roll produced by the foundry-ironsworn system
+    // (e.g. the user triggered a move themselves, or via our suggestion
+    // card), let the Integration layer narrate the outcome. This runs
+    // independently of the `!command` dispatch below and never blocks it.
+    try {
+      Integration.onIronswornRoll(message);
+    } catch (e) {
+      console.warn(`${LOG_PREFIX} [createChatMessage] onIronswornRoll dispatch failed:`, e);
+    }
+
     const rawText = message?.content ?? "";
     console.log(`${LOG_PREFIX} [createChatMessage] raw content:`, JSON.stringify(rawText));
 
@@ -1535,10 +2168,17 @@ Hooks.on("renderChatMessageHTML", (message, html /*, data */) => {
   if (message?.flags?.[MODULE_ID]) {
     html.classList?.add("eternal-skald-msg");
   }
+  // Wire interactive move-suggestion buttons (no-op if no suggestion flag).
+  try { Integration.wireSuggestionCard(message, html); } catch (_) { /* defensive */ }
 });
 // Legacy hook name for v12/v13 compatibility (no-op if unused).
 Hooks.on("renderChatMessage", (message, html /*, data */) => {
   if (message?.flags?.[MODULE_ID]) {
     try { html.addClass("eternal-skald-msg"); } catch (_) { /* jq optional */ }
   }
+  // Wire suggestion buttons on legacy Foundry (html is jQuery here).
+  try {
+    const el = html?.[0] ?? html;
+    Integration.wireSuggestionCard(message, el);
+  } catch (_) { /* defensive */ }
 });

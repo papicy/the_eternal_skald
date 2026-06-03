@@ -30,6 +30,26 @@
       "memoryLength": {
         "name": "Conversation Memory",
         "hint": "How many recent messages the Skald remembers per conversation channel."
+      },
+      "ironswornIntegration": {
+        "name": "Ironsworn Rules Integration",
+        "hint": "When the foundry-ironsworn system is active, let the Skald read character state, trigger the system's own move rolls, and narrate the official outcomes. Disable to run the Skald purely as a narrator. No effect if the Ironsworn system is not installed."
+      },
+      "suggestMoves": {
+        "name": "Suggest Moves",
+        "hint": "Allow the Skald to recommend an Ironsworn move after its narration, shown as an interactive card with a one-click 'Roll' button and a 'Choose Different Move' option. Requires Ironsworn Rules Integration."
+      },
+      "autoNarrateMoves": {
+        "name": "Auto-Narrate Move Outcomes",
+        "hint": "When a move is rolled through the Ironsworn system, the Skald automatically narrates the result (strong hit / weak hit / miss) in saga style. Requires Ironsworn Rules Integration."
+      },
+      "aiAppliesEffects": {
+        "name": "AI Applies Mechanical Effects",
+        "hint": "EXPERIMENTAL. Permit the Skald to apply mechanical effects it proposes — adjusting momentum, harm, stress, supply, marking progress, or rolling oracles — directly to the active character. Leave OFF to keep the player in full control of the sheet."
+      },
+      "debugLogging": {
+        "name": "Debug Logging",
+        "hint": "Print verbose Ironsworn integration diagnostics to the browser console (F12). Useful for troubleshooting move detection and effect parsing."
       }
     },
 

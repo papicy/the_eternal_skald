@@ -285,3 +285,104 @@
   opacity: 0.65;
   font-size: 0.85em;
 }
+
+
+/* ------------------------------------------------------------------ */
+/*  IRONSWORN MOVE SUGGESTION CARD (v2.2.0)                            */
+/* ------------------------------------------------------------------ */
+
+/* "suggest" card variant — a warm, inviting amber-tinted panel that
+   reads as an actionable prompt rather than passive narration. */
+.eternal-skald-card.es-variant-suggest {
+  background: linear-gradient(180deg, #221a10 0%, #140d07 100%);
+  border-color: var(--es-rune);
+  box-shadow: 0 0 0 1px rgba(184, 146, 76, 0.18) inset;
+}
+
+.es-move-suggest p {
+  margin: 4px 0;
+}
+
+.es-move-suggest .es-move-name {
+  font-size: 1.08em;
+  letter-spacing: 0.02em;
+}
+.es-move-suggest .es-move-name strong { color: var(--es-gold-2); }
+
+.es-move-stat {
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 0.85em;
+  color: var(--es-gold);
+  background: rgba(214, 168, 90, 0.12);
+  border: 1px solid rgba(214, 168, 90, 0.3);
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-left: 4px;
+}
+
+.es-move-reason {
+  color: var(--es-muted);
+  font-size: 0.92em;
+  border-left: 2px solid var(--es-iron);
+  padding-left: 8px;
+}
+
+.es-move-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.es-btn {
+  flex: 1 1 auto;
+  min-width: 120px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.92em;
+  line-height: 1.3;
+  color: var(--es-fg);
+  background: linear-gradient(180deg, #2c2114 0%, #1a130b 100%);
+  border: 1px solid var(--es-iron);
+  border-radius: 5px;
+  padding: 7px 10px;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.es-btn:hover {
+  border-color: var(--es-gold);
+  color: var(--es-gold-2);
+  background: linear-gradient(180deg, #3a2c18 0%, #221809 100%);
+}
+.es-btn:active { transform: translateY(1px); }
+
+.es-btn-roll {
+  border-color: var(--es-rune);
+  color: var(--es-gold-2);
+  font-weight: 600;
+}
+.es-btn-roll:hover {
+  border-color: var(--es-gold-2);
+  box-shadow: 0 0 8px rgba(214, 168, 90, 0.25);
+}
+
+/* ------------------------------------------------------------------ */
+/*  MOVE SELECTOR DIALOG                                               */
+/* ------------------------------------------------------------------ */
+
+.es-move-selector .form-group {
+  margin-bottom: 10px;
+}
+.es-move-selector label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 3px;
+  color: var(--es-gold);
+}
+.es-move-selector select {
+  width: 100%;
+  padding: 4px 6px;
+}
+.es-move-selector optgroup {
+  font-style: italic;
+  color: var(--es-muted);
+}

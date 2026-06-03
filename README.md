@@ -4,6 +4,8 @@ An AI-powered storyteller, oracle interpreter, and tactical enemy controller for
 
 Powered by the **Abacus AI ChatLLM** platform (Gemini 3.0 Flash by default).
 
+As of **v2.2.0**, the Skald integrates directly with the official [**foundry-ironsworn**](https://foundryvtt.com/packages/foundry-ironsworn) system: it reads your character's stats and meters, *suggests* the right Ironsworn move, triggers the system's own dice mechanics on one click, narrates the official strong-hit / weak-hit / miss outcome, and can optionally apply mechanical effects. See [Ironsworn Integration](#ironsworn-integration) below. The module still works standalone in any system — Ironsworn features simply activate when the system is present.
+
 ---
 
 ## Setup (3 steps)
@@ -65,7 +67,7 @@ node --import "./Data/modules/the-eternal-skald/scripts/eternal-skald-server.mjs
 When Foundry starts, you should see this in the console/logs:
 
 ```
-⚔️  Skald | v2.0.1 — server hook active. /skald-api/* routes ready.
+⚔️  Skald | v2.2.0 — server hook active. /skald-api/* routes ready.
 ```
 
 ### 3. Set your API key
@@ -87,7 +89,7 @@ http://your-foundry:30000/skald-api/health
 You should see:
 
 ```json
-{"status":"ok","service":"The Eternal Skald","version":"2.0.1"}
+{"status":"ok","service":"The Eternal Skald","version":"2.2.0"}
 ```
 
 If you get a 404 or Foundry's normal HTML page, the `--import` flag isn't taking effect. Double-check:
@@ -127,6 +129,70 @@ Because `/skald-api/chat` is on the **same origin** as Foundry itself:
 
 ---
 
+## Ironsworn Integration
+
+When the official **foundry-ironsworn** system is active, The Eternal Skald becomes more than a narrator — it becomes a true GM brain wired into the game's rules engine. The division of labour is deliberate:
+
+- **The Skald (AI) is the GM brain.** It interprets the fiction, decides *which* Ironsworn move fits the moment, and narrates outcomes in saga style.
+- **The foundry-ironsworn system is the rules engine.** It owns the dice, the action/challenge die mechanics, momentum burning, and the character sheet. The Skald never fakes a roll — it asks the system to roll, then reads the *real* result.
+
+### The hybrid flow
+
+```
+   You describe what you do
+            │
+            ▼
+   Skald narrates + SUGGESTS a move      ◄── "[[MOVE: Face Danger | iron]]"
+            │
+            ▼
+   ┌──────────────────────────────┐
+   │  Interactive suggestion card │
+   │  [ ⚔ Roll Face Danger ]      │   ← one click
+   │  [ 🎲 Choose Different Move ] │   ← you override
+   └──────────────────────────────┘
+            │
+            ▼
+   foundry-ironsworn rolls the dice  (its own dialog / mechanics)
+            │
+            ▼
+   Skald reads the official result and NARRATES
+   strong hit / weak hit / miss in the fiction
+            │
+            ▼
+   (optional) Skald APPLIES effects: momentum, harm,
+   stress, supply, progress, oracle rolls
+```
+
+At every step **you stay in control** — you can take the suggested move, pick a different one, or ignore the card entirely and roll from your sheet as usual. If you roll a move yourself, the Skald still notices and narrates the outcome (when *Auto-Narrate Move Outcomes* is on).
+
+### What the Skald can read
+
+The active character's stats (`edge`, `heart`, `iron`, `shadow`, `wits`), meters (`health`, `spirit`, `supply`, `momentum`), debilities, and progress tracks (vows, journeys, fights, bonds, Delve sites) are gathered client-side and injected into the AI's context, so move suggestions are grounded in your real situation.
+
+### Moves the Skald knows
+
+The full classic Ironsworn move set plus the Delve and Ironsworn moves — Face Danger, Secure an Advantage, Gather Information, Compel, Strike, Clash, Turn the Tide, Battle, Endure Harm, Endure Stress, Face Death, Swear an Iron Vow, Reach a Milestone, Fulfill Your Vow, Undertake a Journey, Reach Your Destination, Make Camp, Sojourn, Discover a Site, Delve the Depths, Locate Your Objective, and more — each mapped to its Datasworn move ID and default stat(s).
+
+### Effect directives (opt-in)
+
+With **AI Applies Mechanical Effects** enabled, the Skald may follow its narration with mechanical changes to the active character — adjusting momentum, dealing harm/stress, spending or restoring supply, marking progress on a track, or rolling an oracle. This is **off by default** so the player retains full control of the sheet; turn it on only if you want a more automated table.
+
+### Settings that govern integration
+
+| Setting | Default | What it does |
+|---|---|---|
+| Ironsworn Rules Integration | On | Master switch. Read state, trigger moves, narrate outcomes. No effect if the Ironsworn system isn't installed. |
+| Suggest Moves | On | Show the interactive move-suggestion card after narration. |
+| Auto-Narrate Move Outcomes | On | Automatically narrate any Ironsworn roll's result. |
+| AI Applies Mechanical Effects | Off | *Experimental.* Let the Skald apply momentum/harm/stress/supply/progress/oracle effects. |
+| Debug Logging | Off | Verbose integration diagnostics in the browser console (F12). |
+
+### Graceful by design
+
+Every integration point feature-detects the Ironsworn system and degrades gracefully. If the system isn't present, these features quietly switch off and the Skald behaves exactly as it did in v2.0 — a pure AI storyteller. If a particular API isn't available in your Ironsworn version, the Skald falls back to a manual roll card rather than failing.
+
+---
+
 ## Commands
 
 All commands use the **`!`** prefix (not `/`). Foundry VTT v14 rejects unknown `/` slash commands before our module sees them.
@@ -159,6 +225,11 @@ All in **Configure Settings → The Eternal Skald** (world-scoped, GM-only):
 | Auto-Narrate Combat | On | Short flavour line at each combatant's turn. |
 | AI Controls Enemies | Off | Full AI turn for non-player combatants. |
 | Conversation Memory | 20 | Rolling buffer length for short-term memory. |
+| Ironsworn Rules Integration | On | Integrate with the foundry-ironsworn rules engine (see [Ironsworn Integration](#ironsworn-integration)). |
+| Suggest Moves | On | Show the interactive move-suggestion card after narration. |
+| Auto-Narrate Move Outcomes | On | Automatically narrate any Ironsworn roll's result. |
+| AI Applies Mechanical Effects | Off | *Experimental.* Let the Skald apply momentum/harm/stress/supply/progress/oracle effects. |
+| Debug Logging | Off | Verbose Ironsworn integration diagnostics in the browser console. |
 
 ---
 
@@ -180,6 +251,22 @@ const { roll, result } = skald.rollOracle(skald.IronswornData.oracles.action);
 
 // Trigger commands programmatically
 await skald.commands.lore('The Fallen Keep of Vorlund');
+
+// --- Ironsworn integration (v2.2.0) ---
+// Read the active character's state
+const char = skald.ironsworn.describeCharacter();   // { name, stats, meters, ... } or null
+const caps = skald.ironsworn.capabilities();         // feature-detection report
+
+// Trigger an Ironsworn move through the system's own dice mechanics
+await skald.ironsworn.triggerMove('Face Danger', { stat: 'iron' });
+
+// Adjust mechanics directly
+await skald.ironsworn.adjustMomentum(+1);
+await skald.ironsworn.markProgress('Find the lost ship');
+
+// Drive the suggestion / selector UI
+await skald.integration.postSuggestionCard({ name: 'Secure an Advantage', stat: 'wits' });
+await skald.integration.showMoveSelector();
 ```
 
 ---
@@ -189,7 +276,7 @@ await skald.commands.lore('The Fallen Keep of Vorlund');
 **"The Eternal Skald server hook is not loaded (404)"**
 The `--import` flag isn't in your Foundry startup command, or the path is wrong. See [Setup step 2](#2-add---import-to-your-foundry-startup).
 
-**No `⚔️ Skald | v2.0.1` line in Foundry's console output**
+**No `⚔️ Skald | v2.2.0` line in Foundry's console output**
 The hook file isn't being loaded. Check the path is absolute and correct. Run it in a terminal to see Node.js errors.
 
 **"No Abacus AI API key is set"**

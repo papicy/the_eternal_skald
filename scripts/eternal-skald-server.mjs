@@ -1,5 +1,5 @@
 /* =====================================================================
- *  THE ETERNAL SKALD — Server-Side Hook (v2.0.1)
+ *  THE ETERNAL SKALD — Server-Side Hook (v2.2.0)
  *  ---------------------------------------------------------------------
  *
  *  Usage:
@@ -28,6 +28,18 @@
  *  POST  /skald-api/chat    → forwards to upstream LLM
  *  OPTIONS /skald-api/*     → 204 CORS preflight
  *
+ *  Ironsworn integration note (v2.2.0)
+ *  -----------------------------------
+ *  This proxy is intentionally STATELESS — it has no access to the
+ *  Foundry `game` object, the active world, or the foundry-ironsworn
+ *  system. ALL Ironsworn game-state context (character sheet, meters,
+ *  momentum, progress tracks, the move catalog, and the move/effect
+ *  directive protocol) is gathered CLIENT-SIDE by the module's
+ *  Integration layer (see scripts/eternal-skald.js → Integration and
+ *  buildIronswornPromptBlock) and injected into `payload.messages`
+ *  before the request ever reaches this hook. The server simply
+ *  forwards those messages verbatim to the upstream LLM.
+ *
  *  Requirements: Node 18+. Zero npm dependencies.
  *
  *  License: MIT
@@ -36,7 +48,7 @@
 import http  from "node:http";
 import https from "node:https";
 
-const VERSION    = "2.0.1";
+const VERSION    = "2.2.0";
 const PREFIX     = "/skald-api/";
 const MAX_BODY   = 2 * 1024 * 1024;   // 2 MiB inbound limit
 const MAX_RESP   = 8 * 1024 * 1024;   // 8 MiB upstream response limit
