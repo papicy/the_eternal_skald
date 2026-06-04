@@ -1,5 +1,5 @@
 /* =====================================================================
- *  THE ETERNAL SKALD — Server-Side Hook (v0.3.1)
+ *  THE ETERNAL SKALD — Server-Side Hook (v0.3.2)
  *  ---------------------------------------------------------------------
  *
  *  Usage:
@@ -48,7 +48,7 @@
 import http  from "node:http";
 import https from "node:https";
 
-const VERSION    = "0.3.1";
+const VERSION    = "0.3.2";
 const PREFIX     = "/skald-api/";
 const MAX_BODY   = 2 * 1024 * 1024;   // 2 MiB inbound limit
 const MAX_RESP   = 8 * 1024 * 1024;   // 8 MiB upstream response limit

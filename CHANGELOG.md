@@ -12,6 +12,27 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.3.2] — 2026-06-04
+
+### Added
+- **Bare `!` command alias.** You can now summon the Skald by typing `!`
+  directly followed by your words — e.g. `!what lurks in the barrow?` — with no
+  need for the `!skald` prefix. The explicit sub-commands (`!oracle`, `!npc`,
+  `!scene`, `!lore`, `!combat`, `!skald`, `!skald-help`) still take precedence;
+  any other `!`-prefixed line is routed to the Skald as a free-form prompt.
+- **AI Mode master toggle** (`aiMode` setting, world-scoped, **default ON**).
+  When ON, `!`-prefixed messages are sent to the AI GM; when OFF, they pass
+  through as ordinary chat and the Skald stays silent. Available in
+  *Module Settings → The Eternal Skald* and surfaced via a notification on change.
+- **Keybinding to toggle AI Mode** (`toggleAiMode`) using Foundry's keybinding
+  system, bound to **Alt+Shift+A** by default and rebindable under
+  *Configure Controls → The Eternal Skald*. GM-only (the toggle is world-scoped).
+- **Public API helpers:** `game.modules.get("the-eternal-skald").api` now exposes
+  `isAiMode()`, `setAiMode(on)`, and `toggleAiMode()` for macros and other modules.
+
+### Changed
+- The `!skald-help` card now documents the bare `!<message>` alias.
+
 ## [0.3.1] — 2026-06-04
 
 ### Fixed

@@ -79,6 +79,29 @@ const COMMANDS = Object.freeze({
 const Settings = {
   /** Register all settings — called from the 'init' hook. */
   register() {
+    /* ---- AI Mode master toggle (v0.3.2) ----
+     * Controls whether the Eternal Skald responds to "!"-prefixed chat
+     * messages at all. When OFF, "!" messages pass through as ordinary
+     * chat and the AI GM stays silent. Defaults to ON for new sessions.
+     * Can also be flipped with the configurable keybinding (see init).
+     */
+    game.settings.register(MODULE_ID, "aiMode", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.aiMode.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.aiMode.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true,
+      onChange: (v) => {
+        try {
+          const on = !!v;
+          ui.notifications?.info(
+            `${SKALD_NAME}: AI Mode ${on ? "ON — the Skald listens." : "OFF — the Skald rests."}`
+          );
+        } catch (_) {}
+      }
+    });
+
     game.settings.register(MODULE_ID, "apiKey", {
       name: game.i18n.localize("ETERNAL_SKALD.settings.apiKey.name"),
       hint: game.i18n.localize("ETERNAL_SKALD.settings.apiKey.hint"),
@@ -683,6 +706,15 @@ function dispatchCommand(rawText) {
     return false;
   }
 
+  // --- AI Mode gate (v0.3.2) -------------------------------------------
+  // The Skald only reacts to "!"-prefixed messages while AI Mode is ON.
+  // When OFF we return false so Foundry publishes the line as ordinary
+  // chat and the AI GM stays silent. Defaults to ON for new sessions.
+  if (Settings.get("aiMode") === false) {
+    console.log(`${LOG_PREFIX} dispatchCommand: AI Mode is OFF — ignoring "!" message, passing through as normal chat`);
+    return false;
+  }
+
   // Split on the first run of whitespace — "!oracle action" -> ["!oracle", "action"].
   // Commands without args (e.g. "!skald-help") split to a single-element array.
   const firstSpace = trimmed.search(/\s/);
@@ -705,9 +737,23 @@ function dispatchCommand(rawText) {
     }
   })();
 
-  if (!handler) {
-    console.log(`${LOG_PREFIX} dispatchCommand: no handler for ${head} — known commands:`, Object.values(COMMANDS));
-    return false;
+  // --- Bare "!" alias (v0.3.2) ----------------------------------------
+  // If the head isn't one of our explicit sub-commands, treat the whole
+  // line (minus the leading "!") as a free-form prompt to the Skald.
+  // This lets users invoke the AI GM with just "!" e.g.
+  //   "!what lurks in the barrow?"  ->  Commands.skald("what lurks ...")
+  // The explicit sub-commands (!oracle, !npc, !scene, !lore, !combat,
+  // !skald, !skald-help) still take precedence via the switch above.
+  let resolvedHandler = handler;
+  if (!resolvedHandler) {
+    const query = trimmed.slice(1).trim();   // drop the leading "!"
+    if (!query) {
+      // A lone "!" with nothing after it — nothing to ask the Skald.
+      console.log(`${LOG_PREFIX} dispatchCommand: bare "!" with no prompt — ignoring`);
+      return false;
+    }
+    console.log(`${LOG_PREFIX} dispatchCommand: no explicit sub-command for ${head} — routing to !skald with prompt:`, JSON.stringify(query));
+    resolvedHandler = () => Commands.skald(query);
   }
 
   console.log(`${LOG_PREFIX} dispatching command "${head}" args="${args}"`);
@@ -718,7 +764,7 @@ function dispatchCommand(rawText) {
   Promise.resolve()
     .then(() => {
       console.log(`${LOG_PREFIX} command handler "${head}" starting...`);
-      return handler();
+      return resolvedHandler();
     })
     .then(result => {
       console.log(`${LOG_PREFIX} command handler "${head}" completed.`);
@@ -738,7 +784,8 @@ const Commands = {
   async help() {
     const rows = [
       [COMMANDS.HELP,   "Show this help card."],
-      [COMMANDS.SKALD,  "Speak with the Skald. Ask anything — rules, ideas, narration."],
+      ["!&lt;message&gt;", "Speak with the Skald — just type <code>!</code> then your words. Ask anything — rules, ideas, narration."],
+      [COMMANDS.SKALD,  "Speak with the Skald (explicit form). Same as <code>!&lt;message&gt;</code>."],
       [COMMANDS.ORACLE, "Roll an Ironsworn oracle and let the Skald interpret. e.g. <code>!oracle action</code>"],
       [COMMANDS.NPC,    "Conjure or roleplay an NPC. e.g. <code>!npc Old Keldra, the bone-witch</code>"],
       [COMMANDS.SCENE,  "Generate a scene/location description."],
@@ -2475,6 +2522,37 @@ Hooks.once("init", () => {
     console.error(LOG_PREFIX, "Settings.register() failed:", err);
   }
 
+  /* === Keybinding: toggle AI Mode (v0.3.2) =============================
+   * Lets the GM flip the AI Mode master toggle on/off with a keyboard
+   * shortcut. No default key is bound — the user assigns one under
+   * Configure Controls → The Eternal Skald. AI Mode is world-scoped, so
+   * the binding is restricted to GMs (only they can write world settings).
+   * =================================================================== */
+  try {
+    game.keybindings.register(MODULE_ID, "toggleAiMode", {
+      name: game.i18n.localize("ETERNAL_SKALD.keybindings.toggleAiMode.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.keybindings.toggleAiMode.hint"),
+      // Default chord: Alt+Shift+A (unlikely to clash). Users can rebind
+      // or clear it under Configure Controls → The Eternal Skald.
+      editable: [{ key: "KeyA", modifiers: ["Alt", "Shift"] }],
+      restricted: true,             // GM only (world-scoped setting)
+      precedence: CONST.KEYBINDING_PRECEDENCE?.NORMAL ?? 0,
+      onDown: () => {
+        try {
+          const current = Settings.get("aiMode") !== false;
+          // Setting onChange handles the user-facing notification.
+          game.settings.set(MODULE_ID, "aiMode", !current);
+        } catch (e) {
+          console.error(LOG_PREFIX, "toggleAiMode keybinding failed:", e);
+        }
+        return true;   // consume the event
+      }
+    });
+    console.log(LOG_PREFIX, "Keybinding 'toggleAiMode' registered.");
+  } catch (err) {
+    console.error(LOG_PREFIX, "Keybinding registration failed:", err);
+  }
+
   /* === HOOK #1: chatMessage ============================================
    * The pre-v14 entry point. Fires BEFORE Foundry creates the
    * ChatMessage document, with the raw text. Cancel with `return false`.
@@ -2548,6 +2626,10 @@ Hooks.once("ready", async () => {
     combat: CombatController,
     lore: LoreGenerator,
     resetMemory: (ch) => Memory.reset(ch),
+    // --- AI Mode controls (v0.3.2) ---
+    isAiMode: () => Settings.get("aiMode") !== false,
+    setAiMode: (on) => game.settings.set(MODULE_ID, "aiMode", !!on),
+    toggleAiMode: () => game.settings.set(MODULE_ID, "aiMode", Settings.get("aiMode") === false),
     IronswornData,
     // --- Ironsworn rules-engine integration (v0.3.0) ---
     ironsworn: IronswornController,
