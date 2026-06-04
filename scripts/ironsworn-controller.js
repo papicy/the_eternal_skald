@@ -1,5 +1,5 @@
 /* =====================================================================
- *  THE ETERNAL SKALD — Ironsworn System Controller (v0.3.0)
+ *  THE ETERNAL SKALD — Ironsworn System Controller (v0.3.1)
  *  ---------------------------------------------------------------------
  *  This module is the bridge between The Eternal Skald (the "GM brain")
  *  and the official `foundry-ironsworn` system (the "rules engine",
@@ -37,6 +37,13 @@ const RANKS = Object.freeze(["troublesome", "dangerous", "formidable", "extreme"
 /* Ticks marked per "mark progress" action, by rank (4 ticks = 1 box). */
 const RANK_TICKS = Object.freeze({
   troublesome: 12, dangerous: 8, formidable: 4, extreme: 2, epic: 1
+});
+
+/* foundry-ironsworn stores a foe's challenge rank as a NUMBER 1–5 on
+ * `system.rank` (see ChallengeRank.ts in the system). Map it to our
+ * canonical rank words. 1=Troublesome … 5=Epic. */
+const RANK_NUM = Object.freeze({
+  1: "troublesome", 2: "dangerous", 3: "formidable", 4: "extreme", 5: "epic"
 });
 
 /* Debug logging is toggled by eternal-skald.js via setDebug(). */
@@ -588,10 +595,21 @@ export const IronswornController = {
     return this.findTrack(actor, trackName);
   },
 
-  /** Normalise an arbitrary rank string to a canonical rank (default given). */
+  /**
+   * Normalise an arbitrary rank to a canonical rank word. Accepts:
+   *   • rank words ("dangerous", "Formidable", "formidible" typo) → matched,
+   *   • numeric ranks 1–5 (the foundry-ironsworn encoding) → mapped,
+   *   • anything else → `fallback`.
+   */
   normalizeRank(rank, fallback = "formidable") {
-    const r = String(rank ?? "").toLowerCase().replace(/[^a-z]/g, "");
-    return RANKS.includes(r) ? r : fallback;
+    // Numeric rank (1–5) as used by foundry-ironsworn foe items.
+    if (typeof rank === "number" && RANK_NUM[rank]) return RANK_NUM[rank];
+    const raw = String(rank ?? "").trim();
+    if (/^[1-5]$/.test(raw)) return RANK_NUM[Number(raw)];
+    const r = raw.toLowerCase().replace(/[^a-z]/g, "");
+    if (RANKS.includes(r)) return r;
+    if (r === "formidible") return "formidable"; // common misspelling (system handles it too)
+    return fallback;
   },
 
   /**
@@ -706,6 +724,209 @@ export const IronswornController = {
       lines.push(`Recently ended fights: ${done.slice(0, 5).map(t => t.name).join(", ")}.`);
     }
     return lines.join("\n");
+  },
+
+  /* =================================================================
+   *  COMPENDIUM ENEMY-RANK LOOKUP
+   *  -----------------------------------------------------------------
+   *  The official foundry-ironsworn foe compendia store each foe as a
+   *  progress-track Item whose `system.rank` is a NUMBER 1–5. We index
+   *  those packs once (cached), then match an enemy name to look up its
+   *  canonical rank — so "Bear", "Wyvern", "Bandit" etc. get the rank the
+   *  rulebook assigns, instead of always defaulting to "dangerous".
+   * ================================================================= */
+
+  /** In-memory cache of the merged foe index. Cleared on world reload. */
+  _foeIndexCache: null,
+
+  /** Drop the cached foe index (e.g. after enabling a foe module mid-session). */
+  clearEnemyCache() {
+    this._foeIndexCache = null;
+    dbg("clearEnemyCache: foe index cache cleared");
+  },
+
+  /**
+   * Item compendium packs that look like foe/encounter catalogs. Covers
+   * Ironsworn Foes, Delve Foes, and Starforged Encounters, plus any
+   * third-party pack whose id/label mentions foes or bestiary.
+   */
+  _foePacks() {
+    const out = [];
+    for (const pack of (game?.packs ?? [])) {
+      try {
+        if (pack.documentName !== "Item") continue;
+        const id = String(pack.metadata?.id ?? pack.collection ?? "");
+        const label = String(pack.metadata?.label ?? pack.title ?? "");
+        if (/foe|encounter|bestiar|monster/i.test(id) || /foe|encounter|bestiar|monster/i.test(label)) {
+          out.push(pack);
+        }
+      } catch (_) {}
+    }
+    return out;
+  },
+
+  /**
+   * Build (and cache) a flat index of every foe entry across the foe
+   * packs: [{ name, lc, rank, packId }]. `rank` is already normalised to
+   * a canonical rank word. Entries without a usable numeric/string rank
+   * (category headers etc.) are skipped.
+   */
+  async _buildFoeIndex() {
+    if (Array.isArray(this._foeIndexCache)) return this._foeIndexCache;
+    const entries = [];
+    for (const pack of this._foePacks()) {
+      try {
+        // Ask the index to carry the rank + type fields so we usually
+        // avoid loading full documents.
+        const index = await pack.getIndex({ fields: ["system.rank", "type", "system.subtype"] });
+        for (const e of index) {
+          const rawRank = foundry.utils.getProperty(e, "system.rank");
+          if (rawRank === undefined || rawRank === null || rawRank === "") continue;
+          const rank = this.normalizeRank(rawRank, null);
+          if (!rank) continue;
+          entries.push({
+            name: e.name,
+            lc: String(e.name ?? "").toLowerCase(),
+            rank,
+            packId: String(pack.metadata?.id ?? pack.collection ?? "")
+          });
+        }
+      } catch (e) {
+        warn(`_buildFoeIndex: failed to index "${pack?.metadata?.id}":`, e?.message ?? e);
+      }
+    }
+    this._foeIndexCache = entries;
+    dbg(`_buildFoeIndex: indexed ${entries.length} foe entries from ${this._foePacks().length} pack(s)`);
+    return entries;
+  },
+
+  /** Strip punctuation/articles and collapse whitespace for fuzzy compares. */
+  _normName(s) {
+    return String(s ?? "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\b(the|a|an|of|some)\b/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  },
+
+  /**
+   * Damerau-Levenshtein distance (small strings) for typo tolerance.
+   * Counts an adjacent transposition (e.g. "er" ↔ "re") as a single edit,
+   * which models the most common kind of human typo more fairly than plain
+   * Levenshtein (so "wyvrenn" is only 2 edits from "wyvern", not 3).
+   */
+  _editDistance(a, b) {
+    a = String(a); b = String(b);
+    const m = a.length, n = b.length;
+    if (!m) return n; if (!n) return m;
+    // Full matrix so we can reference the i-2 / j-2 row for transpositions.
+    const d = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+    for (let i = 0; i <= m; i++) d[i][0] = i;
+    for (let j = 0; j <= n; j++) d[0][j] = j;
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        d[i][j] = Math.min(
+          d[i - 1][j] + 1,         // deletion
+          d[i][j - 1] + 1,         // insertion
+          d[i - 1][j - 1] + cost   // substitution
+        );
+        if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+          d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1); // transposition
+        }
+      }
+    }
+    return d[m][n];
+  },
+
+  /**
+   * Look up an enemy by name in the foe compendia.
+   * Matching, best → worst: exact (case-insensitive) → normalised-equal →
+   * substring (either direction) → token overlap → close edit-distance.
+   *
+   * @param {string} enemyName
+   * @returns {Promise<{found:boolean, name:string|null, rank:string|null,
+   *   matchedName?:string, packId?:string, match?:string, suggestion?:string}>}
+   */
+  async lookupEnemyInCompendium(enemyName) {
+    const result = { found: false, name: enemyName ?? null, rank: null };
+    if (!enemyName || !this.isActive()) return result;
+    let index;
+    try { index = await this._buildFoeIndex(); }
+    catch (e) { warn("lookupEnemyInCompendium failed:", e?.message ?? e); return result; }
+    if (!index.length) return result;
+
+    const lc = String(enemyName).toLowerCase().trim();
+    const norm = this._normName(enemyName);
+
+    // 1. Exact (case-insensitive).
+    let hit = index.find(e => e.lc === lc);
+    let match = hit ? "exact" : null;
+
+    // 2. Normalised equal ("Bandit." / "the Bandit" → "bandit").
+    if (!hit) { hit = index.find(e => this._normName(e.name) === norm); if (hit) match = "normalized"; }
+
+    // 3. Substring either direction ("iron bear" ⊇ "bear"; "bear" ⊆ "cave bear").
+    if (!hit && norm) {
+      const subs = index.filter(e => {
+        const en = this._normName(e.name);
+        return en && (en.includes(norm) || norm.includes(en));
+      });
+      if (subs.length) {
+        // Prefer the entry whose name is closest in length to the query.
+        subs.sort((a, b) => Math.abs(this._normName(a.name).length - norm.length)
+                          - Math.abs(this._normName(b.name).length - norm.length));
+        hit = subs[0]; match = "substring";
+      }
+    }
+
+    // 4. Token overlap (share a significant word, e.g. "giant spider" vs "spider").
+    if (!hit && norm) {
+      const qTokens = new Set(norm.split(" ").filter(t => t.length >= 3));
+      let best = null, bestScore = 0;
+      for (const e of index) {
+        const eTokens = this._normName(e.name).split(" ").filter(t => t.length >= 3);
+        const overlap = eTokens.filter(t => qTokens.has(t)).length;
+        if (overlap > bestScore) { bestScore = overlap; best = e; }
+      }
+      if (best && bestScore > 0) { hit = best; match = "token"; }
+    }
+
+    // 5. Fuzzy edit-distance (typos: "wyvrenn" → "wyvern").
+    if (!hit && norm.length >= 4) {
+      let best = null, bestDist = Infinity;
+      for (const e of index) {
+        const d = this._editDistance(norm, this._normName(e.name));
+        if (d < bestDist) { bestDist = d; best = e; }
+      }
+      // Accept only close matches (≤ ~25% of the length, min 2, max 3).
+      const tol = Math.min(3, Math.max(2, Math.floor(norm.length * 0.25)));
+      if (best && bestDist <= tol) { hit = best; match = "fuzzy"; }
+      else if (best && bestDist <= tol + 2) {
+        result.suggestion = best.name; // close but not close enough — surface as a hint
+        dbg(`lookupEnemyInCompendium: "${enemyName}" no confident match; closest "${best.name}" (dist ${bestDist})`);
+      }
+    }
+
+    if (hit) {
+      dbg(`lookupEnemyInCompendium: "${enemyName}" → "${hit.name}" [${hit.rank}] via ${match} (${hit.packId})`);
+      return { found: true, name: hit.name, rank: hit.rank, matchedName: hit.name, packId: hit.packId, match };
+    }
+    return result;
+  },
+
+  /**
+   * Resolve the official challenge rank for an enemy from the compendium.
+   * Returns a canonical rank word if a confident match is found, otherwise
+   * null (so the caller can use an AI-specified rank or the default).
+   *
+   * @param {string} enemyName
+   * @returns {Promise<string|null>}
+   */
+  async getEnemyRank(enemyName) {
+    const r = await this.lookupEnemyInCompendium(enemyName);
+    return r.found ? r.rank : null;
   },
 
   /* =================================================================

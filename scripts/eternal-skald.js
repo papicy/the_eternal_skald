@@ -1,10 +1,10 @@
 /* =====================================================================
- *  THE ETERNAL SKALD v0.3.0 — Foundry VTT v14 Module (Client)
+ *  THE ETERNAL SKALD v0.3.1 — Foundry VTT v14 Module (Client)
  *  ---------------------------------------------------------------------
  *  An AI-powered storytelling and combat-control assistant for Ironsworn
  *  and Ironsworn: Delve campaigns. Powered by Abacus AI ChatLLM.
  *
- *  ARCHITECTURE (v0.3.0)
+ *  ARCHITECTURE (v0.3.1)
  *  ---------------------
  *  API calls are made SERVER-SIDE by eternal-skald-server.mjs, which
  *  must be loaded via `node --import ...eternal-skald-server.mjs`.
@@ -28,7 +28,7 @@
  *      §13 HOOK REGISTRATIONS
  * ===================================================================== */
 
-console.log("=== The Eternal Skald v0.3.0 — module file loaded ===");
+console.log("=== The Eternal Skald v0.3.1 — module file loaded ===");
 
 import { IronswornData } from "./ironsworn-data.js";
 import { IronswornController } from "./ironsworn-controller.js";
@@ -387,10 +387,20 @@ INITIATIVE state telling who is in control. You drive these with:
    [[EFFECT: create_combat <Foe Name> <rank>]]
         Create a combat progress track for a foe the moment a fight with
         them begins (the first time the character Enters the Fray, or a
-        new foe joins). <rank> is the foe's threat:
-          troublesome (trivial), dangerous (real threat — DEFAULT),
-          formidable (tough), extreme (deadly), epic (legendary).
-        Pick the rank from the fiction; omit it to use the default.
+        new foe joins).
+        RANK IS USUALLY OPTIONAL — the client looks the foe up in the
+        official Ironsworn foe compendium and uses its canonical rank.
+          • STANDARD foes (Bear, Wolf, Wyvern, Bandit, Hollow, Basilisk,
+            Troll, Harrow Spider, …): just give the NAME, omit the rank.
+            e.g. [[EFFECT: create_combat Bear]]  → rank filled from compendium.
+          • UNIQUE / CUSTOM foes you invent (not in the rulebook): give an
+            explicit rank so the track is sized correctly.
+            e.g. [[EFFECT: create_combat Ancient Shadow Dragon extreme]]
+        <rank> threat scale: troublesome (trivial), dangerous (real threat),
+        formidable (tough), extreme (deadly), epic (legendary). If you give
+        no rank and the foe isn't in the compendium, the configured default
+        rank is used. When in doubt for a named, ordinary creature, prefer
+        omitting the rank so the official value is used.
    [[EFFECT: create_vow <Name> <rank> <description>]]
         Create a vow/quest progress track when the character swears an iron vow.
    [[EFFECT: initiative <gain|lose>]]
@@ -1631,8 +1641,6 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
               this._dbg("→ create_combat skipped: autoCreateCombatTracks disabled");
               break;
             }
-            const rank = IronswornController.normalizeRank(
-              eff.rank || (Settings.get("defaultEnemyRank") ?? "dangerous"));
             // Don't duplicate an already-active fight with the same foe.
             const existing = IronswornController.getProgressTrack(actor, eff.name);
             const existingDone = existing && foundry.utils.getProperty(existing, "system.completed");
@@ -1641,10 +1649,35 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
               applied.push(`combat “${eff.name}” already underway`);
               break;
             }
+            // Rank resolution, in priority order:
+            //   1. AI-specified rank  → custom enemy, trust the Skald.
+            //   2. Compendium lookup  → official rank for standard foes.
+            //   3. Default setting    → unknown custom foe with no rank given.
+            let rank, source;
+            if (eff.rank) {
+              rank = IronswornController.normalizeRank(eff.rank);
+              source = "custom";
+              this._dbg(`→ create_combat "${eff.name}": custom enemy, using AI-specified rank "${rank}"`);
+            } else {
+              let lookup = null;
+              try { lookup = await IronswornController.lookupEnemyInCompendium(eff.name); }
+              catch (e) { console.warn(LOG_PREFIX, "compendium lookup failed", e); }
+              if (lookup?.found && lookup.rank) {
+                rank = lookup.rank;
+                source = "compendium";
+                this._dbg(`→ create_combat "${eff.name}": using compendium rank "${rank}" (matched "${lookup.matchedName}" via ${lookup.match})`);
+              } else {
+                rank = IronswornController.normalizeRank(Settings.get("defaultEnemyRank") ?? "dangerous");
+                source = "default";
+                const hint = lookup?.suggestion ? ` (did you mean "${lookup.suggestion}"?)` : "";
+                this._dbg(`→ create_combat "${eff.name}": not in compendium${hint}, using default rank "${rank}"`);
+              }
+            }
             r = await IronswornController.createProgressTrack(actor, eff.name, "combat", rank);
             if (r?.ok) {
-              applied.push(`⚔ began combat “${eff.name}” [${rank}]`);
-              this._notifyCombat(`⚔ Combat track created: ${eff.name} (${rank})`);
+              const tag = source === "compendium" ? " [from compendium]" : source === "custom" ? " [custom]" : "";
+              applied.push(`⚔ began combat “${eff.name}” [${rank}]${tag}`);
+              this._notifyCombat(`⚔ Combat track created: ${eff.name} (${rank}${source === "compendium" ? ", official" : ""})`);
             }
             break;
           }

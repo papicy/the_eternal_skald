@@ -12,6 +12,40 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.3.1] — 2026-06-04
+
+### Fixed
+- **Enemy ranks now come from the Ironsworn foe compendium instead of always
+  defaulting to *dangerous*.** When a combat track is auto-created without an
+  explicit rank, the foe's name is looked up in the installed foe compendia
+  (*Ironsworn Foes*, *Delve Foes*, *Starforged Encounters*, and any compatible
+  third-party foe packs) and its **official challenge rank** is used (e.g. Bear →
+  *formidable*, Wolf → *dangerous*, Wyvern → *extreme*). Foe ranks are stored as
+  numbers (1–5) in the system data and are now decoded correctly.
+
+### Added
+- **Compendium enemy-rank lookup API** on `IronswornController`:
+  `lookupEnemyInCompendium(name)` → `{ found, name, rank, matchedName, packId,
+  match }`, `getEnemyRank(name)` → official rank or `null`, and
+  `clearEnemyCache()`.
+- **Forgiving name matching:** case-insensitive, article/punctuation-insensitive,
+  substring and token-overlap matching (`dire wolf` → Wolf), and
+  Damerau-Levenshtein typo tolerance (`wyvrenn` → Wyvern). Close-but-uncertain
+  names are logged as a suggestion.
+- **Cached foe index** built once per session from the foe packs (via
+  `pack.getIndex`), cleared automatically on world reload.
+
+### Changed
+- **`create_combat` rank resolution priority:** explicit rank (custom foes) →
+  compendium rank (standard foes) → *Default Enemy Rank* setting (only when the
+  foe isn't in any compendium and no rank was given). Debug logging now reports
+  which path was taken.
+- **AI guidance updated:** the Skald is told that rank is *usually optional* —
+  standard foes should be created with just a name (the compendium fills the
+  rank) and only invented/unique foes need an explicit rank.
+- **"Default Enemy Rank" setting clarified** as a fallback for custom foes only,
+  in both the settings hint and the README.
+
 ## [0.3.0] — 2026-06-03
 
 ### Added
@@ -109,6 +143,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.3.1]: https://github.com/papicy/eternal_skald/releases/tag/v0.3.1
 [0.3.0]: https://github.com/papicy/eternal_skald/releases/tag/v0.3.0
 [0.2.3]: https://github.com/papicy/eternal_skald/releases/tag/v0.2.3
 [0.2.2]: https://github.com/papicy/eternal_skald/releases/tag/v0.2.2

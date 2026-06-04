@@ -4,7 +4,7 @@ An AI-powered storyteller, oracle interpreter, and tactical enemy controller for
 
 Powered by the **Abacus AI ChatLLM** platform (Gemini 3.0 Flash by default).
 
-> ⚠️ **Alpha / Development Version (v0.3.0)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
+> ⚠️ **Alpha / Development Version (v0.3.1)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
 
 As of **v0.3.0**, the Skald integrates directly with the official [**foundry-ironsworn**](https://foundryvtt.com/packages/foundry-ironsworn) system: it reads your character's stats and meters, *suggests* the right Ironsworn move, triggers the system's own dice mechanics on one click, narrates the official strong-hit / weak-hit / miss outcome, and can optionally apply mechanical effects. See [Ironsworn Integration](#ironsworn-integration) below. The module still works standalone in any system — Ironsworn features simply activate when the system is present.
 
@@ -69,7 +69,7 @@ node --import "./Data/modules/the-eternal-skald/scripts/eternal-skald-server.mjs
 When Foundry starts, you should see this in the console/logs:
 
 ```
-⚔️  Skald | v0.3.0 — server hook active. /skald-api/* routes ready.
+⚔️  Skald | v0.3.1 — server hook active. /skald-api/* routes ready.
 ```
 
 ### 3. Set your API key
@@ -91,7 +91,7 @@ http://your-foundry:30000/skald-api/health
 You should see:
 
 ```json
-{"status":"ok","service":"The Eternal Skald","version":"0.3.0"}
+{"status":"ok","service":"The Eternal Skald","version":"0.3.1"}
 ```
 
 If you get a 404 or Foundry's normal HTML page, the `--import` flag isn't taking effect. Double-check:
@@ -189,7 +189,7 @@ With **AI Applies Mechanical Effects** enabled (now **on by default**), the Skal
 | Narration Delay (ms) | 2000 | How long to wait after a roll before auto-narrating, so dice animations can finish. ~2000ms with Dice So Nice, ~500ms without. Range 0–5000. |
 | AI Applies Mechanical Effects | **On** | Let the Skald apply momentum/harm/stress/supply/progress/oracle effects **and** drive the combat automation. |
 | Auto-Create Combat Tracks | On | Auto-create a combat progress track per foe when a fight begins. Requires *AI Applies Mechanical Effects*. |
-| Default Enemy Rank | Dangerous | Challenge rank for auto-created combat tracks when the Skald doesn't specify one. |
+| Default Enemy Rank | Dangerous | Fallback rank for **custom** foes only — used when the Skald invents a foe that isn't in the Ironsworn foe compendium *and* doesn't specify a rank. Standard foes (Bear, Wolf, Wyvern, …) automatically use their official compendium rank. |
 | Debug Logging | Off | Verbose integration diagnostics in the browser console (F12). |
 
 ---
@@ -200,17 +200,29 @@ From **v0.3.0**, the Skald runs Ironsworn fights for you. Combat in Ironsworn is
 
 ### Automatic combat-track creation
 
-When the fiction starts a fight, the Skald emits `[[EFFECT: create_combat <Foe Name> <rank>]]` and a combat progress track is created on your character sheet for that foe. Each new foe gets its own track, so multi-enemy fights just work. Rank sets how much progress each hit marks:
+When the fiction starts a fight, the Skald emits `[[EFFECT: create_combat <Foe Name> [rank]]]` and a combat progress track is created on your character sheet for that foe. Each new foe gets its own track, so multi-enemy fights just work. The **rank** sets how much progress each hit marks:
 
 | Rank | Threat | Progress per harm | Boxes to fill |
 |---|---|---|---|
 | Troublesome | trivial | +12 ticks (3 boxes) | ~4 hits |
-| Dangerous *(default)* | a real threat | +8 ticks (2 boxes) | ~5 hits |
+| Dangerous | a real threat | +8 ticks (2 boxes) | ~5 hits |
 | Formidable | tough | +4 ticks (1 box) | 10 hits |
 | Extreme | deadly | +2 ticks | 20 hits |
 | Epic | legendary | +1 tick | 40 hits |
 
-If the Skald doesn't name a rank, **Default Enemy Rank** (Dangerous) is used. Turn off **Auto-Create Combat Tracks** to disable this and create foe tracks manually.
+### Where the rank comes from (compendium lookup)
+
+From **v0.3.1**, the rank usually comes straight from the **official Ironsworn foe compendium** — you (and the Skald) rarely need to specify it. When a track is created, the rank is resolved in this order:
+
+1. **Explicit rank** — if the Skald (or you) provides a rank, it's always honoured. This is how *unique/custom* foes get a rank.
+2. **Compendium lookup** — if no rank is given, the foe name is looked up in the installed Ironsworn foe compendia (*Ironsworn Foes*, *Delve Foes*, *Starforged Encounters*, and any compatible third-party foe packs). On a match, that foe's **official challenge rank** is used. Matching is forgiving: it's case-insensitive, ignores articles/punctuation, handles plurals and simple variations (`dire wolf` → Wolf), and tolerates typos (`wyvrenn` → Wyvern). Close-but-uncertain names are logged as a suggestion.
+3. **Default** — only if the foe isn't in any compendium *and* no rank was given does it fall back to the **Default Enemy Rank** setting (Dangerous).
+
+So **standard foes** (Bear, Wolf, Wyvern, Basilisk, Troll, Bandit, Hollow, …) should be created with just a name — they automatically get their canonical rank (e.g. Bear → *formidable*, Wolf → *dangerous*, Wyvern → *extreme*). Only **invented foes** with no compendium entry need an explicit rank.
+
+The lookup index is built once per session and **cached**; it's cleared automatically on world reload. Enable **Debug Logging** to see which path was taken (`Using compendium rank for …` vs `Custom enemy …`).
+
+Turn off **Auto-Create Combat Tracks** to disable all of this and create foe tracks manually.
 
 ### Initiative & deterministic move resolution
 
@@ -224,21 +236,21 @@ Because these are auto-applied, the AI is instructed *not* to also emit `[[EFFEC
 ### Example flow
 
 ```
-Player: !skald three reavers ambush us on the cliff path
-Skald:  …narrates the ambush…           → [[EFFECT: create_combat Reaver Captain dangerous]]
-                                          → [[EFFECT: create_combat Reaver formidable]]  (×2)
+Player: !skald a pack of wolves and their hulking alpha ambush us
+Skald:  …narrates the ambush…           → [[EFFECT: create_combat Wolf]]  (×2, rank from compendium → dangerous)
+                                          → [[EFFECT: create_combat Dire Alpha formidable]]  (custom foe → explicit rank)
 
 Player rolls Enter the Fray → Strong Hit
 Skald:  "You read the charge and strike first."   (auto: initiative gained)
 
 Player rolls Strike → Strong Hit
-Skald:  "Your axe bites deep."   (auto: Reaver Captain +8 ticks, initiative kept)
+Skald:  "Your axe bites the alpha deep."   (auto: Dire Alpha +8 ticks, initiative kept)
 
 Player rolls Strike → Weak Hit
 Skald:  "A glancing blow — they wheel on you."   (auto: +8 ticks, initiative lost)
 
-…the captain falls…
-Skald:  "The captain drops to one knee and yields."  → [[EFFECT: end_combat Reaver Captain]]
+…the alpha falls…
+Skald:  "The alpha drops to one knee and yields."  → [[EFFECT: end_combat Dire Alpha]]
 ```
 
 `[[EFFECT: end_combat <Foe Name>]]` marks that foe's track complete when they're defeated, flee, or yield. Completed tracks persist on the sheet for the chronicle; only un-completed foes count as "active". Live combat state — who holds initiative, each active foe's progress, recently-ended fights — is fed back into the AI's context every turn.
@@ -291,7 +303,7 @@ All in **Configure Settings → The Eternal Skald** (world-scoped, GM-only):
 | Narration Delay (ms) | 2000 | How long to wait after a roll before auto-narrating, so dice animations can finish. ~2000ms with Dice So Nice, ~500ms without. Range 0–5000. |
 | AI Applies Mechanical Effects | **On** | Let the Skald apply momentum/harm/stress/supply/progress/oracle effects and run the combat automation. |
 | Auto-Create Combat Tracks | On | Auto-create a combat progress track per foe when a fight begins. |
-| Default Enemy Rank | Dangerous | Challenge rank for auto-created combat tracks when none is specified. |
+| Default Enemy Rank | Dangerous | Fallback rank for custom foes only — used when an invented foe isn't in the compendium and no rank is given. Standard foes use their official compendium rank. |
 | Debug Logging | Off | Verbose Ironsworn integration diagnostics in the browser console. |
 
 ---
@@ -337,6 +349,12 @@ skald.ironsworn.getActiveCombatTrack(actor);                   // newest un-fini
 skald.ironsworn.describeCombatState(actor);                    // AI-friendly summary
 await skald.ironsworn.completeTrack(actor, 'Frost Wolf');      // end the fight
 
+// --- Compendium enemy-rank lookup (v0.3.1) ---
+await skald.ironsworn.lookupEnemyInCompendium('wyvrenn');
+// → { found: true, name: 'Wyvern', rank: 'extreme', matchedName: 'Wyvern', packId: '…', match: 'fuzzy' }
+await skald.ironsworn.getEnemyRank('Bear');                    // → 'formidable' (or null if not in any foe pack)
+skald.ironsworn.clearEnemyCache();                             // drop the cached foe index (auto-cleared on world reload)
+
 // Drive the suggestion / selector UI
 await skald.integration.postSuggestionCard({ name: 'Secure an Advantage', stat: 'wits' });
 await skald.integration.showMoveSelector();
@@ -349,7 +367,7 @@ await skald.integration.showMoveSelector();
 **"The Eternal Skald server hook is not loaded (404)"**
 The `--import` flag isn't in your Foundry startup command, or the path is wrong. See [Setup step 2](#2-add---import-to-your-foundry-startup).
 
-**No `⚔️ Skald | v0.3.0` line in Foundry's console output**
+**No `⚔️ Skald | v0.3.1` line in Foundry's console output**
 The hook file isn't being loaded. Check the path is absolute and correct. Run it in a terminal to see Node.js errors.
 
 **"No Abacus AI API key is set"**

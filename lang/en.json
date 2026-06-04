@@ -57,7 +57,7 @@
       },
       "defaultEnemyRank": {
         "name": "Default Enemy Rank",
-        "hint": "Challenge rank assigned to auto-created combat tracks when the Skald does not specify one. Higher ranks take more progress to fill (troublesome = quickest, epic = longest)."
+        "hint": "Fallback challenge rank for CUSTOM enemies only — used when the Skald invents a foe that is not in the Ironsworn foe compendium and does not specify a rank. Standard foes (Bear, Wyvern, Bandit, …) automatically use their official compendium rank. Higher ranks take more progress to fill (troublesome = quickest, epic = longest)."
       },
       "debugLogging": {
         "name": "Debug Logging",
