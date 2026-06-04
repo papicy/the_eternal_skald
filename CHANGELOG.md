@@ -164,6 +164,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.3.2]: https://github.com/papicy/eternal_skald/releases/tag/v0.3.2
 [0.3.1]: https://github.com/papicy/eternal_skald/releases/tag/v0.3.1
 [0.3.0]: https://github.com/papicy/eternal_skald/releases/tag/v0.3.0
 [0.2.3]: https://github.com/papicy/eternal_skald/releases/tag/v0.2.3

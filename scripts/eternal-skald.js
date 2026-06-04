@@ -1,10 +1,10 @@
 /* =====================================================================
- *  THE ETERNAL SKALD v0.3.1 — Foundry VTT v14 Module (Client)
+ *  THE ETERNAL SKALD v0.3.2 — Foundry VTT v14 Module (Client)
  *  ---------------------------------------------------------------------
  *  An AI-powered storytelling and combat-control assistant for Ironsworn
  *  and Ironsworn: Delve campaigns. Powered by Abacus AI ChatLLM.
  *
- *  ARCHITECTURE (v0.3.1)
+ *  ARCHITECTURE (v0.3.2)
  *  ---------------------
  *  API calls are made SERVER-SIDE by eternal-skald-server.mjs, which
  *  must be loaded via `node --import ...eternal-skald-server.mjs`.
@@ -28,7 +28,7 @@
  *      §13 HOOK REGISTRATIONS
  * ===================================================================== */
 
-console.log("=== The Eternal Skald v0.3.1 — module file loaded ===");
+console.log("=== The Eternal Skald v0.3.2 — module file loaded ===");
 
 import { IronswornData } from "./ironsworn-data.js";
 import { IronswornController } from "./ironsworn-controller.js";
