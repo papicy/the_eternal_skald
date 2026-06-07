@@ -1,5 +1,5 @@
 /* =====================================================================
- *  THE ETERNAL SKALD — Ironsworn System Controller (v0.3.2)
+ *  THE ETERNAL SKALD — Ironsworn System Controller (v0.3.3)
  *  ---------------------------------------------------------------------
  *  This module is the bridge between The Eternal Skald (the "GM brain")
  *  and the official `foundry-ironsworn` system (the "rules engine",

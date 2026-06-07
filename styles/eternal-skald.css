@@ -386,3 +386,38 @@
   font-style: italic;
   color: var(--es-muted);
 }
+
+/* ------------------------------------------------------------------ */
+/*  STREAMING (v0.3.3)                                                 */
+/*  Thinking indicator + live-stream cursor while tokens arrive, and   */
+/*  the inline error state used when a stream cannot recover.          */
+/* ------------------------------------------------------------------ */
+
+.eternal-skald-card .es-thinking {
+  color: var(--es-muted);
+  font-style: italic;
+  opacity: 0.85;
+  animation: es-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes es-pulse {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 0.95; }
+}
+
+/* A soft blinking caret appended to the body while streaming. */
+.eternal-skald-card.es-streaming .es-body > p:last-child::after {
+  content: "▌";
+  color: var(--es-gold);
+  margin-left: 1px;
+  animation: es-blink 1s step-end infinite;
+}
+
+@keyframes es-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0; }
+}
+
+.eternal-skald-card .es-error {
+  color: #e0a0a0;
+}

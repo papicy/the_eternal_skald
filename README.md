@@ -4,7 +4,7 @@ An AI-powered storyteller, oracle interpreter, and tactical enemy controller for
 
 Powered by the **Abacus AI ChatLLM** platform (Gemini 3.0 Flash by default).
 
-> ⚠️ **Alpha / Development Version (v0.3.2)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
+> ⚠️ **Alpha / Development Version (v0.3.3)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
 
 As of **v0.3.0**, the Skald integrates directly with the official [**foundry-ironsworn**](https://foundryvtt.com/packages/foundry-ironsworn) system: it reads your character's stats and meters, *suggests* the right Ironsworn move, triggers the system's own dice mechanics on one click, narrates the official strong-hit / weak-hit / miss outcome, and can optionally apply mechanical effects. See [Ironsworn Integration](#ironsworn-integration) below. The module still works standalone in any system — Ironsworn features simply activate when the system is present.
 
@@ -69,7 +69,7 @@ node --import "./Data/modules/the-eternal-skald/scripts/eternal-skald-server.mjs
 When Foundry starts, you should see this in the console/logs:
 
 ```
-⚔️  Skald | v0.3.2 — server hook active. /skald-api/* routes ready.
+⚔️  Skald | v0.3.3 — server hook active. /skald-api/* routes ready.
 ```
 
 ### 3. Set your API key
@@ -91,7 +91,7 @@ http://your-foundry:30000/skald-api/health
 You should see:
 
 ```json
-{"status":"ok","service":"The Eternal Skald","version":"0.3.2"}
+{"status":"ok","service":"The Eternal Skald","version":"0.3.3"}
 ```
 
 If you get a 404 or Foundry's normal HTML page, the `--import` flag isn't taking effect. Double-check:
@@ -119,6 +119,8 @@ Browser (Foundry)                    Foundry Server (Node.js)
 ```
 
 The server hook (`eternal-skald-server.mjs`) is loaded into Foundry's Node.js process via `--import`. It intercepts any HTTP request to `/skald-api/*` before Foundry/Express sees it, makes the upstream API call server-side (where there are no browser CORS restrictions), and returns the response.
+
+As of **v0.3.3** the hook also exposes `POST /skald-api/chat-stream`, which opens the upstream request with `stream: true` and pipes the LLM's Server-Sent-Events token stream straight back to the browser so the Skald's reply can render in real time. If streaming is unavailable (older hook, a non-streaming proxy, or an early error) the client falls back automatically to the buffered `/skald-api/chat` path — so it always works.
 
 Because `/skald-api/chat` is on the **same origin** as Foundry itself:
 - ✅ Works with HTTP and HTTPS
@@ -294,6 +296,7 @@ All in **Configure Settings → The Eternal Skald** (world-scoped, GM-only):
 | Setting | Default | Description |
 |---|---|---|
 | Abacus AI API Key | *(empty)* | Required. Get from your Abacus AI account. |
+| Streaming Responses | **On** | Render replies in real time, word by word, as the AI generates them (Server-Sent Events) for near-instant feedback. Falls back automatically to a buffered reply if streaming is unavailable. |
 | AI Model | `gemini-3-flash-preview` | Any model your Abacus AI deployment exposes. |
 | API Endpoint | `https://routellm.abacus.ai/v1/chat/completions` | Override only for custom AI backends. |
 | Skald Intensity | 6 | 1 (terse) to 10 (full saga-singer operatic). |
@@ -370,7 +373,7 @@ await skald.integration.showMoveSelector();
 **"The Eternal Skald server hook is not loaded (404)"**
 The `--import` flag isn't in your Foundry startup command, or the path is wrong. See [Setup step 2](#2-add---import-to-your-foundry-startup).
 
-**No `⚔️ Skald | v0.3.2` line in Foundry's console output**
+**No `⚔️ Skald | v0.3.3` line in Foundry's console output**
 The hook file isn't being loaded. Check the path is absolute and correct. Run it in a terminal to see Node.js errors.
 
 **"No Abacus AI API key is set"**

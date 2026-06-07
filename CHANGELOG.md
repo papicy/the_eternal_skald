@@ -12,6 +12,46 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.3.3] — 2026-06-07
+
+### Added
+- **Streaming responses.** The Skald now renders its replies in real time —
+  word by word, as the AI generates them — instead of waiting for the entire
+  reply to arrive. A chat card appears instantly with a "gathering the threads
+  of fate…" indicator and fills in live, cutting perceived latency dramatically.
+  Implemented end-to-end over Server-Sent Events:
+  - **Server hook** gains a `POST /skald-api/chat-stream` endpoint that opens the
+    upstream request with `stream: true` and pipes the OpenAI-style SSE token
+    stream straight back to the client. Errors before the stream starts return a
+    normal JSON error; failures mid-stream emit a terminal `event: error` frame.
+  - **Client** gains `Client.chatStream()` (an SSE reader) and a
+    `callSkaldStreaming()` helper that posts the message immediately and rewrites
+    it in place as tokens arrive, throttled to ~140 ms so it never floods
+    Foundry's socket or database. The final update is always flushed.
+  - Live display strips `[[MOVE:…]]` / `[[EFFECT:…]]` directives (including a
+    half-typed one at the stream's tail) so raw protocol never flashes on screen;
+    the **complete** raw reply is still parsed afterwards, so move-suggestion
+    cards, effect application, and conversation memory all behave exactly as
+    before.
+  - Wired into `!skald` / `!scene` / `!combat` conversations, automatic roll-
+    outcome narration, oracle interpretations, and ongoing NPC dialogue.
+- **`streamingEnabled` setting** (world-scoped, **default ON**) in
+  *Module Settings → The Eternal Skald* to turn streaming off if preferred.
+
+### Changed
+- `Chat.renderCard()` was extracted from `Chat.postSkald()` so the streaming
+  updater and the classic post path share identical card markup.
+
+### Notes
+- **Graceful fallback:** if the streaming endpoint is unavailable (older server
+  hook, a non-streaming proxy, or a network error before any token arrives), the
+  client automatically falls back to the buffered `POST /skald-api/chat` path, so
+  upgrading the client without the new server hook still works.
+- A few call sites stay buffered by design: NPC **creation** (the speaker alias
+  is parsed out of the reply, so it can't be known up front), the enemy combat
+  **decision** step (returns JSON that must be parsed whole), and the **lore**
+  generator (writes a Journal Entry from the full text).
+
 ## [0.3.2] — 2026-06-04
 
 ### Added
@@ -164,6 +204,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.3.3]: https://github.com/papicy/eternal_skald/releases/tag/v0.3.3
 [0.3.2]: https://github.com/papicy/eternal_skald/releases/tag/v0.3.2
 [0.3.1]: https://github.com/papicy/eternal_skald/releases/tag/v0.3.1
 [0.3.0]: https://github.com/papicy/eternal_skald/releases/tag/v0.3.0
