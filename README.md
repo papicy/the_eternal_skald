@@ -4,9 +4,11 @@ An AI-powered storyteller, oracle interpreter, and tactical enemy controller for
 
 Powered by the **Abacus AI ChatLLM** platform (Gemini 3.0 Flash by default).
 
-> ⚠️ **Alpha / Development Version (v0.3.3)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
+> ⚠️ **Alpha / Development Version (v0.4.0)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
 
 As of **v0.3.0**, the Skald integrates directly with the official [**foundry-ironsworn**](https://foundryvtt.com/packages/foundry-ironsworn) system: it reads your character's stats and meters, *suggests* the right Ironsworn move, triggers the system's own dice mechanics on one click, narrates the official strong-hit / weak-hit / miss outcome, and can optionally apply mechanical effects. See [Ironsworn Integration](#ironsworn-integration) below. The module still works standalone in any system — Ironsworn features simply activate when the system is present.
+
+**New in v0.4.0 — the Living Chronicle.** The Skald now **automatically scribes your saga into Foundry Journal Entries** as you play: NPCs, locations and discoveries each get their own entry, while world facts and story threads accumulate in rolling journals — all organized into folders under *The Eternal Skald*. It runs quietly in the background and never interrupts narration. Review your world with `!journals`, `!mysteries` and `!remind`, or close out a play session with `!end-session` for a saga-styled recap. See [The Living Chronicle](#the-living-chronicle-auto-journaling) below.
 
 ---
 
@@ -69,7 +71,7 @@ node --import "./Data/modules/the-eternal-skald/scripts/eternal-skald-server.mjs
 When Foundry starts, you should see this in the console/logs:
 
 ```
-⚔️  Skald | v0.3.3 — server hook active. /skald-api/* routes ready.
+⚔️  Skald | v0.4.0 — server hook active. /skald-api/* routes ready.
 ```
 
 ### 3. Set your API key
@@ -91,7 +93,7 @@ http://your-foundry:30000/skald-api/health
 You should see:
 
 ```json
-{"status":"ok","service":"The Eternal Skald","version":"0.3.3"}
+{"status":"ok","service":"The Eternal Skald","version":"0.4.0"}
 ```
 
 If you get a 404 or Foundry's normal HTML page, the `--import` flag isn't taking effect. Double-check:
@@ -267,6 +269,48 @@ Every integration point feature-detects the Ironsworn system and degrades gracef
 
 ---
 
+## The Living Chronicle (Auto-Journaling)
+
+*(New in v0.4.0.)* As the Skald narrates, it quietly records the people, places, and events of your saga into Foundry **Journal Entries** — so your world documents itself.
+
+### How it works
+
+When auto-journaling is active, the Skald appends a hidden, machine-readable metadata block to its narration:
+
+```
+[[SKALD_META]]{ "entities": [...], "facts": [...], "mysteries": [...], "worldState": {...}, "decisions": [...] }[[/SKALD_META]]
+```
+
+This block is **always stripped from the displayed text** — players never see it. The client parses it and, through a background queue, turns it into journal entries. The server stays a stateless streaming proxy; all journaling happens client-side.
+
+### What gets recorded
+
+| Source | Where it goes | Behavior |
+|---|---|---|
+| **NPCs** (incl. `!npc` encounters) | *NPCs* folder | One entry per NPC. Re-mentions append an update (deduped by name). |
+| **Locations** | *Locations* folder | One entry per place. |
+| **Discoveries** | *Discoveries* folder | One entry per notable find/secret/clue. |
+| **World facts** | *World Facts* → single rolling journal | Appended as a running, timestamped log (silent). |
+| **Story threads / mysteries / decisions / world-state** | *Story Threads* → single rolling journal | Appended as a running log (silent). |
+| **Session recap** (`!end-session`) | *Session Chronicles* folder | A dated, saga-styled summary of the session. |
+
+All folders live under a root **The Eternal Skald** journal folder. Entries are **GM-only** by default; flip **Journal Visibility** to *Shared with players* to grant observer access.
+
+### Notifications
+
+New NPC/Location/Discovery entries surface as a subtle bottom-right **toast** that fades after ~2 seconds. Control verbosity with **Journal Notifications**: *None* (silent), *Minimal* (new entries only, default), or *Detailed* (also toasts updates). World facts and story threads are always silent.
+
+### Reviewing your world
+
+- `!journals [type]` — list what's been recorded (optionally filtered by type).
+- `!mysteries` — see open mysteries, decisions, and tracked world-state.
+- `!remind [topic]` — recall what the chronicle holds about a topic. (v0.4.0 uses a scored text search; richer semantic recall is planned for v0.5.0.)
+- `!end-session` — *(GM-only)* weave a Session Chronicle from everything recorded this session.
+
+Auto-journaling is **on by default** and degrades gracefully — if a write ever fails, play continues uninterrupted. Toggle it any time with the **Auto-Journaling** setting.
+
+---
+
 ## Commands
 
 All commands use the **`!`** prefix (not `/`). Foundry VTT v14 rejects unknown `/` slash commands before our module sees them.
@@ -283,6 +327,10 @@ All commands use the **`!`** prefix (not `/`). Foundry VTT v14 rejects unknown `
 | `!scene <subject>` | Generate a vivid scene description, factoring in your current canvas. |
 | `!lore <topic>` | Write world-building lore. A JournalEntry is created in the Skald's Chronicles folder. |
 | `!combat <note?>` | Get tactical narration and Ironsworn-move suggestions for the current fight. |
+| `!journals [type]` | **(v0.4.0)** List the chronicle entries the Skald has auto-scribed. Optionally filter by type — e.g. `!journals npc`, `!journals location`. |
+| `!mysteries` | **(v0.4.0)** Review the open mysteries, decisions and world-state the Skald is tracking. |
+| `!remind [topic]` | **(v0.4.0)** Recall what the chronicle holds about a topic (scored text search over recorded entries, summarized in-character). Full semantic recall is planned for v0.5.0. |
+| `!end-session` | **(v0.4.0, GM-only)** Weave a saga-styled Session Chronicle recap from everything recorded this session into a dated journal. |
 
 ### Available oracles
 `action`, `theme`, `region`, `location`, `coastal`, `npc`, `npc-goal`, `npc-descriptor`, `combat`, `mystic`, `price`.
@@ -310,6 +358,10 @@ All in **Configure Settings → The Eternal Skald** (world-scoped, GM-only):
 | AI Applies Mechanical Effects | **On** | Let the Skald apply momentum/harm/stress/supply/progress/oracle effects and run the combat automation. |
 | Auto-Create Combat Tracks | On | Auto-create a combat progress track per foe when a fight begins. |
 | Default Enemy Rank | Dangerous | Fallback rank for custom foes only — used when an invented foe isn't in the compendium and no rank is given. Standard foes use their official compendium rank. |
+| Auto-Journaling | **On** | **(v0.4.0)** Let the Skald automatically scribe NPCs, locations, discoveries, world facts and story threads into Journal Entries as they emerge in play. |
+| Journal Notifications | Minimal | **(v0.4.0)** How loudly new chronicle entries are announced: none (silent), minimal (brief toast), or detailed (also toasts updates). |
+| Journal Visibility | GM only | **(v0.4.0)** Who can read the auto-scribed entries: GM only, or shared with players (observer access). |
+| Session Chronicle on Demand | On | **(v0.4.0)** Enable the `!end-session` command, which weaves a saga-styled recap of the session into a dated journal. |
 | Debug Logging | Off | Verbose Ironsworn integration diagnostics in the browser console. |
 
 ---
@@ -364,6 +416,21 @@ skald.ironsworn.clearEnemyCache();                             // drop the cache
 // Drive the suggestion / selector UI
 await skald.integration.postSuggestionCard({ name: 'Secure an Advantage', stat: 'wits' });
 await skald.integration.showMoveSelector();
+
+// --- Auto-journaling chronicle (v0.4.0) ---
+// Ingest a full AI reply (parses any [[SKALD_META]] block and enqueues writes)
+skald.journal.ingestReply(replyText, { channel: 'skald' });
+
+// Or hand it a metadata object directly
+skald.journal.ingestMetadata({
+  entities: [{ type: 'npc', name: 'Old Keldra', description: 'A bone-witch of the fens.' }],
+  facts: ['The bridge at Hallow Ford has collapsed.'],
+  mysteries: ['Who lit the signal fire on the headland?']
+});
+
+// List recorded entries (optionally by type) and write a session chronicle
+skald.journal.listEntries('npc');
+await skald.journal.generateSessionChronicle();
 ```
 
 ---
@@ -373,7 +440,7 @@ await skald.integration.showMoveSelector();
 **"The Eternal Skald server hook is not loaded (404)"**
 The `--import` flag isn't in your Foundry startup command, or the path is wrong. See [Setup step 2](#2-add---import-to-your-foundry-startup).
 
-**No `⚔️ Skald | v0.3.3` line in Foundry's console output**
+**No `⚔️ Skald | v0.4.0` line in Foundry's console output**
 The hook file isn't being loaded. Check the path is absolute and correct. Run it in a terminal to see Node.js errors.
 
 **"No Abacus AI API key is set"**

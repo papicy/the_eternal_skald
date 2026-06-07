@@ -421,3 +421,81 @@
 .eternal-skald-card .es-error {
   color: #e0a0a0;
 }
+
+/* ------------------------------------------------------------------ */
+/*  AUTO-JOURNALING CHRONICLE (v0.4.0)                                 */
+/*  Bottom-right toast stack for new journal entries, plus the styling */
+/*  for the !journals / !mysteries / !remind chat listings.            */
+/* ------------------------------------------------------------------ */
+
+/* Toast host: fixed to the bottom-right, stacks newest at the bottom. */
+#es-journal-toasts {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+  max-width: 320px;
+}
+
+.es-journal-toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: linear-gradient(180deg, rgba(28, 24, 18, 0.96), rgba(18, 15, 11, 0.96));
+  border: 1px solid var(--es-gold, #c9a55a);
+  color: var(--es-fg, #e8e2d4);
+  font-size: 0.82rem;
+  line-height: 1.3;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  /* Start hidden + nudged right; the .es-jt-show class fades it in. */
+  opacity: 0;
+  transform: translateX(24px);
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+.es-journal-toast.es-jt-show {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.es-journal-toast .es-jt-icon { font-size: 1rem; }
+.es-journal-toast .es-jt-text strong { color: var(--es-gold, #c9a55a); }
+
+/* Chat listings produced by !journals / !mysteries / !remind. */
+.eternal-skald-card .es-journal-head {
+  margin: 0.5em 0 0.2em;
+  border-bottom: 1px solid rgba(201, 165, 90, 0.35);
+  padding-bottom: 2px;
+}
+.eternal-skald-card .es-journal-count {
+  color: var(--es-muted, #9a917f);
+  font-weight: normal;
+}
+.eternal-skald-card .es-journal-list {
+  margin: 0.2em 0 0.6em;
+  padding-left: 1.2em;
+}
+.eternal-skald-card .es-journal-list li { margin: 0.12em 0; }
+
+.es-journal-stamp {
+  color: var(--es-muted, #9a917f);
+  font-size: 0.8rem;
+  margin: 0.4em 0 0.2em;
+}
+.es-journal-foot {
+  color: var(--es-muted, #9a917f);
+  font-size: 0.78rem;
+  font-style: italic;
+  margin-top: 0.6em;
+}
+.es-journal-sep {
+  border: none;
+  border-top: 1px dashed rgba(201, 165, 90, 0.4);
+  margin: 0.6em 0;
+}

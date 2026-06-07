@@ -12,6 +12,52 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.4.0] — 2026-06-07
+
+### Added
+- **The Living Chronicle — automatic journaling.** The Skald now scribes your
+  saga into Foundry **Journal Entries** as it unfolds, with zero manual effort.
+  As the AI narrates, it appends a hidden, machine-readable metadata block
+  (`[[SKALD_META]]…[[/SKALD_META]]`) that the client parses and turns into
+  journal entries. The block is always stripped from the displayed narration —
+  players never see the raw protocol.
+  - **Organized folders.** Entries are filed under a root **The Eternal Skald**
+    journal folder, with sub-folders for **NPCs**, **Locations**, **Discoveries**,
+    **World Facts**, **Story Threads**, and **Session Chronicles**.
+  - **Per-entry types.** NPCs, locations and discoveries each get their own
+    dedicated journal entry (deduped by name — re-mentioning an NPC appends an
+    update rather than creating a twin). World facts and story threads/mysteries
+    accumulate into single **rolling** journals so they read as a running log.
+  - **Background queue.** All writes go through an async, sequential
+    `JournalQueue`, so journaling never blocks narration and a burst of new
+    entities can't race the database. The whole system degrades gracefully —
+    if journaling ever fails, play continues uninterrupted.
+  - **Toast notifications.** New entries surface as a subtle bottom-right toast
+    that fades after ~2 seconds. Verbosity is configurable (silent / minimal /
+    detailed); world facts and story threads are always silent.
+- **New commands:**
+  - `!journals [type]` — list the chronicle entries the Skald has recorded
+    (optionally filtered by `npc`, `location`, `discovery`, etc.).
+  - `!mysteries` — review the open mysteries, decisions and world-state the
+    Skald is tracking.
+  - `!remind [topic]` — recall what the chronicle holds about a topic via a
+    scored text search across recorded entries, then summarized in-character.
+    *(Full semantic/RAG recall is planned for v0.5.0.)*
+  - `!end-session` — GM-only; weave a saga-styled **Session Chronicle** recap
+    from everything recorded during the session, written as a dated journal.
+- **Four new settings** (world-scoped): **Auto-Journaling** (master on/off),
+  **Journal Notifications** (none / minimal / detailed), **Journal Visibility**
+  (GM only / shared with players), and **Session Chronicle on Demand**.
+- **Public API.** `game.modules.get("the-eternal-skald").api.journal` exposes the
+  `JournalSystem` for macros and other modules.
+
+### Changed
+- The narrative channels (`!skald`, `!scene`, `!combat`), combat outcome
+  narration, and NPC encounters now feed the chronicle automatically when
+  auto-journaling is enabled.
+- The system prompt teaches the AI the chronicle-metadata protocol only when
+  journaling is active for the current channel, keeping other prompts lean.
+
 ## [0.3.3] — 2026-06-07
 
 ### Added

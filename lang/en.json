@@ -70,6 +70,22 @@
       "debugLogging": {
         "name": "Debug Logging",
         "hint": "Print verbose Ironsworn integration diagnostics to the browser console (F12). Useful for troubleshooting move detection and effect parsing."
+      },
+      "autoJournaling": {
+        "name": "Auto-Journaling",
+        "hint": "Let the Skald automatically scribe NPCs, locations, discoveries, world facts and story threads into Foundry Journal Entries as they emerge in play — organized into folders under 'The Eternal Skald'. Runs quietly in the background and never interrupts narration. Defaults to ON."
+      },
+      "journalNotifications": {
+        "name": "Journal Notifications",
+        "hint": "How loudly the Skald announces new chronicle entries. 'Silent' = no popups; 'Minimal' = a brief toast for new NPCs/locations/discoveries (default); 'Detailed' = also toast updates to existing entries. World Facts and Story Threads are always silent."
+      },
+      "journalPermissions": {
+        "name": "Journal Visibility",
+        "hint": "Who can see the auto-scribed chronicle entries. 'GM Only' keeps them private to the GM (default); 'Shared with Players' grants all players observer access so they can read the chronicle."
+      },
+      "sessionAutoSummary": {
+        "name": "Session Chronicle on Demand",
+        "hint": "Enable the !end-session command, which weaves a saga-styled recap of everything recorded this session into a dated Session Chronicle journal. Defaults to ON."
       }
     },
 

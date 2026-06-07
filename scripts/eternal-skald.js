@@ -70,13 +70,19 @@ const STREAM_PATH = "/skald-api/chat-stream";
 // prefix — Foundry leaves "!" messages alone and our hook gets to
 // inspect them.
 const COMMANDS = Object.freeze({
-  SKALD:  "!skald",
-  ORACLE: "!oracle",
-  NPC:    "!npc",
-  SCENE:  "!scene",
-  LORE:   "!lore",
-  COMBAT: "!combat",
-  HELP:   "!skald-help"
+  SKALD:    "!skald",
+  ORACLE:   "!oracle",
+  NPC:      "!npc",
+  SCENE:    "!scene",
+  LORE:     "!lore",
+  COMBAT:   "!combat",
+  HELP:     "!skald-help",
+  // --- Journal system (v0.4.0) ---
+  JOURNAL:  "!journal",
+  JOURNALS: "!journals",
+  MYSTERIES:"!mysteries",
+  REMIND:   "!remind",
+  END_SESSION: "!end-session"
 });
 
 /* ===================================================================== */
@@ -264,6 +270,62 @@ const Settings = {
       default: "dangerous"
     });
 
+    /* ---- Auto-journaling system (v0.4.0) ----
+     * The Skald keeps a living chronicle: NPCs, locations, discoveries,
+     * world facts, story threads and per-session recaps are written to
+     * Foundry Journal Entries from structured metadata the AI appends to
+     * its replies. All four settings below are world-scoped.
+     */
+
+    // Master toggle — when OFF, no metadata is requested and nothing is written.
+    game.settings.register(MODULE_ID, "autoJournaling", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.autoJournaling.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.autoJournaling.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true
+    });
+
+    // Toast verbosity for NPC/Location/Discovery writes.
+    game.settings.register(MODULE_ID, "journalNotifications", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.journalNotifications.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.journalNotifications.hint"),
+      scope: "world",
+      config: true,
+      type: String,
+      choices: {
+        none:     "None (silent)",
+        minimal:  "Minimal (brief toast)",
+        detailed: "Detailed (toast on create & update)"
+      },
+      default: "minimal"
+    });
+
+    // Who can see the auto-generated journals.
+    game.settings.register(MODULE_ID, "journalPermissions", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.journalPermissions.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.journalPermissions.hint"),
+      scope: "world",
+      config: true,
+      type: String,
+      choices: {
+        "gm-only": "GM only",
+        "shared":  "Shared with players"
+      },
+      default: "gm-only"
+    });
+
+    // Auto-generate a Session Chronicle when !end-session is invoked.
+    game.settings.register(MODULE_ID, "sessionAutoSummary", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.sessionAutoSummary.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.sessionAutoSummary.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true
+    });
+
     game.settings.register(MODULE_ID, "debugLogging", {
       name: game.i18n.localize("ETERNAL_SKALD.settings.debugLogging.name"),
       hint: game.i18n.localize("ETERNAL_SKALD.settings.debugLogging.hint"),
@@ -360,9 +422,61 @@ GUIDELINES:
     context: extras.context
   });
 
-  return [persona, rulesDigest, guidance, ironswornBlock]
+  // Auto-journaling metadata protocol (v0.4.0). Only added when the caller
+  // opts in AND auto-journaling is enabled, so rules-only Q&A stays lean.
+  const journalBlock = (extras.allowJournal && (Settings.get("autoJournaling") !== false))
+    ? buildJournalPromptBlock()
+    : "";
+
+  return [persona, rulesDigest, guidance, ironswornBlock, journalBlock]
     .filter(Boolean)
     .join("\n\n") + taskAddendum;
+}
+
+/**
+ * Build the auto-journaling metadata protocol block (v0.4.0).
+ *
+ * Teaches the model to append a single, machine-readable metadata block at
+ * the very END of its reply describing any new entities, established facts,
+ * open mysteries, world-state changes, and player decisions worth
+ * remembering. The client ({@link JournalSystem.ingestReply}) parses this
+ * block, hides it from the visible narration, and feeds it to the background
+ * {@link JournalQueue} which writes / updates Foundry Journal Entries.
+ *
+ * The block is OPTIONAL: the model is told to omit it entirely when nothing
+ * noteworthy happened, so casual chatter doesn't spawn journals.
+ */
+function buildJournalPromptBlock() {
+  return `\
+CHRONICLE METADATA (auto-journaling — append AFTER your narration):
+The Skald keeps a living chronicle. When your reply introduces or advances
+anything worth remembering, append EXACTLY ONE metadata block as the very
+last thing in your reply, on its own lines, in this precise shape:
+
+[[SKALD_META]]
+{"entities":[{"type":"npc","name":"Kendra","action":"create","description":"A scarred warden of the iron marches who guards the barrow road.","motivations":"Avenge her slain kin","relationships":"Wary ally of the player"}],"facts":["The barrow road floods at every dusk tide"],"mysteries":["Who lit the signal fire on the Broken Tor?"],"worldState":{"weather":"iron storm rising"},"decisions":["The player swore to escort Kendra to Highmount"]}
+[[/SKALD_META]]
+
+Rules for the block:
+• It MUST be valid, single-line JSON (no comments, no trailing commas).
+• Every field is OPTIONAL — include only what genuinely applies. If nothing
+  is worth recording, OMIT THE WHOLE BLOCK. Do not invent filler.
+• "entities": notable characters/places/things. Each has:
+    - "type": one of "npc" | "location" | "discovery"
+    - "name": short proper name (the journal title)
+    - "action": "create" (new) or "update" (add to an existing entry)
+    - "description": 1–3 sentences of GM-usable detail
+    - optional extras by type:
+        npc       → "motivations", "relationships"
+        location  → "features", "dangers"
+        discovery → "significance", "connectedTo"
+• "facts": short strings of established continuity the GM must keep true.
+• "mysteries": unresolved questions / open story threads.
+• "worldState": flat key→value pairs for changing conditions (weather,
+  faction stance, time of day, …).
+• "decisions": meaningful choices the players just made.
+• NEVER mention this block, its syntax, or "metadata" in your narration. The
+  player never sees it — it is stripped before display.`;
 }
 
 /**
@@ -905,12 +1019,54 @@ function formatMarkdown(text) {
 function stripDirectivesForDisplay(text) {
   if (typeof text !== "string") return "";
   let s = text;
-  // Remove any COMPLETE directives anywhere in the text.
+  // Remove a COMPLETE chronicle metadata block (v0.4.0) anywhere in the text.
+  s = s.replace(/\[\[\s*SKALD_META\s*\]\][\s\S]*?\[\[\s*\/\s*SKALD_META\s*\]\]/gi, "");
+  // Remove an OPEN-but-unclosed metadata block still streaming at the end
+  // (the closing tag hasn't arrived yet). Metadata is always last, so we can
+  // safely drop everything from the open tag onward.
+  s = s.replace(/\[\[\s*SKALD_META\s*\]\][\s\S]*$/i, "");
+  // Remove a partial OPENING tag still being streamed char-by-char:
+  //   "[[", "[[S", "[[SKALD_MET" …
+  s = s.replace(/\[\[\s*(?:S(?:K(?:A(?:L(?:D(?:_(?:M(?:E(?:T(?:A)?)?)?)?)?)?)?)?)?)?$/i, "");
+  // Remove any COMPLETE move/effect directives anywhere in the text.
   s = s.replace(/\[\[\s*(?:MOVE|EFFECT)\s*:[^\]]*?\]\]/gi, "");
-  // Remove a partial directive still being streamed at the very end:
+  // Remove a partial move/effect directive still being streamed at the very end:
   //   "[[", "[[MO", "[[MOVE: Fac", "[[EFFECT: harm" …
   s = s.replace(/\[\[\s*(?:M(?:O(?:V(?:E)?)?)?|E(?:F(?:F(?:E(?:C(?:T)?)?)?)?)?)?(?:\s*:[^\]]*)?$/i, "");
   return s;
+}
+
+/**
+ * Extract the chronicle metadata block ([[SKALD_META]]…[[/SKALD_META]])
+ * from a COMPLETE AI reply (v0.4.0). Tolerant of the model wrapping the
+ * JSON in a fenced code block or adding stray whitespace.
+ *
+ * @param {string} text
+ * @returns {{ metadata: object|null, clean: string }}
+ *   `metadata` is the parsed object (or null if absent/invalid); `clean` is
+ *   the reply with the block removed.
+ */
+function parseMetadata(text) {
+  if (typeof text !== "string") return { metadata: null, clean: "" };
+  const re = /\[\[\s*SKALD_META\s*\]\]([\s\S]*?)\[\[\s*\/\s*SKALD_META\s*\]\]/i;
+  const m = text.match(re);
+  if (!m) return { metadata: null, clean: text };
+
+  const clean = text.replace(m[0], "").trim();
+  let raw = (m[1] || "").trim();
+  // Tolerate the model fencing the JSON: ```json … ``` or ``` … ```.
+  raw = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+
+  let metadata = null;
+  try {
+    metadata = JSON.parse(raw);
+  } catch (_) {
+    // Last-ditch: grab the outermost {...} span and try again.
+    const brace = raw.match(/\{[\s\S]*\}/);
+    if (brace) { try { metadata = JSON.parse(brace[0]); } catch (_) { metadata = null; } }
+  }
+  if (metadata && typeof metadata !== "object") metadata = null;
+  return { metadata, clean };
 }
 
 /**
@@ -1094,6 +1250,12 @@ function dispatchCommand(rawText) {
       case COMMANDS.SCENE:   return () => Commands.scene(args);
       case COMMANDS.LORE:    return () => Commands.lore(args);
       case COMMANDS.COMBAT:  return () => Commands.combat(args);
+      // --- Journal system (v0.4.0) ---
+      case COMMANDS.JOURNAL: return () => Commands.journals(args);
+      case COMMANDS.JOURNALS:return () => Commands.journals(args);
+      case COMMANDS.MYSTERIES:return () => Commands.mysteries(args);
+      case COMMANDS.REMIND:  return () => Commands.remind(args);
+      case COMMANDS.END_SESSION: return () => Commands.endSession(args);
       default:               return null;
     }
   })();
@@ -1151,7 +1313,11 @@ const Commands = {
       [COMMANDS.NPC,    "Conjure or roleplay an NPC. e.g. <code>!npc Old Keldra, the bone-witch</code>"],
       [COMMANDS.SCENE,  "Generate a scene/location description."],
       [COMMANDS.LORE,   "Generate world-building lore (and a Journal Entry)."],
-      [COMMANDS.COMBAT, "Get tactical narration/advice for the current fight."]
+      [COMMANDS.COMBAT, "Get tactical narration/advice for the current fight."],
+      [COMMANDS.JOURNALS,  "List the chronicle entries the Skald has scribed. e.g. <code>!journals npc</code>"],
+      [COMMANDS.MYSTERIES, "Review the open mysteries and unresolved threads."],
+      [COMMANDS.REMIND,    "Recall what the chronicle holds. e.g. <code>!remind Keldra</code>"],
+      [COMMANDS.END_SESSION, "GM-only: weave a Session Chronicle from this session's events."]
     ];
 
     const tableRows = rows.map(([c, d]) =>
@@ -1217,6 +1383,132 @@ const Commands = {
     const ctx = CombatController.summariseCurrent();
     const task = `Provide a brief tactical narration AND a concrete suggestion for the current combat moment, grounded in Ironsworn moves (Enter the Fray, Strike, Clash, Secure an Advantage, Endure Harm). Be specific. Situation provided by the GM: ${args || "(unspecified)"}\n\nBattlefield snapshot:\n${ctx}`;
     return runConversation("combat", args || "tactical analysis", { task, label: "Counsel of Iron", variant: "combat" });
+  },
+
+  /* ------------------- !journal / !journals (v0.4.0) --------------- */
+  async journals(_args) {
+    const entries = JournalSystem.listEntries();
+    if (!entries.length) {
+      return Chat.postSystem(
+        `<em>The chronicle is empty. Play on — I record what matters as our saga unfolds.</em>`,
+        { gmWhisper: true }
+      );
+    }
+    // Group by type in a stable display order.
+    const order = ["npc", "location", "discovery", "worldFact", "storyThread", "session"];
+    const byType = new Map();
+    for (const j of entries) {
+      const t = j.getFlag(MODULE_ID, "type");
+      if (!byType.has(t)) byType.set(t, []);
+      byType.get(t).push(j);
+    }
+    const sections = [];
+    for (const t of order) {
+      const list = byType.get(t);
+      if (!list?.length) continue;
+      const spec = JournalSystem.TYPES[t] || { label: t, emoji: "📝" };
+      const items = list
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(j => `<li>${j.link ?? `@JournalEntry[${j.id}]{${escapeHtml(j.name)}}`}</li>`)
+        .join("");
+      sections.push(`<p class="es-journal-head"><strong>${spec.emoji} ${escapeHtml(spec.label)}s</strong> <span class="es-journal-count">(${list.length})</span></p><ul class="es-journal-list">${items}</ul>`);
+    }
+    return Chat.postSkald(sections.join(""), {
+      variant: "lore",
+      title: "The Skald's Chronicle"
+    });
+  },
+
+  /* ------------------------- !mysteries (v0.4.0) ------------------- */
+  async mysteries(_args) {
+    const threads = JournalSystem.listEntries("storyThread");
+    if (!threads.length) {
+      return Chat.postSystem(
+        `<em>No threads yet hang loose in the weave. The fates are quiet.</em>`,
+        { gmWhisper: true }
+      );
+    }
+    const links = threads
+      .map(j => `<li>${j.link ?? `@JournalEntry[${j.id}]{${escapeHtml(j.name)}}`}</li>`)
+      .join("");
+    const body = `
+      <p>Threads and mysteries still unspun, Ironsworn:</p>
+      <ul class="es-journal-list">${links}</ul>
+      <p class="es-help-aside"><em>Open the entry above to read the gathered mysteries, decisions and world-state.</em></p>`;
+    return Chat.postSkald(body, { variant: "oracle", title: "Open Threads" });
+  },
+
+  /* --------------------------- !remind (v0.4.0) -------------------- */
+  async remind(args) {
+    const topic = (args || "").trim();
+    const entries = JournalSystem.listEntries();
+    if (!entries.length) {
+      return Chat.postSystem(`<em>I have naught written yet to recall.</em>`, { gmWhisper: true });
+    }
+
+    // Simple text search (no RAG yet — that arrives in v0.5.0). Match the
+    // topic against entry names + their stored aiContext; fall back to the
+    // most recently updated entries when no topic is given or nothing hits.
+    const needle = topic.toLowerCase();
+    const scored = entries.map(j => {
+      const name = (j.name || "").toLowerCase();
+      const ctx = (j.getFlag(MODULE_ID, "aiContext") || "").toLowerCase();
+      let score = 0;
+      if (needle) {
+        if (name.includes(needle)) score += 5;
+        for (const word of needle.split(/\s+/).filter(w => w.length > 2)) {
+          if (name.includes(word)) score += 2;
+          if (ctx.includes(word)) score += 1;
+        }
+      }
+      return { j, score, updated: j.getFlag(MODULE_ID, "lastUpdated") || 0 };
+    });
+
+    let hits = needle
+      ? scored.filter(s => s.score > 0).sort((a, b) => b.score - a.score)
+      : scored.sort((a, b) => b.updated - a.updated);
+    if (!hits.length) hits = scored.sort((a, b) => b.updated - a.updated);
+    hits = hits.slice(0, 6);
+
+    // Build a compact context digest from the matched entries for the AI.
+    const digest = hits.map(({ j }) => {
+      const spec = JournalSystem.TYPES[j.getFlag(MODULE_ID, "type")] || { label: "Note" };
+      const ctx = j.getFlag(MODULE_ID, "aiContext") || "";
+      return `• [${spec.label}] ${j.name}: ${ctx}`.slice(0, 600);
+    }).join("\n");
+
+    const subject = topic ? `the topic "${topic}"` : "recent events";
+    const task = `The GM asks you to recall what the chronicle holds about ${subject}. Using ONLY the journal notes below, give a tight, in-character reminder (3-6 sentences) of who/what/where matters and any open threads. Do not invent details beyond the notes. Do NOT append any metadata block.\n\nCHRONICLE NOTES:\n${digest}`;
+
+    try {
+      const reply = await Client.chat([
+        { role: "system", content: buildSystemPrompt({ task }) },
+        { role: "user", content: topic ? `Remind me about: ${topic}` : "Remind me what has happened recently." }
+      ], { temperature: 0.7, maxTokens: 600 });
+      const links = hits.map(({ j }) => j.link ?? `@JournalEntry[${j.id}]{${escapeHtml(j.name)}}`).join(" · ");
+      const body = `${formatMarkdown(reply)}<p class="es-help-aside"><em>Drawn from:</em> ${links}</p>`;
+      return Chat.postSkald(body, { variant: "lore", title: topic ? `Recalling: ${topic}` : "The Skald Recalls" });
+    } catch (err) {
+      console.warn(LOG_PREFIX, "!remind failed", err);
+      // Degrade to a plain link list if the AI is unreachable.
+      const links = hits.map(({ j }) => `<li>${j.link ?? `@JournalEntry[${j.id}]{${escapeHtml(j.name)}}`}</li>`).join("");
+      return Chat.postSkald(`<p>From the chronicle:</p><ul class="es-journal-list">${links}</ul>`, {
+        variant: "lore", title: topic ? `Recalling: ${topic}` : "The Skald Recalls"
+      });
+    }
+  },
+
+  /* ------------------------ !end-session (v0.4.0) ------------------ */
+  async endSession(_args) {
+    if (!game.user.isGM) {
+      return Chat.postSystem(`<em>Only the GM may close the session's chronicle.</em>`, { gmWhisper: true });
+    }
+    await Chat.postSystem(`<em>${SKALD_NAME} gathers the threads of the session…</em>`, { gmWhisper: true });
+    const entry = await JournalSystem.generateSessionChronicle({ announce: true });
+    if (entry) {
+      ui.notifications?.info(`${SKALD_NAME}: Session chronicle written.`);
+    }
+    return entry;
   }
 };
 
@@ -1229,8 +1521,11 @@ async function runConversation(channel, userText, { task, label, variant = "defa
     Memory.push(channel, "user", userText);
     // Inject the live Ironsworn game state when requested and available.
     const context = includeContext ? Integration.gatherContext() : "";
+    // Narrative channels (skald/scene/combat) are the chronicle's primary
+    // source. Allow the AI to append a [[SKALD_META]] block we can ingest.
+    const allowJournal = ["skald", "scene", "combat"].includes(channel);
     const messages = [
-      { role: "system", content: buildSystemPrompt({ task, allowMoves, context }) },
+      { role: "system", content: buildSystemPrompt({ task, allowMoves, context, allowJournal }) },
       ...Memory.get(channel)
     ];
 
@@ -1245,6 +1540,8 @@ async function runConversation(channel, userText, { task, label, variant = "defa
         if (allowMoves && Integration.active()) {
           await Integration.postSuggestionFromReply(reply);
         }
+        // Fire-and-forget chronicle ingestion (never blocks/breaks play).
+        if (allowJournal) JournalSystem.ingestReply(reply, { channel });
         return reply;
       } catch (streamErr) {
         // callSkaldStreaming already rendered a readable error into its card
@@ -1265,10 +1562,13 @@ async function runConversation(channel, userText, { task, label, variant = "defa
     if (allowMoves && Integration.active()) {
       await Integration.postReplyWithSuggestion(reply, { variant, title: label });
     } else {
-      // Strip any stray directive so it never leaks into the chat card.
+      // Strip any stray directive (move + chronicle metadata) so it never
+      // leaks into the chat card.
       const { clean } = Integration.parseMoveSuggestion(reply);
-      await Chat.postSkald(formatMarkdown(clean || reply), { variant, title: label });
+      await Chat.postSkald(formatMarkdown(stripDirectivesForDisplay(clean || reply)), { variant, title: label });
     }
+    // Fire-and-forget chronicle ingestion (never blocks/breaks play).
+    if (allowJournal) JournalSystem.ingestReply(reply, { channel });
     return reply;
   } catch (err) {
     console.error(LOG_PREFIX, err);
@@ -1476,7 +1776,8 @@ const Integration = {
    */
   async postReplyWithSuggestion(reply, { variant = "default", title } = {}) {
     const { suggestion, clean } = this.parseMoveSuggestion(reply);
-    await Chat.postSkald(formatMarkdown(clean || reply), { variant, title });
+    // Also strip any chronicle metadata block (v0.4.0) from the display copy.
+    await Chat.postSkald(formatMarkdown(stripDirectivesForDisplay(clean || reply)), { variant, title });
 
     if (suggestion && this.active() && (Settings.get("suggestMoves") ?? true)) {
       this._lastIntent = suggestion.reason || this._lastIntent;
@@ -1958,7 +2259,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
     try {
       Memory.push("general", "user", `(${parsed.moveName} → ${parsed.outcome})`);
       const messages = [
-        { role: "system", content: buildSystemPrompt({ task, context: ctx, allowEffects }) },
+        { role: "system", content: buildSystemPrompt({ task, context: ctx, allowEffects, allowJournal: true }) },
         ...Memory.get("general")
       ];
 
@@ -1976,9 +2277,11 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
       } else {
         reply = await Client.chat(messages, { temperature: 0.85, maxTokens: 500 });
         const { clean } = this.parseEffects(reply);
-        await Chat.postSkald(formatMarkdown(clean || reply), cardOpts);
+        await Chat.postSkald(formatMarkdown(stripDirectivesForDisplay(clean || reply)), cardOpts);
       }
       Memory.push("general", "assistant", reply);
+      // Fire-and-forget chronicle ingestion (never blocks/breaks play).
+      JournalSystem.ingestReply(reply, { channel: "combat" });
 
       const { effects } = this.parseEffects(reply);
       // Strip effects the auto-combat flow already handled, to avoid
@@ -2256,6 +2559,22 @@ Then on a new line speak as the NPC — greet the players in-character, in 2-4 s
         stats, turnCount: 1, lastReply: reply
       });
 
+      // Scribe the freshly-met NPC into the chronicle (background, best-effort).
+      try {
+        const npcName = this._extractName(descriptor, stats);
+        if (npcName) {
+          JournalSystem.ingestMetadata({
+            entities: [{
+              type: "npc",
+              name: npcName,
+              action: "create",
+              description: (dialogue || reply).replace(/\s+/g, " ").trim().slice(0, 400),
+              motivations: stats || descriptor
+            }]
+          }, { channel: "npc" });
+        }
+      } catch (e) { console.warn(LOG_PREFIX, "NPC journal ingest failed", e); }
+
       const body = `${stats ? `<div class="es-npc-stats">${escapeHtml(stats)}</div>` : ""}${formatMarkdown(dialogue || reply)}`;
       await Chat.postSkald(body, {
         variant: "npc",
@@ -2489,6 +2808,590 @@ const LoreGenerator = {
       folder = null;
     }
     return folder;
+  }
+};
+
+/* ===================================================================== */
+/*  §10b AUTO-JOURNALING SYSTEM (v0.4.0)                                  */
+/* ===================================================================== */
+
+/**
+ * A tiny, dependency-free background work queue.
+ *
+ * Journal writes touch the Foundry document database and can conflict if
+ * fired concurrently (e.g. two replies both trying to create the same
+ * folder, or append to the same rolling journal). {@link JournalQueue}
+ * serialises them: jobs are processed strictly one-at-a-time, in order, on
+ * a microtask drain loop so the caller never blocks. A failing job logs and
+ * is skipped — it never stalls the queue or surfaces an error to the player.
+ */
+class JournalQueue {
+  /** @param {(job:any)=>Promise<void>} processor */
+  constructor(processor) {
+    this._jobs = [];
+    this._busy = false;
+    this._processor = processor;
+  }
+
+  /** Add a job and kick the drain loop (non-blocking). */
+  enqueue(job) {
+    this._jobs.push(job);
+    // Fire-and-forget: never await from the caller's path.
+    this._drain().catch(e => console.warn(LOG_PREFIX, "JournalQueue drain crashed:", e?.message || e));
+    return this;
+  }
+
+  /** Number of jobs still waiting (excludes the one in flight). */
+  get size() { return this._jobs.length; }
+
+  /** Process jobs sequentially until the queue empties. */
+  async _drain() {
+    if (this._busy) return;
+    this._busy = true;
+    try {
+      while (this._jobs.length) {
+        const job = this._jobs.shift();
+        try {
+          await this._processor(job);
+        } catch (e) {
+          console.warn(LOG_PREFIX, "JournalQueue job failed:", e?.message || e, job?.kind ?? "");
+        }
+      }
+    } finally {
+      this._busy = false;
+    }
+  }
+}
+
+/**
+ * The auto-journaling brain (v0.4.0).
+ *
+ * Parses the chronicle metadata the AI appends to its replies (see
+ * {@link buildJournalPromptBlock}) and turns it into Foundry Journal
+ * Entries, organised into a tidy folder tree, with optional minimal toast
+ * notifications. World Facts and Story Threads are tracked SILENTLY in
+ * rolling journals; NPCs / Locations / Discoveries get individual entries
+ * and a small toast. Session Chronicles are generated on demand from an
+ * in-memory activity log.
+ *
+ * All writes go through {@link JournalQueue} so they never block narration.
+ */
+const JournalSystem = {
+  ROOT_FOLDER: SKALD_NAME,            // "The Eternal Skald"
+  _folderColor: "#8c6a2f",
+
+  /** type-key → { folder, title (for rolling journals), label, emoji } */
+  TYPES: {
+    npc:         { folder: "NPCs",               label: "NPC",          emoji: "👤", rolling: false },
+    location:    { folder: "Locations",          label: "Location",     emoji: "🗺️", rolling: false },
+    discovery:   { folder: "Discoveries",        label: "Discovery",    emoji: "🔍", rolling: false },
+    worldFact:   { folder: "World Facts",        label: "World Fact",   emoji: "📜", rolling: true, journalName: "Established Facts" },
+    storyThread: { folder: "Story Threads",      label: "Story Thread", emoji: "🧵", rolling: true, journalName: "Threads & Mysteries" },
+    session:     { folder: "Session Chronicles", label: "Session",      emoji: "📖", rolling: false }
+  },
+
+  /** Cache of resolved Folder documents keyed by folder name (per session). */
+  _folderCache: new Map(),
+
+  /** Background work queue (initialised lazily on first use). */
+  _queue: null,
+
+  /** Rolling in-memory log of session activity, drained by !end-session. */
+  _sessionLog: [],
+
+  /* ---------------- gating / accessors ---------------- */
+
+  enabled()       { return Settings.get("autoJournaling") !== false; },
+  notifyLevel()   { return Settings.get("journalNotifications") || "minimal"; },
+  permission()    { return Settings.get("journalPermissions") || "gm-only"; },
+  sessionAuto()   { return Settings.get("sessionAutoSummary") !== false; },
+
+  /** Only GMs (or users with journal-create rights) write journals. */
+  canWrite() {
+    try { return game.user?.isGM || game.user?.can?.("JOURNAL_CREATE"); }
+    catch (_) { return false; }
+  },
+
+  queue() {
+    if (!this._queue) this._queue = new JournalQueue((job) => this._process(job));
+    return this._queue;
+  },
+
+  /* ---------------- public entry point ---------------- */
+
+  /**
+   * Ingest a COMPLETE AI reply: parse its chronicle metadata (if any),
+   * record it to the session log, and enqueue background journal writes.
+   * Non-blocking, swallows all errors — journaling must never break play.
+   *
+   * @param {string} reply
+   * @param {object} [ctx]
+   * @param {string} [ctx.channel] - conversation channel (for the log)
+   * @param {string} [ctx.sourceVow] - vow id for context flags
+   * @returns {object|null} the parsed metadata (or null)
+   */
+  ingestReply(reply, ctx = {}) {
+    try {
+      if (!this.enabled() || !this.canWrite()) return null;
+      const { metadata } = parseMetadata(reply);
+      if (!metadata || typeof metadata !== "object") return null;
+      this.ingestMetadata(metadata, ctx);
+      return metadata;
+    } catch (e) {
+      console.warn(LOG_PREFIX, "ingestReply failed:", e?.message || e);
+      return null;
+    }
+  },
+
+  /**
+   * Process an already-parsed metadata object. Records to the session log
+   * and enqueues a background job per actionable item.
+   */
+  ingestMetadata(metadata, ctx = {}) {
+    if (!metadata || typeof metadata !== "object") return;
+    const sourceVow = ctx.sourceVow ?? this._currentVowId();
+
+    // 1) Record to the session log for the eventual chronicle.
+    this._sessionLog.push({
+      t: Date.now(),
+      channel: ctx.channel ?? "general",
+      entities: Array.isArray(metadata.entities) ? metadata.entities.map(e => ({ type: e?.type, name: e?.name })) : [],
+      facts: Array.isArray(metadata.facts) ? metadata.facts.slice() : [],
+      mysteries: Array.isArray(metadata.mysteries) ? metadata.mysteries.slice() : [],
+      decisions: Array.isArray(metadata.decisions) ? metadata.decisions.slice() : [],
+      worldState: (metadata.worldState && typeof metadata.worldState === "object") ? { ...metadata.worldState } : {}
+    });
+    // Keep the log from growing without bound during marathon sessions.
+    if (this._sessionLog.length > 500) this._sessionLog.splice(0, this._sessionLog.length - 500);
+
+    const q = this.queue();
+
+    // 2) Entities → individual NPC / Location / Discovery journals.
+    if (Array.isArray(metadata.entities)) {
+      for (const ent of metadata.entities) {
+        if (!ent || typeof ent !== "object") continue;
+        const type = String(ent.type || "").toLowerCase();
+        if (!["npc", "location", "discovery"].includes(type)) continue;
+        if (!ent.name || typeof ent.name !== "string") continue;
+        q.enqueue({ kind: "entity", type, entity: ent, sourceVow });
+      }
+    }
+
+    // 3) Silent rolling trackers.
+    const facts = Array.isArray(metadata.facts) ? metadata.facts.filter(s => typeof s === "string" && s.trim()) : [];
+    if (facts.length) q.enqueue({ kind: "facts", facts, sourceVow });
+
+    const mysteries = Array.isArray(metadata.mysteries) ? metadata.mysteries.filter(s => typeof s === "string" && s.trim()) : [];
+    const decisions = Array.isArray(metadata.decisions) ? metadata.decisions.filter(s => typeof s === "string" && s.trim()) : [];
+    const worldState = (metadata.worldState && typeof metadata.worldState === "object") ? metadata.worldState : null;
+    if (mysteries.length || decisions.length || (worldState && Object.keys(worldState).length)) {
+      q.enqueue({ kind: "thread", mysteries, decisions, worldState, sourceVow });
+    }
+  },
+
+  /* ---------------- queue processor ---------------- */
+
+  async _process(job) {
+    if (!job || !this.canWrite()) return;
+    switch (job.kind) {
+      case "entity":  return this._processEntity(job);
+      case "facts":   return this._processFacts(job);
+      case "thread":  return this._processThread(job);
+      default: return;
+    }
+  },
+
+  async _processEntity(job) {
+    const { type, entity, sourceVow } = job;
+    // Dedupe by name: if an entry already exists (regardless of whether the
+    // AI said "create" or "update"), augment it instead of making a twin.
+    const existing = this._findEntry(type, entity.name);
+    if (existing) return this._updateEntity(existing, type, entity, sourceVow);
+    return this._createEntity(type, entity, sourceVow);
+  },
+
+  async _createEntity(type, entity, sourceVow) {
+    const folder = await this.getOrCreateFolder(type);
+    const name = String(entity.name).slice(0, 100);
+    const html = this._renderEntityHtml(type, entity);
+    const entry = await JournalEntry.create({
+      name,
+      folder: folder?.id ?? null,
+      ownership: this._ownership(),
+      pages: [{
+        name,
+        type: "text",
+        text: { content: html, format: 1 /* HTML */ }
+      }],
+      flags: {
+        [MODULE_ID]: {
+          type,
+          createdBy: "ai",
+          lastUpdated: Date.now(),
+          relatedEntities: [],
+          sourceVow: sourceVow ?? null,
+          aiContext: this._entityContext(entity)
+        }
+      }
+    });
+    if (entry) this._toast(name, type);
+    return entry;
+  },
+
+  async _updateEntity(entry, type, entity, sourceVow) {
+    try {
+      const page = entry.pages?.contents?.[0] ?? entry.pages?.find?.(() => true);
+      const prev = page?.text?.content ?? "";
+      const addition = this._renderEntityUpdateHtml(entity);
+      const merged = `${prev}\n<hr class="es-journal-sep"/>\n${addition}`;
+      if (page) {
+        await page.update({ "text.content": merged });
+      }
+      const existingCtx = entry.getFlag?.(MODULE_ID, "aiContext") || "";
+      await entry.update({
+        flags: {
+          [MODULE_ID]: {
+            type,
+            createdBy: "ai",
+            lastUpdated: Date.now(),
+            sourceVow: sourceVow ?? entry.getFlag?.(MODULE_ID, "sourceVow") ?? null,
+            aiContext: `${existingCtx}\n${this._entityContext(entity)}`.trim().slice(0, 4000)
+          }
+        }
+      });
+      // Updates are quieter than creates — only toast in "detailed" mode.
+      if (this.notifyLevel() === "detailed") this._toast(entry.name, type, "Updated");
+      return entry;
+    } catch (e) {
+      console.warn(LOG_PREFIX, "_updateEntity failed:", e?.message || e);
+      return null;
+    }
+  },
+
+  async _processFacts(job) {
+    const items = job.facts.map(f => `<li>${escapeHtml(f)}</li>`).join("");
+    const stamp = new Date().toLocaleString();
+    const block = `<p class="es-journal-stamp"><em>${escapeHtml(stamp)}</em></p><ul>${items}</ul>`;
+    await this._appendRolling("worldFact", block, job.facts.join(" · "), job.sourceVow);
+    // World Facts are silent by design — no toast.
+  },
+
+  async _processThread(job) {
+    const parts = [];
+    if (job.mysteries?.length) {
+      parts.push(`<p><strong>🧵 Mysteries</strong></p><ul>${job.mysteries.map(m => `<li>${escapeHtml(m)}</li>`).join("")}</ul>`);
+    }
+    if (job.decisions?.length) {
+      parts.push(`<p><strong>⚖️ Decisions</strong></p><ul>${job.decisions.map(d => `<li>${escapeHtml(d)}</li>`).join("")}</ul>`);
+    }
+    if (job.worldState && Object.keys(job.worldState).length) {
+      const rows = Object.entries(job.worldState)
+        .map(([k, v]) => `<li><strong>${escapeHtml(k)}:</strong> ${escapeHtml(String(v))}</li>`).join("");
+      parts.push(`<p><strong>🌍 World State</strong></p><ul>${rows}</ul>`);
+    }
+    if (!parts.length) return;
+    const stamp = new Date().toLocaleString();
+    const block = `<p class="es-journal-stamp"><em>${escapeHtml(stamp)}</em></p>${parts.join("")}`;
+    const ctx = [
+      ...(job.mysteries || []),
+      ...(job.decisions || []),
+      ...Object.entries(job.worldState || {}).map(([k, v]) => `${k}: ${v}`)
+    ].join(" · ");
+    await this._appendRolling("storyThread", block, ctx, job.sourceVow);
+    // Story Threads are silent by design — no toast.
+  },
+
+  /* ---------------- rolling-journal helper ---------------- */
+
+  /**
+   * Append an HTML block to the single rolling journal for a silent type
+   * (World Facts / Story Threads), creating it on first use.
+   */
+  async _appendRolling(typeKey, html, contextLine, sourceVow) {
+    const spec = this.TYPES[typeKey];
+    if (!spec) return null;
+    const folder = await this.getOrCreateFolder(typeKey);
+    let entry = this._findRolling(typeKey, spec.journalName);
+
+    if (!entry) {
+      entry = await JournalEntry.create({
+        name: spec.journalName,
+        folder: folder?.id ?? null,
+        ownership: this._ownership(),
+        pages: [{
+          name: spec.journalName,
+          type: "text",
+          text: { content: `<h2>${spec.emoji} ${escapeHtml(spec.journalName)}</h2>${html}`, format: 1 }
+        }],
+        flags: {
+          [MODULE_ID]: {
+            type: typeKey,
+            createdBy: "ai",
+            lastUpdated: Date.now(),
+            relatedEntities: [],
+            sourceVow: sourceVow ?? null,
+            aiContext: contextLine || ""
+          }
+        }
+      });
+      return entry;
+    }
+
+    const page = entry.pages?.contents?.[0] ?? entry.pages?.find?.(() => true);
+    if (page) {
+      const prev = page.text?.content ?? "";
+      await page.update({ "text.content": `${prev}\n${html}` });
+    }
+    const existingCtx = entry.getFlag?.(MODULE_ID, "aiContext") || "";
+    await entry.update({
+      flags: {
+        [MODULE_ID]: {
+          type: typeKey,
+          createdBy: "ai",
+          lastUpdated: Date.now(),
+          sourceVow: sourceVow ?? entry.getFlag?.(MODULE_ID, "sourceVow") ?? null,
+          aiContext: `${existingCtx}\n${contextLine || ""}`.trim().slice(0, 6000)
+        }
+      }
+    });
+    return entry;
+  },
+
+  /* ---------------- entry rendering ---------------- */
+
+  _renderEntityHtml(type, e) {
+    const desc = e.description ? `<p>${escapeHtml(e.description)}</p>` : "";
+    const rows = [];
+    if (type === "npc") {
+      if (e.motivations)   rows.push(["Motivations", e.motivations]);
+      if (e.relationships) rows.push(["Relationships", e.relationships]);
+    } else if (type === "location") {
+      if (e.features) rows.push(["Notable features", e.features]);
+      if (e.dangers)  rows.push(["Dangers", e.dangers]);
+    } else if (type === "discovery") {
+      if (e.significance) rows.push(["Significance", e.significance]);
+      if (e.connectedTo)  rows.push(["Connected to", e.connectedTo]);
+    }
+    const list = rows.length
+      ? `<ul>${rows.map(([k, v]) => `<li><strong>${escapeHtml(k)}:</strong> ${escapeHtml(String(v))}</li>`).join("")}</ul>`
+      : "";
+    const spec = this.TYPES[type];
+    return `<h2>${spec?.emoji ?? ""} ${escapeHtml(e.name)}</h2>${desc}${list}` +
+           `<p class="es-journal-foot"><em>Recorded by The Eternal Skald.</em></p>`;
+  },
+
+  _renderEntityUpdateHtml(e) {
+    const stamp = new Date().toLocaleString();
+    const desc = e.description ? `<p>${escapeHtml(e.description)}</p>` : "";
+    const extras = [];
+    for (const k of ["motivations", "relationships", "features", "dangers", "significance", "connectedTo"]) {
+      if (e[k]) extras.push(`<li><strong>${escapeHtml(k)}:</strong> ${escapeHtml(String(e[k]))}</li>`);
+    }
+    const list = extras.length ? `<ul>${extras.join("")}</ul>` : "";
+    return `<p class="es-journal-stamp"><em>Update — ${escapeHtml(stamp)}</em></p>${desc}${list}`;
+  },
+
+  _entityContext(e) {
+    const bits = [e.name, e.description, e.motivations, e.relationships, e.features, e.dangers, e.significance, e.connectedTo]
+      .filter(Boolean).join(" | ");
+    return bits.slice(0, 2000);
+  },
+
+  /* ---------------- folder management ---------------- */
+
+  async _getRootFolder() {
+    const cacheKey = `__root__`;
+    if (this._folderCache.has(cacheKey)) return this._folderCache.get(cacheKey);
+    let root = game.folders?.find(f => f.type === "JournalEntry" && f.name === this.ROOT_FOLDER && !f.folder);
+    if (!root) {
+      try {
+        root = await Folder.create({ name: this.ROOT_FOLDER, type: "JournalEntry", color: this._folderColor });
+      } catch (e) { console.warn(LOG_PREFIX, "root folder create failed", e); root = null; }
+    }
+    this._folderCache.set(cacheKey, root);
+    return root;
+  },
+
+  /** Get or create the typed sub-folder under the root, on first use. */
+  async getOrCreateFolder(typeKey) {
+    const spec = this.TYPES[typeKey];
+    if (!spec) return null;
+    if (this._folderCache.has(typeKey)) return this._folderCache.get(typeKey);
+
+    const root = await this._getRootFolder();
+    let folder = game.folders?.find(f =>
+      f.type === "JournalEntry" && f.name === spec.folder &&
+      (f.folder?.id ?? f.folder) === (root?.id ?? null)
+    );
+    if (!folder) {
+      try {
+        folder = await Folder.create({
+          name: spec.folder,
+          type: "JournalEntry",
+          folder: root?.id ?? null,
+          color: this._folderColor
+        });
+      } catch (e) { console.warn(LOG_PREFIX, `folder '${spec.folder}' create failed`, e); folder = root; }
+    }
+    this._folderCache.set(typeKey, folder);
+    return folder;
+  },
+
+  /* ---------------- lookups ---------------- */
+
+  /** All journal entries this module created, optionally filtered by type. */
+  listEntries(typeFilter = null) {
+    try {
+      return (game.journal?.contents ?? []).filter(j => {
+        const t = j.getFlag?.(MODULE_ID, "type");
+        if (!t || j.getFlag?.(MODULE_ID, "createdBy") !== "ai") return false;
+        return typeFilter ? t === typeFilter : true;
+      });
+    } catch (_) { return []; }
+  },
+
+  /** Find an existing individual entry of a type by case-insensitive name. */
+  _findEntry(type, name) {
+    const lc = String(name).toLowerCase().trim();
+    return this.listEntries(type).find(j => j.name?.toLowerCase().trim() === lc) ?? null;
+  },
+
+  /** Find the single rolling journal for a silent type. */
+  _findRolling(typeKey, journalName) {
+    const lc = String(journalName).toLowerCase();
+    return this.listEntries(typeKey).find(j => j.name?.toLowerCase() === lc) ?? null;
+  },
+
+  /* ---------------- ownership / vow ---------------- */
+
+  _ownership() {
+    const lvls = (typeof CONST !== "undefined" && CONST.DOCUMENT_OWNERSHIP_LEVELS) || {};
+    if (this.permission() === "shared") {
+      return { default: lvls.OBSERVER ?? 2 };
+    }
+    return { default: lvls.NONE ?? 0 };   // gm-only (default)
+  },
+
+  /** Best-effort id of the active character's first incomplete vow. */
+  _currentVowId() {
+    try {
+      if (!Integration.active()) return null;
+      const actor = IronswornController.getActiveCharacter?.();
+      if (!actor) return null;
+      const tracks = IronswornController.getProgressTracks?.(actor) ?? [];
+      const vow = tracks.find(t => t.type === "vow" && !t.completed) ?? tracks.find(t => t.type === "vow");
+      return vow?.id ?? null;
+    } catch (_) { return null; }
+  },
+
+  /* ---------------- notifications ---------------- */
+
+  /**
+   * Minimal bottom-right toast: "📝 Added [name] to [type] journal".
+   * Respects the journalNotifications setting ("none" silences everything).
+   */
+  _toast(name, typeKey, verb = "Added") {
+    const level = this.notifyLevel();
+    if (level === "none") return;
+    const spec = this.TYPES[typeKey] || { label: typeKey, emoji: "📝" };
+    const label = spec.label || typeKey;
+    try {
+      let host = document.getElementById("es-journal-toasts");
+      if (!host) {
+        host = document.createElement("div");
+        host.id = "es-journal-toasts";
+        document.body.appendChild(host);
+      }
+      const el = document.createElement("div");
+      el.className = "es-journal-toast";
+      el.innerHTML = `<span class="es-jt-icon">📝</span><span class="es-jt-text">${verb} <strong>${escapeHtml(name)}</strong> to ${escapeHtml(label)} journal</span>`;
+      host.appendChild(el);
+      // Trigger fade-in, then auto-remove after ~2s.
+      requestAnimationFrame(() => el.classList.add("es-jt-show"));
+      setTimeout(() => {
+        el.classList.remove("es-jt-show");
+        setTimeout(() => { try { el.remove(); } catch (_) {} }, 400);
+      }, 2000);
+    } catch (e) {
+      // DOM not available (e.g. headless) — fall back to a quiet console note.
+      console.log(LOG_PREFIX, `${verb} ${name} to ${label} journal`);
+    }
+  },
+
+  /* ---------------- session chronicle ---------------- */
+
+  /**
+   * Generate a Session Chronicle from the in-memory activity log. Asks the
+   * AI to weave a saga-styled recap, then writes it as a dated journal and
+   * clears the log. Triggered by !end-session.
+   */
+  async generateSessionChronicle({ announce = true } = {}) {
+    if (!this.canWrite()) {
+      ui.notifications?.warn(`${SKALD_NAME}: only the GM can close a session chronicle.`);
+      return null;
+    }
+    const log = this._sessionLog.slice();
+    if (!log.length) {
+      await Chat.postSystem(`<em>The chronicle is bare — nothing notable was recorded this session.</em>`, { gmWhisper: true });
+      return null;
+    }
+
+    // Build a compact digest for the AI from the log.
+    const allFacts     = [...new Set(log.flatMap(e => e.facts))];
+    const allMysteries = [...new Set(log.flatMap(e => e.mysteries))];
+    const allDecisions = [...new Set(log.flatMap(e => e.decisions))];
+    const allEntities  = [...new Map(log.flatMap(e => e.entities).filter(x => x?.name).map(x => [x.name, x])).values()];
+    const worldState   = Object.assign({}, ...log.map(e => e.worldState || {}));
+
+    const digest = [
+      allEntities.length  ? `Notable figures & places: ${allEntities.map(e => `${e.name} (${e.type})`).join(", ")}` : "",
+      allDecisions.length ? `Key decisions: ${allDecisions.join("; ")}` : "",
+      allFacts.length     ? `Established facts: ${allFacts.join("; ")}` : "",
+      allMysteries.length ? `Open mysteries: ${allMysteries.join("; ")}` : "",
+      Object.keys(worldState).length ? `World state: ${Object.entries(worldState).map(([k, v]) => `${k}=${v}`).join(", ")}` : ""
+    ].filter(Boolean).join("\n");
+
+    const task = `Compose a SESSION CHRONICLE — a saga-styled recap of the session just ended, in your Skald voice. Use these recorded facts (do NOT invent beyond them; weave what is given):\n${digest}\n\nStructure it with short headed sections using **bold** headers: **What Happened**, **Decisions**, **Consequences**, **Unresolved Threads**. Keep it tight and evocative (4-8 short paragraphs total). Do NOT append any metadata block.`;
+
+    let recap;
+    try {
+      recap = await Client.chat([
+        { role: "system", content: buildSystemPrompt({ task }) },
+        { role: "user", content: "Close the chronicle for this session." }
+      ], { temperature: 0.8, maxTokens: 1200 });
+    } catch (e) {
+      console.warn(LOG_PREFIX, "session chronicle AI call failed:", e?.message || e);
+      // Degrade: write a plain digest if the AI is unreachable.
+      recap = `**What Happened**\n${digest || "(no details)"}`;
+    }
+
+    const folder = await this.getOrCreateFolder("session");
+    const title = `Session Chronicle — ${new Date().toLocaleDateString()}`;
+    const html = `<h2>📖 ${escapeHtml(title)}</h2>${formatMarkdown(recap)}`;
+    const entry = await JournalEntry.create({
+      name: title,
+      folder: folder?.id ?? null,
+      ownership: this._ownership(),
+      pages: [{ name: title, type: "text", text: { content: html, format: 1 } }],
+      flags: {
+        [MODULE_ID]: {
+          type: "session",
+          createdBy: "ai",
+          lastUpdated: Date.now(),
+          relatedEntities: [],
+          sourceVow: this._currentVowId(),
+          aiContext: digest.slice(0, 6000)
+        }
+      }
+    });
+
+    if (entry && announce) {
+      await Chat.postSkald(formatMarkdown(recap), { variant: "lore", title });
+      this._toast(title, "session");
+    }
+    // Clear the log — a new session begins.
+    this._sessionLog = [];
+    return entry;
   }
 };
 
@@ -3051,6 +3954,8 @@ Hooks.once("ready", async () => {
     npc: NpcDialogue,
     combat: CombatController,
     lore: LoreGenerator,
+    // --- Auto-journaling chronicle (v0.4.0) ---
+    journal: JournalSystem,
     resetMemory: (ch) => Memory.reset(ch),
     // --- AI Mode controls (v0.3.2) ---
     isAiMode: () => Settings.get("aiMode") !== false,

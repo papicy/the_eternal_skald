@@ -1,5 +1,5 @@
 /* =====================================================================
- *  THE ETERNAL SKALD — Server-Side Hook (v0.3.3)
+ *  THE ETERNAL SKALD — Server-Side Hook (v0.4.0)
  *  ---------------------------------------------------------------------
  *
  *  Usage:
@@ -49,6 +49,25 @@
  *  before the request ever reaches this hook. The server simply
  *  forwards those messages verbatim to the upstream LLM.
  *
+ *  Journal-system metadata note (v0.4.0)
+ *  -------------------------------------
+ *  v0.4.0 adds an auto-journaling system. Because this proxy is stateless
+ *  and (for streaming) pipes the upstream SSE bytes through untouched, the
+ *  structured journal metadata is NOT assembled server-side. Instead the
+ *  CLIENT instructs the model (via the system prompt) to append a single
+ *  trailing block to its reply:
+ *
+ *      [[SKALD_META]]
+ *      {"entities":[…],"facts":[…],"mysteries":[…],"worldState":{…},"decisions":[…]}
+ *      [[/SKALD_META]]
+ *
+ *  The client strips that block from the visible narration and parses it
+ *  into journal entries (see JournalSystem in eternal-skald.js). Travelling
+ *  inline keeps the server a pure pass-through and preserves token-by-token
+ *  streaming — the metadata simply streams last and is hidden from display.
+ *  No server change is required to carry it; this note documents the
+ *  contract so the proxy and client stay in sync.
+ *
  *  Requirements: Node 18+. Zero npm dependencies.
  *
  *  License: MIT
@@ -57,7 +76,7 @@
 import http  from "node:http";
 import https from "node:https";
 
-const VERSION    = "0.3.3";
+const VERSION    = "0.4.0";
 const PREFIX     = "/skald-api/";
 const MAX_BODY   = 2 * 1024 * 1024;   // 2 MiB inbound limit
 const MAX_RESP   = 8 * 1024 * 1024;   // 8 MiB upstream response limit
