@@ -1,8 +1,14 @@
 /* =====================================================================
- *  THE ETERNAL SKALD v0.3.3 — Foundry VTT v14 Module (Client)
+ *  THE ETERNAL SKALD v0.5.0 — Foundry VTT v14 Module (Client)
  *  ---------------------------------------------------------------------
  *  An AI-powered storytelling and combat-control assistant for Ironsworn
  *  and Ironsworn: Delve campaigns. Powered by Abacus AI ChatLLM.
+ *
+ *  v0.5.0 adds Browser-Based RAG (AI Memory): the Skald embeds its journal
+ *  entries into a local IndexedDB vector store (via transformers.js) and
+ *  recalls the most semantically relevant world memory before answering.
+ *  See scripts/browser-rag.js. Degrades gracefully — the AI always works
+ *  even when the embedding model can't load.
  *
  *  ARCHITECTURE (v0.3.3)
  *  ---------------------
@@ -28,13 +34,15 @@
  *      §13 HOOK REGISTRATIONS
  * ===================================================================== */
 
-console.log("=== The Eternal Skald v0.3.3 — module file loaded ===");
+console.log("=== The Eternal Skald v0.5.0 — module file loaded ===");
 
 import { IronswornData } from "./ironsworn-data.js";
 import { IronswornController } from "./ironsworn-controller.js";
+import { BrowserRAG } from "./browser-rag.js";
 
 console.log("The Eternal Skald | ironsworn-data.js imported successfully");
 console.log("The Eternal Skald | ironsworn-controller.js imported successfully");
+console.log("The Eternal Skald | browser-rag.js imported successfully");
 
 /* ===================================================================== */
 /*  §1  CONSTANTS                                                         */
@@ -82,7 +90,10 @@ const COMMANDS = Object.freeze({
   JOURNALS: "!journals",
   MYSTERIES:"!mysteries",
   REMIND:   "!remind",
-  END_SESSION: "!end-session"
+  END_SESSION: "!end-session",
+  // --- Browser-based RAG / AI memory (v0.5.0) ---
+  REINDEX:    "!reindex",
+  RAG_STATUS: "!rag-status"
 });
 
 /* ===================================================================== */
@@ -326,6 +337,72 @@ const Settings = {
       default: true
     });
 
+    // ---- Browser-based RAG / AI memory (v0.5.0) -----------------------
+
+    // Master switch for semantic memory. When off, the Skald behaves
+    // exactly as v0.4.0 (no embeddings, no vector store, no model load).
+    game.settings.register(MODULE_ID, "ragEnabled", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.ragEnabled.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.ragEnabled.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true
+    });
+
+    // Maximum tokens of recalled world memory injected per AI call.
+    game.settings.register(MODULE_ID, "ragContextTokens", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.ragContextTokens.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.ragContextTokens.hint"),
+      scope: "world",
+      config: true,
+      type: Number,
+      range: { min: 200, max: 6000, step: 100 },
+      default: 2000
+    });
+
+    // How many top matches to retrieve per query.
+    game.settings.register(MODULE_ID, "ragMaxResults", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.ragMaxResults.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.ragMaxResults.hint"),
+      scope: "world",
+      config: true,
+      type: Number,
+      range: { min: 1, max: 20, step: 1 },
+      default: 5
+    });
+
+    // Automatically embed journal entries as the Skald scribes them.
+    game.settings.register(MODULE_ID, "ragAutoIndex", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.ragAutoIndex.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.ragAutoIndex.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true
+    });
+
+    // Minimum cosine similarity for a memory to be considered relevant.
+    game.settings.register(MODULE_ID, "ragSimilarityThreshold", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.ragSimilarityThreshold.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.ragSimilarityThreshold.hint"),
+      scope: "world",
+      config: true,
+      type: Number,
+      range: { min: 0, max: 1, step: 0.05 },
+      default: 0.3
+    });
+
+    // Verbose RAG console logging for troubleshooting.
+    game.settings.register(MODULE_ID, "ragDebugMode", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.ragDebugMode.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.ragDebugMode.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: false
+    });
+
     game.settings.register(MODULE_ID, "debugLogging", {
       name: game.i18n.localize("ETERNAL_SKALD.settings.debugLogging.name"),
       hint: game.i18n.localize("ETERNAL_SKALD.settings.debugLogging.hint"),
@@ -428,10 +505,130 @@ GUIDELINES:
     ? buildJournalPromptBlock()
     : "";
 
-  return [persona, rulesDigest, guidance, ironswornBlock, journalBlock]
+  // Browser-based RAG (v0.5.0). Embeddings are async and cannot run inside
+  // this synchronous builder, so callers pre-fetch the recalled memory text
+  // (via RagBridge.fetchMemory) and pass it in through extras.memory. We
+  // simply slot it in here when present. Empty / disabled → omitted.
+  const memoryBlock = (typeof extras.memory === "string" && extras.memory.trim())
+    ? extras.memory.trim()
+    : "";
+
+  return [persona, rulesDigest, guidance, memoryBlock, ironswornBlock, journalBlock]
     .filter(Boolean)
     .join("\n\n") + taskAddendum;
 }
+
+/**
+ * Thin host-side bridge to the Browser RAG module (v0.5.0). Centralises the
+ * "fetch relevant world memory for this query" call so every AI call site
+ * can opt in with one line, while keeping all failure handling in one place.
+ * ALWAYS resolves to a string ("" when RAG is off, not ready, or errors) so
+ * narration never blocks or breaks on memory retrieval.
+ */
+const RagBridge = {
+  /**
+   * Retrieve a "RELEVANT WORLD MEMORY" prompt block for a query.
+   * @param {string} queryText - the player's prompt / move / scene seed.
+   * @returns {Promise<string>}
+   */
+  async fetchMemory(queryText) {
+    try {
+      if (!BrowserRAG?.isAvailable?.()) return "";
+      const q = String(queryText || "").trim();
+      if (!q) return "";
+      return await BrowserRAG.buildContextBlock(q);
+    } catch (e) {
+      console.warn(LOG_PREFIX, "[RAG] fetchMemory failed (continuing without memory):", e?.message || e);
+      return "";
+    }
+  },
+
+  /** Fire-and-forget: embed a freshly written/updated journal entry. */
+  indexEntry(entry) {
+    try {
+      if (!entry || !BrowserRAG?.isAvailable?.() || !BrowserRAG.autoIndex()) return;
+      BrowserRAG.indexJournalEntry(entry).catch(() => {});
+    } catch (_) {}
+  }
+};
+
+/**
+ * A small bottom-right progress card for long RAG operations (model
+ * download + bulk reindex). Reuses the journal-toast host styling, with an
+ * inner determinate progress bar. All DOM access is defensive so headless
+ * environments simply no-op. (v0.5.0)
+ */
+const RagProgress = {
+  _el: null,
+
+  _host() {
+    let host = document.getElementById("es-journal-toasts");
+    if (!host) {
+      host = document.createElement("div");
+      host.id = "es-journal-toasts";
+      document.body.appendChild(host);
+    }
+    return host;
+  },
+
+  /** Show (or reset) the progress card with an initial label. */
+  show(label) {
+    try {
+      this.hide();
+      const el = document.createElement("div");
+      el.className = "es-journal-toast es-rag-progress";
+      el.innerHTML =
+        `<span class="es-jt-icon">🧠</span>` +
+        `<span class="es-jt-text"><span class="es-rag-label">${escapeHtml(label || "Working…")}</span>` +
+        `<span class="es-rag-bar"><span class="es-rag-bar-fill" style="width:0%"></span></span></span>`;
+      this._host().appendChild(el);
+      requestAnimationFrame(() => el.classList.add("es-jt-show"));
+      this._el = el;
+    } catch (_) { this._el = null; }
+  },
+
+  /** Update label and (optional) percentage [0–100]. */
+  update(label, pct) {
+    try {
+      if (!this._el) return;
+      const lab = this._el.querySelector(".es-rag-label");
+      const fill = this._el.querySelector(".es-rag-bar-fill");
+      if (lab && label) lab.textContent = label;
+      if (fill && typeof pct === "number") fill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+    } catch (_) {}
+  },
+
+  /** Finish successfully — show a final message, then fade out. */
+  done(label) { this._finish(label, 2200); },
+
+  /** Finish with an error tint. */
+  fail(label) {
+    try { this._el?.classList.add("es-rag-fail"); } catch (_) {}
+    this._finish(label, 3000);
+  },
+
+  _finish(label, after) {
+    try {
+      if (this._el) {
+        const lab = this._el.querySelector(".es-rag-label");
+        const fill = this._el.querySelector(".es-rag-bar-fill");
+        if (lab && label) lab.textContent = label;
+        if (fill) fill.style.width = "100%";
+      }
+    } catch (_) {}
+    setTimeout(() => this.hide(), after);
+  },
+
+  hide() {
+    try {
+      const el = this._el;
+      if (!el) return;
+      el.classList.remove("es-jt-show");
+      setTimeout(() => { try { el.remove(); } catch (_) {} }, 400);
+      this._el = null;
+    } catch (_) { this._el = null; }
+  }
+};
 
 /**
  * Build the auto-journaling metadata protocol block (v0.4.0).
@@ -1256,6 +1453,9 @@ function dispatchCommand(rawText) {
       case COMMANDS.MYSTERIES:return () => Commands.mysteries(args);
       case COMMANDS.REMIND:  return () => Commands.remind(args);
       case COMMANDS.END_SESSION: return () => Commands.endSession(args);
+      // --- Browser-based RAG / AI memory (v0.5.0) ---
+      case COMMANDS.REINDEX:    return () => Commands.reindex(args);
+      case COMMANDS.RAG_STATUS: return () => Commands.ragStatus(args);
       default:               return null;
     }
   })();
@@ -1316,8 +1516,10 @@ const Commands = {
       [COMMANDS.COMBAT, "Get tactical narration/advice for the current fight."],
       [COMMANDS.JOURNALS,  "List the chronicle entries the Skald has scribed. e.g. <code>!journals npc</code>"],
       [COMMANDS.MYSTERIES, "Review the open mysteries and unresolved threads."],
-      [COMMANDS.REMIND,    "Recall what the chronicle holds. e.g. <code>!remind Keldra</code>"],
-      [COMMANDS.END_SESSION, "GM-only: weave a Session Chronicle from this session's events."]
+      [COMMANDS.REMIND,    "Recall what the chronicle holds — now with semantic memory. e.g. <code>!remind Keldra</code>"],
+      [COMMANDS.END_SESSION, "GM-only: weave a Session Chronicle from this session's events."],
+      [COMMANDS.REINDEX,   "GM-only: rebuild the Skald's semantic memory from all chronicle entries."],
+      [COMMANDS.RAG_STATUS, "Show the state of the Skald's semantic memory (RAG)."]
     ];
 
     const tableRows = rows.map(([c, d]) =>
@@ -1438,7 +1640,14 @@ const Commands = {
     return Chat.postSkald(body, { variant: "oracle", title: "Open Threads" });
   },
 
-  /* --------------------------- !remind (v0.4.0) -------------------- */
+  /* --------------------------- !remind (RAG, v0.5.0) --------------- */
+  /**
+   * Recall what the chronicle holds about a topic. As of v0.5.0 this is
+   * powered by Browser-Based RAG: the topic is embedded and matched
+   * semantically against the journal vector store. When RAG is disabled,
+   * still loading, or finds nothing, it degrades to the v0.4.0 keyword
+   * search so the command always works.
+   */
   async remind(args) {
     const topic = (args || "").trim();
     const entries = JournalSystem.listEntries();
@@ -1446,36 +1655,61 @@ const Commands = {
       return Chat.postSystem(`<em>I have naught written yet to recall.</em>`, { gmWhisper: true });
     }
 
-    // Simple text search (no RAG yet — that arrives in v0.5.0). Match the
-    // topic against entry names + their stored aiContext; fall back to the
-    // most recently updated entries when no topic is given or nothing hits.
-    const needle = topic.toLowerCase();
-    const scored = entries.map(j => {
-      const name = (j.name || "").toLowerCase();
-      const ctx = (j.getFlag(MODULE_ID, "aiContext") || "").toLowerCase();
-      let score = 0;
-      if (needle) {
-        if (name.includes(needle)) score += 5;
-        for (const word of needle.split(/\s+/).filter(w => w.length > 2)) {
-          if (name.includes(word)) score += 2;
-          if (ctx.includes(word)) score += 1;
+    // ── 1) Try semantic recall (RAG) when a topic is given ───────────
+    let hits = [];   // [{ j, ctx, label }]
+    let usedRag = false;
+    if (topic && BrowserRAG?.isAvailable?.()) {
+      try {
+        // Warm the model if needed so the very first !remind works too.
+        if (!BrowserRAG.isReady()) {
+          await Chat.postSystem(`<em>${SKALD_NAME} reaches into memory…</em>`, { gmWhisper: true });
+          await BrowserRAG.init();
         }
+        const results = await BrowserRAG.search(topic, { maxResults: 6 });
+        if (results.length) {
+          usedRag = true;
+          for (const r of results) {
+            const j = game.journal?.get?.(r.id);
+            if (!j) continue;
+            const spec = JournalSystem.TYPES[j.getFlag(MODULE_ID, "type")] || { label: "Note" };
+            hits.push({ j, ctx: r.text || j.getFlag(MODULE_ID, "aiContext") || "", label: spec.label, score: r.score });
+          }
+        }
+      } catch (e) {
+        console.warn(LOG_PREFIX, "[RAG] !remind semantic search failed, falling back:", e?.message || e);
       }
-      return { j, score, updated: j.getFlag(MODULE_ID, "lastUpdated") || 0 };
-    });
+    }
 
-    let hits = needle
-      ? scored.filter(s => s.score > 0).sort((a, b) => b.score - a.score)
-      : scored.sort((a, b) => b.updated - a.updated);
-    if (!hits.length) hits = scored.sort((a, b) => b.updated - a.updated);
-    hits = hits.slice(0, 6);
+    // ── 2) Keyword fallback (v0.4.0 behaviour) ───────────────────────
+    if (!hits.length) {
+      const needle = topic.toLowerCase();
+      const scored = entries.map(j => {
+        const name = (j.name || "").toLowerCase();
+        const ctx = (j.getFlag(MODULE_ID, "aiContext") || "").toLowerCase();
+        let score = 0;
+        if (needle) {
+          if (name.includes(needle)) score += 5;
+          for (const word of needle.split(/\s+/).filter(w => w.length > 2)) {
+            if (name.includes(word)) score += 2;
+            if (ctx.includes(word)) score += 1;
+          }
+        }
+        return { j, score, updated: j.getFlag(MODULE_ID, "lastUpdated") || 0 };
+      });
+      let ranked = needle
+        ? scored.filter(s => s.score > 0).sort((a, b) => b.score - a.score)
+        : scored.sort((a, b) => b.updated - a.updated);
+      if (!ranked.length) ranked = scored.sort((a, b) => b.updated - a.updated);
+      hits = ranked.slice(0, 6).map(({ j }) => {
+        const spec = JournalSystem.TYPES[j.getFlag(MODULE_ID, "type")] || { label: "Note" };
+        return { j, ctx: j.getFlag(MODULE_ID, "aiContext") || "", label: spec.label };
+      });
+    }
 
     // Build a compact context digest from the matched entries for the AI.
-    const digest = hits.map(({ j }) => {
-      const spec = JournalSystem.TYPES[j.getFlag(MODULE_ID, "type")] || { label: "Note" };
-      const ctx = j.getFlag(MODULE_ID, "aiContext") || "";
-      return `• [${spec.label}] ${j.name}: ${ctx}`.slice(0, 600);
-    }).join("\n");
+    const digest = hits.map(({ j, ctx, label }) =>
+      `• [${label}] ${j.name}: ${ctx}`.slice(0, 600)
+    ).join("\n");
 
     const subject = topic ? `the topic "${topic}"` : "recent events";
     const task = `The GM asks you to recall what the chronicle holds about ${subject}. Using ONLY the journal notes below, give a tight, in-character reminder (3-6 sentences) of who/what/where matters and any open threads. Do not invent details beyond the notes. Do NOT append any metadata block.\n\nCHRONICLE NOTES:\n${digest}`;
@@ -1486,7 +1720,8 @@ const Commands = {
         { role: "user", content: topic ? `Remind me about: ${topic}` : "Remind me what has happened recently." }
       ], { temperature: 0.7, maxTokens: 600 });
       const links = hits.map(({ j }) => j.link ?? `@JournalEntry[${j.id}]{${escapeHtml(j.name)}}`).join(" · ");
-      const body = `${formatMarkdown(reply)}<p class="es-help-aside"><em>Drawn from:</em> ${links}</p>`;
+      const recallNote = usedRag ? ` <span class="es-rag-badge">semantic recall</span>` : "";
+      const body = `${formatMarkdown(reply)}<p class="es-help-aside"><em>Drawn from:</em> ${links}${recallNote}</p>`;
       return Chat.postSkald(body, { variant: "lore", title: topic ? `Recalling: ${topic}` : "The Skald Recalls" });
     } catch (err) {
       console.warn(LOG_PREFIX, "!remind failed", err);
@@ -1496,6 +1731,81 @@ const Commands = {
         variant: "lore", title: topic ? `Recalling: ${topic}` : "The Skald Recalls"
       });
     }
+  },
+
+  /* --------------------------- !reindex (v0.5.0) ------------------- */
+  /**
+   * Rebuild the entire semantic memory index from the current journal
+   * entries. GM-only. Surfaces a progress toast while the model loads and
+   * embeds each entry.
+   */
+  async reindex(_args) {
+    if (!game.user.isGM) {
+      return Chat.postSystem(`<em>Only the GM may re-weave the threads of memory.</em>`, { gmWhisper: true });
+    }
+    if (!BrowserRAG?.isAvailable?.()) {
+      return Chat.postSystem(
+        `<em>Semantic memory is unavailable here (it is disabled, or your browser lacks support). Enable it in <strong>Module Settings → The Eternal Skald</strong>.</em>`,
+        { gmWhisper: true }
+      );
+    }
+    const entries = JournalSystem.listEntries();
+    if (!entries.length) {
+      return Chat.postSystem(`<em>There is nothing yet written to commit to memory.</em>`, { gmWhisper: true });
+    }
+
+    RagProgress.show("Awakening memory…");
+    try {
+      const { indexed, total } = await BrowserRAG.reindexAll(entries, {
+        onProgress: (done, tot, modelEvt) => {
+          if (modelEvt && modelEvt.status && modelEvt.status !== "ready") {
+            const pct = typeof modelEvt.progress === "number" ? ` ${modelEvt.progress}%` : "";
+            RagProgress.update(`Loading memory model…${pct}`, modelEvt.progress);
+          } else {
+            const pct = tot ? Math.round((done / tot) * 100) : 0;
+            RagProgress.update(`Embedding chronicle ${done}/${tot}`, pct);
+          }
+        }
+      });
+      RagProgress.done(`Memory woven: ${indexed}/${total} entries.`);
+      return Chat.postSkald(
+        `<p>I have committed <strong>${indexed}</strong> of <strong>${total}</strong> chronicle entries to memory. Ask me to <code>!remind</code> you of anything within.</p>`,
+        { variant: "lore", title: "The Threads of Memory" }
+      );
+    } catch (err) {
+      console.warn(LOG_PREFIX, "[RAG] !reindex failed", err);
+      RagProgress.fail("Memory weaving failed.");
+      return Chat.postSystem(`<strong>The weaving faltered:</strong> ${escapeHtml(err?.message || String(err))}`, { gmWhisper: true });
+    }
+  },
+
+  /* --------------------------- !rag-status (v0.5.0) ---------------- */
+  /** Report semantic-memory health (model, vector count, settings). */
+  async ragStatus(_args) {
+    const s = await (BrowserRAG?.status?.() ?? Promise.resolve(null));
+    if (!s) {
+      return Chat.postSystem(`<em>Semantic memory is not loaded.</em>`, { gmWhisper: true });
+    }
+    const yn = (b) => b ? "✅" : "❌";
+    const rows = [
+      ["Enabled",            yn(s.enabled)],
+      ["Browser support",    yn(s.indexedDB)],
+      ["Model loaded",       s.modelFailed ? "⚠️ failed this session" : yn(s.modelReady)],
+      ["Auto-index",         yn(s.autoIndex)],
+      ["Vectors stored",     String(s.vectorCount)],
+      ["Model",              `<code>${escapeHtml(s.model)}</code> (${s.dims}-dim)`],
+      ["Max results",        String(s.maxResults)],
+      ["Context budget",     `${s.contextTokens} tokens`],
+      ["Similarity threshold", String(s.threshold)]
+    ];
+    const tableRows = rows.map(([k, v]) => `<tr><td><strong>${k}</strong></td><td>${v}</td></tr>`).join("");
+    const tip = !s.modelReady && !s.modelFailed
+      ? `<p class="es-help-aside"><em>The memory model loads on first use (or run <code>!reindex</code> to warm it now).</em></p>`
+      : "";
+    return Chat.postSkald(
+      `<p><strong>Semantic Memory (RAG) status:</strong></p><table class="es-help-table"><tbody>${tableRows}</tbody></table>${tip}`,
+      { variant: "help", title: "The Skald's Memory" }
+    );
   },
 
   /* ------------------------ !end-session (v0.4.0) ------------------ */
@@ -1524,8 +1834,11 @@ async function runConversation(channel, userText, { task, label, variant = "defa
     // Narrative channels (skald/scene/combat) are the chronicle's primary
     // source. Allow the AI to append a [[SKALD_META]] block we can ingest.
     const allowJournal = ["skald", "scene", "combat"].includes(channel);
+    // Recall semantically-relevant world memory for this prompt (v0.5.0).
+    // Always resolves to a string ("" when RAG is off/not ready/fails).
+    const memory = await RagBridge.fetchMemory(userText);
     const messages = [
-      { role: "system", content: buildSystemPrompt({ task, allowMoves, context, allowJournal }) },
+      { role: "system", content: buildSystemPrompt({ task, allowMoves, context, allowJournal, memory }) },
       ...Memory.get(channel)
     ];
 
@@ -2258,8 +2571,10 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
 
     try {
       Memory.push("general", "user", `(${parsed.moveName} → ${parsed.outcome})`);
+      // Recall relevant world memory using the move + the player's intent.
+      const memory = await RagBridge.fetchMemory(`${parsed.moveName} ${this._lastIntent || ""}`.trim());
       const messages = [
-        { role: "system", content: buildSystemPrompt({ task, context: ctx, allowEffects, allowJournal: true }) },
+        { role: "system", content: buildSystemPrompt({ task, context: ctx, allowEffects, allowJournal: true, memory }) },
         ...Memory.get("general")
       ];
 
@@ -2545,8 +2860,9 @@ STATS: <name>; rank <troublesome|dangerous|formidable|extreme|epic>; <one-line m
 Then on a new line speak as the NPC — greet the players in-character, in 2-4 sentences. Use quotation marks for their spoken dialogue.`;
 
     try {
+      const memory = await RagBridge.fetchMemory(descriptor);
       const messages = [
-        { role: "system", content: buildSystemPrompt({ task }) },
+        { role: "system", content: buildSystemPrompt({ task, memory }) },
         { role: "user", content: `Introduce the NPC: ${descriptor}` }
       ];
       const reply = await Client.chat(messages, { temperature: 0.9 });
@@ -2593,8 +2909,9 @@ Then on a new line speak as the NPC — greet the players in-character, in 2-4 s
     if (!session) return null;
     try {
       const task = `You remain in the voice of the NPC introduced earlier ("${session.descriptor}"). Respond in-character, 1-3 sentences. Honour their stated goal and manner. Do NOT narrate other characters' actions. Use quotation marks for spoken dialogue.`;
+      const memory = await RagBridge.fetchMemory(`${session.descriptor} ${userLine}`.trim());
       const messages = [
-        { role: "system", content: buildSystemPrompt({ task }) },
+        { role: "system", content: buildSystemPrompt({ task, memory }) },
         ...Memory.get(session.channel),
         { role: "user", content: userLine }
       ];
@@ -2698,8 +3015,9 @@ const OracleInterpreter = {
     const task = `The fates have spoken. The oracle "${oracleLabel}" returned: "${result}" (roll ${roll}).
 Interpret this for the current Ironsworn scene in 2-4 sentences. Be specific and useful — offer a concrete hook the GM can run with. Do not re-roll, do not invent additional oracle results.`;
     try {
+      const memory = await RagBridge.fetchMemory(`${oracleLabel}: ${result}`);
       const messages = [
-        { role: "system", content: buildSystemPrompt({ task }) },
+        { role: "system", content: buildSystemPrompt({ task, memory }) },
         { role: "user", content: `Interpret the oracle result: ${result}` }
       ];
       const cardOpts = { variant: "oracle", title: "What the Skald Hears" };
@@ -2750,8 +3068,9 @@ const LoreGenerator = {
   async write(topic) {
     const task = `Compose 3-5 short paragraphs of Ironsworn world-building lore on the topic: "${topic}". Norse-tinged, evocative, GM-usable. Include at least one named place, one named figure, and one rumour or hook. Format with a clear opening sentence; use occasional **bold** for proper nouns.`;
     try {
+      const memory = await RagBridge.fetchMemory(topic);
       const reply = await Client.chat([
-        { role: "system", content: buildSystemPrompt({ task }) },
+        { role: "system", content: buildSystemPrompt({ task, memory }) },
         { role: "user", content: `Write lore on: ${topic}` }
       ], { temperature: 0.85, maxTokens: 1100 });
 
@@ -3034,7 +3353,11 @@ const JournalSystem = {
         }
       }
     });
-    if (entry) this._toast(name, type);
+    if (entry) {
+      this._toast(name, type);
+      // Embed into semantic memory (v0.5.0) — fire-and-forget.
+      RagBridge.indexEntry(entry);
+    }
     return entry;
   },
 
@@ -3061,6 +3384,8 @@ const JournalSystem = {
       });
       // Updates are quieter than creates — only toast in "detailed" mode.
       if (this.notifyLevel() === "detailed") this._toast(entry.name, type, "Updated");
+      // Re-embed the updated entry so memory reflects the new content (v0.5.0).
+      RagBridge.indexEntry(entry);
       return entry;
     } catch (e) {
       console.warn(LOG_PREFIX, "_updateEntity failed:", e?.message || e);
@@ -3134,6 +3459,8 @@ const JournalSystem = {
           }
         }
       });
+      // Embed the freshly-created rolling journal (v0.5.0).
+      RagBridge.indexEntry(entry);
       return entry;
     }
 
@@ -3154,6 +3481,8 @@ const JournalSystem = {
         }
       }
     });
+    // Re-embed the appended rolling journal (v0.5.0).
+    RagBridge.indexEntry(entry);
     return entry;
   },
 
@@ -3385,9 +3714,13 @@ const JournalSystem = {
       }
     });
 
-    if (entry && announce) {
-      await Chat.postSkald(formatMarkdown(recap), { variant: "lore", title });
-      this._toast(title, "session");
+    if (entry) {
+      // Embed the session chronicle into semantic memory (v0.5.0).
+      RagBridge.indexEntry(entry);
+      if (announce) {
+        await Chat.postSkald(formatMarkdown(recap), { variant: "lore", title });
+        this._toast(title, "session");
+      }
     }
     // Clear the log — a new session begins.
     this._sessionLog = [];
@@ -3956,6 +4289,8 @@ Hooks.once("ready", async () => {
     lore: LoreGenerator,
     // --- Auto-journaling chronicle (v0.4.0) ---
     journal: JournalSystem,
+    // --- Browser-based RAG / semantic memory (v0.5.0) ---
+    rag: BrowserRAG,
     resetMemory: (ch) => Memory.reset(ch),
     // --- AI Mode controls (v0.3.2) ---
     isAiMode: () => Settings.get("aiMode") !== false,
@@ -4102,4 +4437,15 @@ Hooks.on("renderChatMessage", (message, html /*, data */) => {
     const el = html?.[0] ?? html;
     Integration.wireSuggestionCard(message, el);
   } catch (_) { /* defensive */ }
+});
+
+// --- deleteJournalEntry: keep semantic memory in sync (v0.5.0) -------
+// When a Skald-authored journal entry is deleted, evict its vector so it
+// no longer surfaces in recall. Fire-and-forget; never throws.
+Hooks.on("deleteJournalEntry", (entry /*, options, userId */) => {
+  try {
+    if (!entry?.getFlag?.(MODULE_ID, "createdBy")) return;
+    const id = entry.id || entry._id;
+    if (id) BrowserRAG?.remove?.(id);
+  } catch (_) { /* defensive — memory upkeep must never break deletes */ }
 });

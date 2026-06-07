@@ -467,6 +467,55 @@
 .es-journal-toast .es-jt-icon { font-size: 1rem; }
 .es-journal-toast .es-jt-text strong { color: var(--es-gold, #c9a55a); }
 
+/* --- Browser-based RAG / semantic-memory progress card (v0.5.0) ----- */
+.es-journal-toast.es-rag-progress {
+  align-items: flex-start;
+  min-width: 240px;
+}
+.es-journal-toast.es-rag-progress .es-jt-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.es-rag-label { display: block; }
+.es-rag-bar {
+  display: block;
+  width: 100%;
+  height: 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+.es-rag-bar-fill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--es-gold, #c9a55a), #e7cf94);
+  transition: width 0.3s ease;
+}
+.es-journal-toast.es-rag-fail {
+  border-color: #b5482f;
+}
+.es-journal-toast.es-rag-fail .es-rag-bar-fill {
+  background: linear-gradient(90deg, #b5482f, #d97c5f);
+}
+
+/* Inline "semantic recall" badge shown on !remind cards. */
+.es-rag-badge {
+  display: inline-block;
+  margin-left: 0.4em;
+  padding: 0.05em 0.5em;
+  font-size: 0.72em;
+  font-variant: small-caps;
+  letter-spacing: 0.04em;
+  color: #1a1610;
+  background: var(--es-gold, #c9a55a);
+  border-radius: 10px;
+  vertical-align: middle;
+}
+
 /* Chat listings produced by !journals / !mysteries / !remind. */
 .eternal-skald-card .es-journal-head {
   margin: 0.5em 0 0.2em;

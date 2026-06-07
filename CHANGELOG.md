@@ -12,6 +12,71 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.5.0] — 2026-06-07
+
+### Added
+- **AI Memory — Browser-Based RAG.** The Skald now has a *semantic long-term
+  memory* of your saga, built entirely inside the browser. There is **no server
+  to run, no cloud vector database, and no extra API keys** for memory — it is
+  private by design and lives only on the GM's machine.
+  - **Local embeddings.** Each chronicle Journal Entry (NPCs, locations,
+    discoveries, world facts, story threads, session chronicles) is turned into a
+    384-dimension embedding vector using a small transformer model
+    (`Xenova/all-MiniLM-L6-v2`) running locally via
+    [transformers.js](https://github.com/xenova/transformers.js) (WASM/WebGPU).
+    The model (~90 MB) is fetched from a CDN on first use and cached by the
+    browser thereafter.
+  - **IndexedDB vector store.** Vectors, their source text, and metadata are
+    stored in an IndexedDB database (`eternal-skald-vectors` → `journals`), so
+    memory survives reloads.
+  - **Relevant recall before every answer.** Before the Skald responds, your
+    prompt (or the move/scene/oracle in play) is embedded and matched against the
+    store with **cosine similarity**; the most relevant entries are injected as a
+    `RELEVANT WORLD MEMORY` block in the system prompt. This keeps continuity
+    across long campaigns without bloating the context window.
+  - **Smart, bounded injection.** Retrieval honours a configurable token budget
+    (default 2000), a max-results cap (default 5), and a similarity threshold
+    (default 0.3), trimming the recalled block to fit.
+  - **Automatic indexing.** New and updated chronicle entries are embedded in the
+    background through a serial queue, so journal writes never stack CPU-heavy
+    work on the main thread. Deleting a Skald journal evicts its vector too.
+- **`!remind` is now semantic.** It embeds your topic and recalls the most
+  *meaningfully related* entries (not just keyword matches), tagging the result
+  with a "semantic recall" badge. It transparently falls back to the v0.4.0
+  keyword search when memory is disabled, still loading, or finds nothing.
+- **New command `!reindex`** (GM-only) — rebuilds the entire semantic memory
+  from your current chronicle, with a live progress bar while the model loads
+  and entries embed.
+- **New command `!rag-status`** — shows memory health: whether it's enabled,
+  browser support, whether the model is loaded, auto-index state, the number of
+  vectors stored, and the active tuning settings.
+- **Six new settings** (World-scoped): **Semantic Memory (RAG)** on/off,
+  **Memory Context Budget**, **Memory Results per Query**, **Auto-Index
+  Journals**, **Memory Relevance Threshold**, and **Memory Debug Logging**.
+- **Public API.** `game.modules.get("the-eternal-skald").api.rag` exposes the
+  `BrowserRAG` module (`search`, `buildContextBlock`, `reindexAll`, `status`,
+  `clear`, …) for macros and other modules.
+
+### Changed
+- The system-prompt builder now slots a `RELEVANT WORLD MEMORY` block (when
+  available) between the persona/guidance and the Ironsworn/journal blocks.
+- Memory retrieval is wired into all narrative AI call sites — `!skald`,
+  `!scene`, `!combat`, move-outcome narration, NPC dialogue, oracle
+  interpretation and lore generation.
+
+### Notes
+- **Graceful degradation.** RAG never blocks or breaks play. If transformers.js
+  can't be fetched (offline, strict CSP, very old browser) or IndexedDB is
+  unavailable, every memory call fails *soft* and the Skald simply answers
+  without world memory — exactly as in v0.4.0.
+- **First-time setup.** The embedding model downloads once (~90 MB). The very
+  first conversations after enabling RAG answer immediately without memory while
+  the model warms in the background; run `!reindex` to load it and index your
+  existing chronicle up front.
+- Requires a modern browser with WebAssembly + IndexedDB (any recent Chrome,
+  Edge, Firefox or Safari). WebGPU is used automatically when available for a
+  speed boost, but is not required.
+
 ## [0.4.0] — 2026-06-07
 
 ### Added

@@ -86,6 +86,30 @@
       "sessionAutoSummary": {
         "name": "Session Chronicle on Demand",
         "hint": "Enable the !end-session command, which weaves a saga-styled recap of everything recorded this session into a dated Session Chronicle journal. Defaults to ON."
+      },
+      "ragEnabled": {
+        "name": "Semantic Memory (RAG)",
+        "hint": "Give the Skald a long-term semantic memory of your saga. Journal entries are embedded into a local in-browser vector store and the most relevant ones are recalled before the Skald answers — improving continuity across sessions. Runs entirely in your browser (no server, no cloud). A small model (~90 MB) downloads once on first use and is cached. Defaults to ON; the AI still works fully when disabled."
+      },
+      "ragContextTokens": {
+        "name": "Memory Context Budget (tokens)",
+        "hint": "Maximum amount of recalled world memory (in tokens, ~4 characters each) injected into each AI request. Higher values give the Skald more continuity but use more of the prompt. Default: 2000."
+      },
+      "ragMaxResults": {
+        "name": "Memory Results per Query",
+        "hint": "How many of the most relevant chronicle entries to recall for each query before trimming to the context budget. Default: 5."
+      },
+      "ragAutoIndex": {
+        "name": "Auto-Index Journals",
+        "hint": "Automatically embed each NPC, location, discovery, world fact, story thread and session chronicle into semantic memory as the Skald scribes it. Turn off to index only manually via the !reindex command. Defaults to ON."
+      },
+      "ragSimilarityThreshold": {
+        "name": "Memory Relevance Threshold",
+        "hint": "Minimum cosine similarity (0–1) for a memory to be considered relevant to a query. Lower values recall more (but looser) matches; higher values recall only strong matches. Default: 0.3."
+      },
+      "ragDebugMode": {
+        "name": "Memory Debug Logging",
+        "hint": "Print verbose semantic-memory (RAG) diagnostics to the browser console (F12): model load, embedding, indexing and search activity. Useful for troubleshooting. Defaults to OFF."
       }
     },
 

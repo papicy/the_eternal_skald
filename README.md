@@ -4,9 +4,11 @@ An AI-powered storyteller, oracle interpreter, and tactical enemy controller for
 
 Powered by the **Abacus AI ChatLLM** platform (Gemini 3.0 Flash by default).
 
-> ⚠️ **Alpha / Development Version (v0.4.0)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
+> ⚠️ **Alpha / Development Version (v0.5.0)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
 
 As of **v0.3.0**, the Skald integrates directly with the official [**foundry-ironsworn**](https://foundryvtt.com/packages/foundry-ironsworn) system: it reads your character's stats and meters, *suggests* the right Ironsworn move, triggers the system's own dice mechanics on one click, narrates the official strong-hit / weak-hit / miss outcome, and can optionally apply mechanical effects. See [Ironsworn Integration](#ironsworn-integration) below. The module still works standalone in any system — Ironsworn features simply activate when the system is present.
+
+**New in v0.5.0 — AI Memory (Browser-Based RAG).** The Skald now *remembers your whole saga*. Every chronicle entry is embedded into a private, **in-browser** semantic memory, and the most *relevant* NPCs, locations, facts and threads are recalled automatically before the Skald speaks — so continuity holds across sessions without bloating the prompt. It runs entirely in your browser (no server, no cloud, no extra API keys); a small model downloads once and is cached. `!remind` is now semantic, joined by `!reindex` and `!rag-status`. See [AI Memory (Browser-Based RAG)](#ai-memory-browser-based-rag) below.
 
 **New in v0.4.0 — the Living Chronicle.** The Skald now **automatically scribes your saga into Foundry Journal Entries** as you play: NPCs, locations and discoveries each get their own entry, while world facts and story threads accumulate in rolling journals — all organized into folders under *The Eternal Skald*. It runs quietly in the background and never interrupts narration. Review your world with `!journals`, `!mysteries` and `!remind`, or close out a play session with `!end-session` for a saga-styled recap. See [The Living Chronicle](#the-living-chronicle-auto-journaling) below.
 
@@ -71,7 +73,7 @@ node --import "./Data/modules/the-eternal-skald/scripts/eternal-skald-server.mjs
 When Foundry starts, you should see this in the console/logs:
 
 ```
-⚔️  Skald | v0.4.0 — server hook active. /skald-api/* routes ready.
+⚔️  Skald | v0.5.0 — server hook active. /skald-api/* routes ready.
 ```
 
 ### 3. Set your API key
@@ -93,7 +95,7 @@ http://your-foundry:30000/skald-api/health
 You should see:
 
 ```json
-{"status":"ok","service":"The Eternal Skald","version":"0.4.0"}
+{"status":"ok","service":"The Eternal Skald","version":"0.5.0"}
 ```
 
 If you get a 404 or Foundry's normal HTML page, the `--import` flag isn't taking effect. Double-check:
@@ -304,10 +306,45 @@ New NPC/Location/Discovery entries surface as a subtle bottom-right **toast** th
 
 - `!journals [type]` — list what's been recorded (optionally filtered by type).
 - `!mysteries` — see open mysteries, decisions, and tracked world-state.
-- `!remind [topic]` — recall what the chronicle holds about a topic. (v0.4.0 uses a scored text search; richer semantic recall is planned for v0.5.0.)
+- `!remind [topic]` — recall what the chronicle holds about a topic. **(v0.5.0)** Now powered by **semantic recall** — the Skald embeds your topic and finds the most *meaning-relevant* entries (not just keyword matches), falling back to scored text search if the memory model isn't ready. See [AI Memory](#ai-memory-browser-based-rag).
 - `!end-session` — *(GM-only)* weave a Session Chronicle from everything recorded this session.
 
 Auto-journaling is **on by default** and degrades gracefully — if a write ever fails, play continues uninterrupted. Toggle it any time with the **Auto-Journaling** setting.
+
+---
+
+## AI Memory (Browser-Based RAG)
+
+**New in v0.5.0.** The Eternal Skald now has a long-term, *semantic* memory of your world. Instead of only feeding the AI the last few chat messages, the Skald can recall the **most meaning-relevant** journal entries — NPCs, locations, lore, world facts, story threads, session chronicles — and weave them into its context **before** it answers. The result: an AI Game-Master that remembers who the villagers are, what oaths you swore three sessions ago, and the rumor you heard in the barrow.
+
+### How it works
+
+This is **Retrieval-Augmented Generation (RAG) that runs entirely in your browser** — no extra server, no third-party vector database, nothing leaves your machine for the memory step.
+
+1. **Embedding.** Whenever a journal entry is created or updated, the Skald turns its text into a 384-dimension *embedding* vector using a small open-source model ([`Xenova/all-MiniLM-L6-v2`](https://huggingface.co/Xenova/all-MiniLM-L6-v2)) running locally via [transformers.js](https://github.com/xenova/transformers.js).
+2. **Storage.** Vectors are stored in your browser's **IndexedDB** (database `eternal-skald-vectors`). They persist between sessions and are scoped to your browser/world.
+3. **Retrieval.** Before the Skald answers a prompt, narrates a move, conjures an NPC, interprets an oracle, or writes lore, it embeds the *current* request, compares it against every stored vector by **cosine similarity**, keeps the top matches above a relevance threshold, and packs them — newest/most-relevant first, within a token budget — into a **`RELEVANT WORLD MEMORY`** block in the system prompt.
+
+### Privacy & where things run
+
+- The embedding model and all vectors live **in your browser only**. The memory/retrieval step makes **no network calls** (after the one-time model download).
+- Only the final, retrieved memory *text* is included in the prompt sent to your configured AI endpoint — exactly the same channel as your normal chat, and only the slices actually relevant to your request.
+
+### First-time setup
+
+- The first time semantic memory is needed, the browser downloads the embedding model (**~90 MB**, cached afterward by the browser). A small progress bar appears; **play is never blocked** — until the model is ready the Skald silently falls back to the v0.4.0 scored text search, then upgrades automatically.
+- To warm the model and build memory for an existing world, run **`!reindex`** (GM-only). Check progress/state any time with **`!rag-status`**.
+
+### Browser compatibility & performance
+
+- Requires **WebAssembly (WASM)** and **IndexedDB** — available in all modern browsers (Chrome, Edge, Firefox, Safari). If your deployment's Content-Security-Policy blocks the CDN import or you're fully offline on first run, the model simply won't load and the Skald **degrades gracefully** to text search.
+- If your browser supports **WebGPU**, transformers.js uses it automatically for faster embedding; otherwise it runs on WASM CPU, which is still fine for the small batches a tabletop session produces.
+
+### Controlling it
+
+- Toggle the whole feature with the **Semantic Memory (RAG)** setting; tune budget/threshold/result-count with the other RAG settings (see [Settings](#settings)).
+- `!remind [topic]` uses semantic recall directly; `!reindex` (GM) rebuilds the whole memory; `!rag-status` reports model state, vector count and settings.
+- **Graceful degradation is a hard rule:** if anything in the memory pipeline fails (model, IndexedDB, CSP, offline), the Skald logs a warning and continues exactly as in v0.4.0 — memory is purely additive and never breaks play.
 
 ---
 
@@ -329,8 +366,10 @@ All commands use the **`!`** prefix (not `/`). Foundry VTT v14 rejects unknown `
 | `!combat <note?>` | Get tactical narration and Ironsworn-move suggestions for the current fight. |
 | `!journals [type]` | **(v0.4.0)** List the chronicle entries the Skald has auto-scribed. Optionally filter by type — e.g. `!journals npc`, `!journals location`. |
 | `!mysteries` | **(v0.4.0)** Review the open mysteries, decisions and world-state the Skald is tracking. |
-| `!remind [topic]` | **(v0.4.0)** Recall what the chronicle holds about a topic (scored text search over recorded entries, summarized in-character). Full semantic recall is planned for v0.5.0. |
+| `!remind [topic]` | **(v0.5.0)** Recall what the chronicle holds about a topic using **semantic recall** — embeds your topic and finds the most meaning-relevant entries, summarized in-character. Falls back to scored text search if the memory model isn't ready yet. See [AI Memory](#ai-memory-browser-based-rag). |
 | `!end-session` | **(v0.4.0, GM-only)** Weave a saga-styled Session Chronicle recap from everything recorded this session into a dated journal. |
+| `!reindex` | **(v0.5.0, GM-only)** Rebuild the browser-based semantic memory: warm the embedding model and (re)embed every chronicle entry into IndexedDB. A progress bar tracks the work. See [AI Memory](#ai-memory-browser-based-rag). |
+| `!rag-status` | **(v0.5.0)** Report the state of the semantic memory: whether the embedding model is loaded, how many vectors are stored, and the active RAG settings. |
 
 ### Available oracles
 `action`, `theme`, `region`, `location`, `coastal`, `npc`, `npc-goal`, `npc-descriptor`, `combat`, `mystic`, `price`.
@@ -362,6 +401,12 @@ All in **Configure Settings → The Eternal Skald** (world-scoped, GM-only):
 | Journal Notifications | Minimal | **(v0.4.0)** How loudly new chronicle entries are announced: none (silent), minimal (brief toast), or detailed (also toasts updates). |
 | Journal Visibility | GM only | **(v0.4.0)** Who can read the auto-scribed entries: GM only, or shared with players (observer access). |
 | Session Chronicle on Demand | On | **(v0.4.0)** Enable the `!end-session` command, which weaves a saga-styled recap of the session into a dated journal. |
+| Semantic Memory (RAG) | **On** | **(v0.5.0)** Enable browser-based semantic memory: embed journal entries and retrieve the most relevant ones into the AI's context before it answers. See [AI Memory](#ai-memory-browser-based-rag). Turn off to disable retrieval and indexing entirely. |
+| Memory Context Budget | 2000 | **(v0.5.0)** Maximum approximate tokens of retrieved memory injected into the prompt's `RELEVANT WORLD MEMORY` block. Range 200–6000. Higher = more recall, larger prompts. |
+| Memory Results per Query | 5 | **(v0.5.0)** How many of the top-scoring entries to consider per retrieval. Range 1–20. |
+| Auto-Index Journals | **On** | **(v0.5.0)** Automatically embed chronicle entries into semantic memory as they are created or updated. Off means memory only updates when you run `!reindex`. |
+| Memory Relevance Threshold | 0.3 | **(v0.5.0)** Minimum cosine similarity (0–1) an entry must reach to be recalled. Higher = stricter/more precise, fewer results. Range 0–1, step 0.05. |
+| Memory Debug Logging | Off | **(v0.5.0)** Verbose RAG diagnostics (embedding, scoring, retrieval) in the browser console. |
 | Debug Logging | Off | Verbose Ironsworn integration diagnostics in the browser console. |
 
 ---
@@ -431,6 +476,16 @@ skald.journal.ingestMetadata({
 // List recorded entries (optionally by type) and write a session chronicle
 skald.journal.listEntries('npc');
 await skald.journal.generateSessionChronicle();
+
+// --- Browser-based semantic memory / RAG (v0.5.0) ---
+await skald.rag.init();                       // lazily load the embedding model (~90MB, browser-only)
+await skald.rag.indexJournalEntry(entry);     // embed + store one JournalEntry's vector in IndexedDB
+await skald.rag.reindexAll(skald.journal.listEntries()); // clear + (re)embed the given entries
+const hits = await skald.rag.search('who guards the barrow?', { maxResults: 5, threshold: 0.3 });
+const block = await skald.rag.buildContextBlock('coastal raid', { maxTokens: 2000, maxResults: 5 });
+const state = await skald.rag.status();       // { modelReady, vectorCount, model, dims, threshold, ... }
+await skald.rag.remove(entry.id);             // evict one entry's vector
+await skald.rag.clear();                       // wipe the whole vector store
 ```
 
 ---
@@ -440,7 +495,7 @@ await skald.journal.generateSessionChronicle();
 **"The Eternal Skald server hook is not loaded (404)"**
 The `--import` flag isn't in your Foundry startup command, or the path is wrong. See [Setup step 2](#2-add---import-to-your-foundry-startup).
 
-**No `⚔️ Skald | v0.4.0` line in Foundry's console output**
+**No `⚔️ Skald | v0.5.0` line in Foundry's console output**
 The hook file isn't being loaded. Check the path is absolute and correct. Run it in a terminal to see Node.js errors.
 
 **"No Abacus AI API key is set"**
@@ -454,6 +509,13 @@ If you can't modify the startup command, this module won't work on hosted platfo
 
 **Auto-narration doesn't fire after an Ironsworn roll**
 Enable **Debug Logging** in Module Settings and check the browser console. As of **v0.3.0**, roll detection reads the `foundry-ironsworn` roll card HTML (the system no longer attaches module flags), logs every detection step, and waits for the configurable **Narration Delay** (default 2000ms) before narrating so dice animations can finish. Make sure **Auto-Narrate Moves** is enabled and you're logged in as the GM. If you still see no `Detected Ironsworn roll` log line, copy the console output and open an issue.
+
+**Semantic memory (RAG) isn't recalling anything / `!remind` falls back to text search**
+The embedding model loads lazily the first time it's needed and is **~90 MB**. Until it finishes (or if it can't load at all), the Skald falls back to the v0.4.0 scored text search — this is by design and never blocks play. To diagnose:
+1. Run **`!rag-status`** — check `modelReady` (is the model loaded?) and `vectorCount` (are entries embedded?).
+2. Run **`!reindex`** *(GM-only)* to warm the model and (re)embed every chronicle entry; a progress bar tracks the work.
+3. If the model never loads, your environment is likely **offline on first run** or your deployment's **Content-Security-Policy** blocks the transformers.js CDN import (the model is fetched from a CDN the first time). Allow the CDN, or accept the graceful text-search fallback. Enable **Memory Debug Logging** for verbose RAG diagnostics.
+4. Requires a browser with **WebAssembly** and **IndexedDB** (all modern browsers). Private/incognito windows that block IndexedDB will disable memory storage. See [AI Memory](#ai-memory-browser-based-rag).
 
 ---
 
