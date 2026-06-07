@@ -7,6 +7,10 @@
         "name": "AI Mode",
         "hint": "Master switch for the Eternal Skald. When ON, messages beginning with '!' are sent to the AI GM. When OFF, '!' messages are treated as ordinary chat and the Skald stays silent. Defaults to ON. Can also be toggled with the configurable keyboard shortcut (Configure Controls → The Eternal Skald)."
       },
+      "streamingEnabled": {
+        "name": "Streaming Responses",
+        "hint": "Render the Skald's replies in real time, word by word, as the AI generates them — instead of waiting for the whole reply to arrive. Gives near-instant feedback and a livelier feel. If streaming is ever unavailable (older server hook, network issue), the Skald automatically falls back to a normal buffered reply, so it is safe to leave ON. Defaults to ON."
+      },
       "apiKey": {
         "name": "Abacus AI API Key",
         "hint": "Your ChatLLM API key from Abacus AI. Keep this private — it will be sent with every request. World-scoped, GM-only."

@@ -1,5 +1,5 @@
 /* =====================================================================
- *  THE ETERNAL SKALD — Server-Side Hook (v0.3.2)
+ *  THE ETERNAL SKALD — Server-Side Hook (v0.3.3)
  *  ---------------------------------------------------------------------
  *
  *  Usage:
@@ -24,9 +24,18 @@
  *
  *  Endpoints
  *  ---------
- *  GET   /skald-api/health  → { status: "ok", ... }
- *  POST  /skald-api/chat    → forwards to upstream LLM
- *  OPTIONS /skald-api/*     → 204 CORS preflight
+ *  GET   /skald-api/health       → { status: "ok", ... }
+ *  POST  /skald-api/chat         → forwards to upstream LLM (buffered)
+ *  POST  /skald-api/chat-stream  → forwards to upstream LLM and pipes the
+ *                                  Server-Sent-Events token stream straight
+ *                                  back to the client (v0.3.3, OpenAI SSE
+ *                                  format: `data: {json}\n\n` … `data: [DONE]`).
+ *                                  Falls back gracefully — on an upstream
+ *                                  error before headers are flushed we reply
+ *                                  with a normal JSON error; once the SSE
+ *                                  stream has started we emit an
+ *                                  `event: error` frame and close.
+ *  OPTIONS /skald-api/*          → 204 CORS preflight
  *
  *  Ironsworn integration note (v0.3.0)
  *  -----------------------------------
@@ -48,7 +57,7 @@
 import http  from "node:http";
 import https from "node:https";
 
-const VERSION    = "0.3.2";
+const VERSION    = "0.3.3";
 const PREFIX     = "/skald-api/";
 const MAX_BODY   = 2 * 1024 * 1024;   // 2 MiB inbound limit
 const MAX_RESP   = 8 * 1024 * 1024;   // 8 MiB upstream response limit
@@ -179,6 +188,149 @@ function forward({ apiKey, endpoint, payload }) {
   });
 }
 
+/* ── Streaming upstream forwarder (v0.3.3) ───────────────────────── *
+ *                                                                     *
+ *  Opens the upstream LLM request with `stream: true` and pipes the   *
+ *  raw Server-Sent-Events stream straight back to `clientRes`.        *
+ *                                                                     *
+ *  Error semantics:                                                   *
+ *    • Upstream replies with HTTP >= 400  → we buffer its (small)     *
+ *      error body and REJECT the promise. The caller has not yet      *
+ *      flushed any headers, so it can emit a clean JSON error.        *
+ *    • Connection / timeout failure BEFORE the SSE headers are sent   *
+ *      → REJECT (caller emits JSON error).                            *
+ *    • Failure AFTER the SSE stream has started → we write a terminal *
+ *      `event: error` frame, end the response, and RESOLVE (the       *
+ *      client already received a 200 + partial stream, so a JSON      *
+ *      error is impossible).                                          *
+ * ─────────────────────────────────────────────────────────────────── */
+
+function forwardStream({ apiKey, endpoint, payload }, clientRes) {
+  return new Promise((resolve, reject) => {
+    let url;
+    try { url = new URL(endpoint); }
+    catch (_) {
+      const e = new Error(`Bad endpoint URL: ${endpoint}`);
+      e.statusCode = 400;
+      return reject(e);
+    }
+
+    const lib  = url.protocol === "https:" ? https : http;
+    // Force streaming on the upstream payload regardless of what the
+    // client sent — this endpoint is streaming-only.
+    const streamPayload = { ...(payload ?? {}), stream: true };
+    const body = Buffer.from(JSON.stringify(streamPayload), "utf8");
+
+    const opts = {
+      method:   "POST",
+      hostname: url.hostname,
+      port:     url.port || (url.protocol === "https:" ? 443 : 80),
+      path:     url.pathname + (url.search || ""),
+      headers: {
+        "Content-Type":   "application/json",
+        "Content-Length":  body.length,
+        "Authorization":  `Bearer ${apiKey}`,
+        "apiKey":          apiKey,
+        "Accept":         "text/event-stream",
+        "User-Agent":     `TheEternalSkald/${VERSION}`
+      }
+    };
+
+    let headersFlushed = false;
+
+    const req = lib.request(opts, (res) => {
+      const status = res.statusCode || 502;
+
+      // Upstream error → buffer the (small) body and reject so the
+      // caller can send a clean JSON error. No SSE headers sent yet.
+      if (status >= 400) {
+        const buf = [];
+        let bytes = 0;
+        res.on("data", (chunk) => {
+          bytes += chunk.length;
+          if (bytes <= 64 * 1024) buf.push(chunk);
+        });
+        res.on("end", () => {
+          let msg = `Upstream returned HTTP ${status}`;
+          const raw = Buffer.concat(buf).toString("utf8");
+          try {
+            const j = JSON.parse(raw);
+            msg = j?.error?.message || j?.error || j?.message || raw || msg;
+          } catch (_) { if (raw) msg = raw; }
+          const e = new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+          e.statusCode = status;
+          reject(e);
+        });
+        res.on("error", () => {
+          const e = new Error(`Upstream stream error (HTTP ${status})`);
+          e.statusCode = status;
+          reject(e);
+        });
+        return;
+      }
+
+      // Success → flush SSE headers and pipe chunks straight through.
+      corsHeaders(clientRes);
+      clientRes.writeHead(200, {
+        "Content-Type":      "text/event-stream; charset=utf-8",
+        "Cache-Control":     "no-cache, no-transform",
+        "Connection":        "keep-alive",
+        "X-Accel-Buffering": "no"
+      });
+      if (typeof clientRes.flushHeaders === "function") clientRes.flushHeaders();
+      headersFlushed = true;
+
+      res.on("data", (chunk) => {
+        try { clientRes.write(chunk); } catch (_) { /* client gone */ }
+      });
+      res.on("end", () => {
+        try { clientRes.end(); } catch (_) { /* already closed */ }
+        resolve();
+      });
+      res.on("error", (e) => {
+        // Stream already started — emit a terminal SSE error frame.
+        try {
+          clientRes.write(`event: error\ndata: ${JSON.stringify({ error: e.message })}\n\n`);
+          clientRes.end();
+        } catch (_) { /* socket gone */ }
+        resolve();
+      });
+    });
+
+    // If the client hangs up, abort the upstream request to free it.
+    clientRes.on("close", () => { try { req.destroy(); } catch (_) {} });
+
+    req.setTimeout(TIMEOUT_MS, () => {
+      req.destroy();
+      if (headersFlushed) {
+        try {
+          clientRes.write(`event: error\ndata: ${JSON.stringify({ error: `Upstream timed out (${TIMEOUT_MS}ms)` })}\n\n`);
+          clientRes.end();
+        } catch (_) {}
+        return resolve();
+      }
+      const e = new Error(`Upstream timed out (${TIMEOUT_MS}ms)`);
+      e.statusCode = 504;
+      reject(e);
+    });
+    req.on("error", (e) => {
+      if (headersFlushed) {
+        try {
+          clientRes.write(`event: error\ndata: ${JSON.stringify({ error: `Upstream connection failed: ${e.message}` })}\n\n`);
+          clientRes.end();
+        } catch (_) {}
+        return resolve();
+      }
+      const err2 = new Error(`Upstream connection failed: ${e.message}`);
+      err2.statusCode = 502;
+      reject(err2);
+    });
+
+    req.write(body);
+    req.end();
+  });
+}
+
 /* ── Request handler ─────────────────────────────────────────────── */
 
 async function handle(req, res) {
@@ -228,6 +380,40 @@ async function handle(req, res) {
     } catch (e) {
       err(`upstream: ${e.message}`);
       return json(res, e.statusCode ?? 502, { error: e.message });
+    }
+  }
+
+  // Streaming chat endpoint (v0.3.3)
+  if (req.method === "POST" && sub === "chat-stream") {
+    let body;
+    try { body = await readBody(req); }
+    catch (e) {
+      return json(res, e.statusCode ?? 400, { error: e.message });
+    }
+
+    const { apiKey, endpoint, payload } = body;
+    if (!apiKey || typeof apiKey !== "string") {
+      return json(res, 400, { error: "Missing 'apiKey' field" });
+    }
+    if (!endpoint || typeof endpoint !== "string") {
+      return json(res, 400, { error: "Missing 'endpoint' field" });
+    }
+    if (!payload || typeof payload !== "object") {
+      return json(res, 400, { error: "Missing 'payload' object" });
+    }
+
+    try {
+      await forwardStream({ apiKey, endpoint, payload }, res);
+      return;
+    } catch (e) {
+      err(`stream upstream: ${e.message}`);
+      // forwardStream only rejects BEFORE any SSE header was flushed,
+      // so a clean JSON error is always safe here.
+      if (!res.headersSent) {
+        return json(res, e.statusCode ?? 502, { error: e.message });
+      }
+      try { res.end(); } catch (_) {}
+      return;
     }
   }
 

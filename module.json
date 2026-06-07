@@ -1,8 +1,8 @@
 {
   "id": "the-eternal-skald",
   "title": "The Eternal Skald",
-  "description": "<p>An AI-powered storyteller, oracle interpreter, and tactical enemy controller for <strong>Ironsworn</strong> and <strong>Ironsworn: Delve</strong> campaigns in Foundry VTT v14. Powered by Abacus AI ChatLLM. Just type <code>!</code> followed by your words to speak with the Skald, or <code>!skald-help</code> for all commands.</p><p>v0.3.2 — the Skald now answers to a bare <code>!</code> alias (e.g. <code>!what lurks in the barrow?</code>), gated by a new <strong>AI Mode</strong> master toggle (default ON) in module settings and bindable to a keyboard shortcut (Alt+Shift+A by default) so the GM can mute or wake the AI mid-session. Builds on v0.3.1 compendium-based enemy ranks and the v0.3.0 automatic combat system — combat progress tracks per foe, harm by rank on Strike/Clash hits, initiative through Enter the Fray — on top of deep integration with the <strong>foundry-ironsworn</strong> rules engine (suggesting moves, triggering the system's own roll mechanics, narrating official outcomes, and applying mechanical effects). Works standalone too — Ironsworn features activate automatically when the system is present.</p>",
-  "version": "0.3.2",
+  "description": "<p>An AI-powered storyteller, oracle interpreter, and tactical enemy controller for <strong>Ironsworn</strong> and <strong>Ironsworn: Delve</strong> campaigns in Foundry VTT v14. Powered by Abacus AI ChatLLM. Just type <code>!</code> followed by your words to speak with the Skald, or <code>!skald-help</code> for all commands.</p><p>v0.3.3 — the Skald now <strong>streams its replies in real time</strong>, rendering each word as the AI speaks it for near-instant feedback instead of waiting for the whole reply. Streaming is on by default (toggle in module settings) and falls back automatically to a buffered reply if it is ever unavailable, so narration, move suggestions, and mechanical effects all behave exactly as before. Builds on the v0.3.2 bare <code>!</code> alias and <strong>AI Mode</strong> master toggle, v0.3.1 compendium-based enemy ranks, and the v0.3.0 automatic combat system — combat progress tracks per foe, harm by rank on Strike/Clash hits, initiative through Enter the Fray — on top of deep integration with the <strong>foundry-ironsworn</strong> rules engine (suggesting moves, triggering the system's own roll mechanics, narrating official outcomes, and applying mechanical effects). Works standalone too — Ironsworn features activate automatically when the system is present.</p>",
+  "version": "0.3.3",
   "compatibility": {
     "minimum": "13",
     "verified": "14",
@@ -37,6 +37,6 @@
   },
   "url": "https://github.com/papicy/eternal_skald",
   "manifest": "https://raw.githubusercontent.com/papicy/eternal_skald/main/module.json",
-  "download": "https://github.com/papicy/eternal_skald/releases/download/v0.3.2/the-eternal-skald.zip",
+  "download": "https://github.com/papicy/eternal_skald/releases/download/v0.3.3/the-eternal-skald.zip",
   "readme": "https://github.com/papicy/eternal_skald/blob/main/README.md"
 }

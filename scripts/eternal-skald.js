@@ -1,10 +1,10 @@
 /* =====================================================================
- *  THE ETERNAL SKALD v0.3.2 — Foundry VTT v14 Module (Client)
+ *  THE ETERNAL SKALD v0.3.3 — Foundry VTT v14 Module (Client)
  *  ---------------------------------------------------------------------
  *  An AI-powered storytelling and combat-control assistant for Ironsworn
  *  and Ironsworn: Delve campaigns. Powered by Abacus AI ChatLLM.
  *
- *  ARCHITECTURE (v0.3.2)
+ *  ARCHITECTURE (v0.3.3)
  *  ---------------------
  *  API calls are made SERVER-SIDE by eternal-skald-server.mjs, which
  *  must be loaded via `node --import ...eternal-skald-server.mjs`.
@@ -28,7 +28,7 @@
  *      §13 HOOK REGISTRATIONS
  * ===================================================================== */
 
-console.log("=== The Eternal Skald v0.3.2 — module file loaded ===");
+console.log("=== The Eternal Skald v0.3.3 — module file loaded ===");
 
 import { IronswornData } from "./ironsworn-data.js";
 import { IronswornController } from "./ironsworn-controller.js";
@@ -55,6 +55,13 @@ const DEFAULT_MODEL     = "gemini-3-flash-preview";
  * this path and forwards to the upstream LLM. No CORS. No proxy. Done.
  */
 const API_PATH = "/skald-api/chat";
+
+/**
+ * Streaming sibling of {@link API_PATH} (v0.3.3). The server-side hook
+ * pipes the upstream LLM's Server-Sent-Events token stream straight back
+ * through this path so the client can render the reply as it arrives.
+ */
+const STREAM_PATH = "/skald-api/chat-stream";
 
 // Foundry VTT v14 validates messages starting with "/" against an
 // internal command registry BEFORE the `chatMessage` hook fires, and
@@ -100,6 +107,21 @@ const Settings = {
           );
         } catch (_) {}
       }
+    });
+
+    /* ---- Streaming responses (v0.3.3) ----
+     * When ON, the Skald renders its replies token-by-token in real time
+     * (Server-Sent Events) for near-instant feedback instead of waiting
+     * for the whole reply. Falls back automatically to the buffered
+     * request if streaming is unavailable or errors out. Defaults to ON.
+     */
+    game.settings.register(MODULE_ID, "streamingEnabled", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.streamingEnabled.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.streamingEnabled.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true
     });
 
     game.settings.register(MODULE_ID, "apiKey", {
@@ -553,6 +575,179 @@ const Client = {
     }
 
     return content.trim();
+  },
+
+  /**
+   * Streaming sibling of {@link chat} (v0.3.3). POSTs to /skald-api/chat-stream
+   * and consumes the upstream LLM's Server-Sent-Events token stream, invoking
+   * the supplied callbacks as text arrives.
+   *
+   * If the server responds with a normal JSON body instead of an event-stream
+   * (e.g. the hook is an older build, or an error occurred before streaming
+   * began) it transparently degrades to a single-shot result so callers always
+   * get a usable reply.
+   *
+   * @param {Array<{role: string, content: string}>} messages
+   * @param {object} [opts]
+   * @param {object} [handlers]
+   * @param {(delta: string, full: string) => void} [handlers.onChunk]
+   * @param {(full: string) => void} [handlers.onDone]
+   * @param {(err: Error) => void} [handlers.onError]
+   * @returns {Promise<string>} the full assistant reply text
+   */
+  async chatStream(messages, opts = {}, handlers = {}) {
+    const { onChunk, onDone, onError } = handlers;
+    const apiKey   = Settings.get("apiKey");
+    const model    = Settings.get("modelName")   || DEFAULT_MODEL;
+    const endpoint = Settings.get("apiEndpoint") || DEFAULT_ENDPOINT;
+
+    if (!apiKey) {
+      throw new Error(game.i18n.localize("ETERNAL_SKALD.errors.noApiKey"));
+    }
+    if (!Array.isArray(messages) || messages.length === 0) {
+      throw new Error("Cannot call ChatLLM with empty messages.");
+    }
+
+    const payload = {
+      model,
+      messages,
+      temperature: opts.temperature ?? 0.8,
+      max_tokens:  opts.maxTokens   ?? 800,
+      stream: true
+    };
+
+    console.log(LOG_PREFIX, "Streaming AI:", { endpoint, model, msgCount: messages.length });
+
+    let response;
+    try {
+      response = await fetch(STREAM_PATH, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ apiKey, endpoint, payload })
+      });
+    } catch (netErr) {
+      console.error(LOG_PREFIX, "stream fetch failed:", netErr);
+      throw new Error(
+        "Cannot reach the Skald's server hook.\n" +
+        "Make sure Foundry was started with:\n" +
+        "  node --import ./Data/modules/the-eternal-skald/scripts/eternal-skald-server.mjs resources/app/main.mjs\n" +
+        "See the README for details."
+      );
+    }
+
+    // 404 = hook not loaded, or an older hook without the streaming route.
+    if (response.status === 404) {
+      throw new Error(
+        "The Eternal Skald streaming endpoint is not available (404).\n" +
+        "Update the server hook and add --import to your Foundry startup command. See README → Setup."
+      );
+    }
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      let detail = text;
+      try {
+        const j = JSON.parse(text);
+        detail = j?.error || j?.message || j?.detail || text;
+      } catch (_) { /* not JSON */ }
+      throw new Error(`Skald API error ${response.status}: ${String(detail).slice(0, 300)}`);
+    }
+
+    const contentType = (response.headers.get("content-type") || "").toLowerCase();
+
+    // Graceful degrade: server returned buffered JSON, not an SSE stream.
+    if (!contentType.includes("text/event-stream") || !response.body || typeof response.body.getReader !== "function") {
+      let data;
+      try { data = await response.json(); }
+      catch (_) { throw new Error("The Skald returned a malformed response."); }
+      const content = this._extractContent(data);
+      if (!content || typeof content !== "string") {
+        throw new Error("The Skald received an empty or malformed reply from the AI.");
+      }
+      const full = content.trim();
+      try { onChunk?.(full, full); } catch (_) {}
+      try { onDone?.(full); } catch (_) {}
+      return full;
+    }
+
+    // Consume the SSE stream.
+    const reader  = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    let full   = "";
+
+    const handleEvent = (block) => {
+      // An SSE event block is one or more lines; collect the data payload
+      // and detect a terminal `event: error` frame.
+      let isError = false;
+      const dataLines = [];
+      for (const rawLine of block.split("\n")) {
+        const line = rawLine.replace(/\r$/, "");
+        if (!line || line.startsWith(":")) continue;        // comment / keep-alive
+        if (line.startsWith("event:")) {
+          if (line.slice(6).trim() === "error") isError = true;
+          continue;
+        }
+        if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+      }
+      if (dataLines.length === 0) return;
+      const dataStr = dataLines.join("\n");
+      if (dataStr === "[DONE]") return;
+
+      let json;
+      try { json = JSON.parse(dataStr); }
+      catch (_) { return; }   // ignore unparseable frames
+
+      if (isError || json?.error) {
+        const msg = json?.error?.message || json?.error || "The Skald's stream failed.";
+        throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+      }
+
+      const delta =
+        json?.choices?.[0]?.delta?.content ??
+        json?.choices?.[0]?.message?.content ??
+        json?.delta ??
+        "";
+      if (delta) {
+        full += delta;
+        try { onChunk?.(delta, full); } catch (_) {}
+      }
+    };
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // Events are separated by a blank line (\n\n).
+        let sep;
+        while ((sep = buffer.indexOf("\n\n")) !== -1) {
+          const block = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + 2);
+          if (block.trim()) handleEvent(block);
+        }
+      }
+      // Flush any trailing buffered event (no terminating blank line).
+      buffer += decoder.decode();
+      if (buffer.trim()) handleEvent(buffer);
+    } catch (streamErr) {
+      console.error(LOG_PREFIX, "stream read error:", streamErr);
+      try { reader.cancel(); } catch (_) {}
+      // If we already have partial text, surface it; otherwise rethrow.
+      if (full.trim()) {
+        try { onError?.(streamErr); } catch (_) {}
+      } else {
+        throw streamErr;
+      }
+    }
+
+    const result = full.trim();
+    if (!result) {
+      throw new Error("The Skald received an empty reply from the AI.");
+    }
+    try { onDone?.(result); } catch (_) {}
+    return result;
   }
 };
 
@@ -597,24 +792,25 @@ const Memory = {
 
 const Chat = {
   /**
-   * Post a styled Skald chat message. The body is wrapped in module CSS
-   * classes so styles/eternal-skald.css can theme it.
+   * Build the Skald card HTML for a given body. Extracted from
+   * {@link postSkald} (v0.3.3) so streaming updates can re-render the
+   * exact same markup in place via `message.update({ content })`.
    *
-   * @param {string} content   - HTML body
+   * @param {string} content - HTML body
    * @param {object} [opts]
-   * @param {string} [opts.title]       - optional title shown above body
-   * @param {string} [opts.alias]       - speaker alias (default: SKALD_NAME)
-   * @param {string} [opts.variant]     - "default" | "oracle" | "combat" |
-   *                                       "npc" | "help" | "lore"
-   * @param {boolean}[opts.gmWhisper]   - whisper to GMs only
+   * @param {string} [opts.title]
+   * @param {string} [opts.alias]
+   * @param {string} [opts.variant]
+   * @returns {string} the full card HTML
    */
-  async postSkald(content, opts = {}) {
+  renderCard(content, opts = {}) {
     const variant = opts.variant ?? "default";
     const title   = opts.title ? `<h3 class="es-title">${escapeHtml(opts.title)}</h3>` : "";
     const alias   = opts.alias ?? SKALD_NAME;
+    const streamCls = opts.streaming ? " es-streaming" : "";
 
-    const html = `
-      <div class="eternal-skald-card es-variant-${variant}">
+    return `
+      <div class="eternal-skald-card es-variant-${variant}${streamCls}">
         <div class="es-banner">
           <span class="es-rune">ᚱ</span>
           <span class="es-alias">${escapeHtml(alias)}</span>
@@ -624,6 +820,21 @@ const Chat = {
         <div class="es-body">${content}</div>
       </div>
     `;
+  },
+
+  /**
+   * Post a styled Skald chat message. The body is wrapped in module CSS
+   * classes so styles/eternal-skald.css can theme it.
+   *
+   * @param {string} content   - HTML body
+   * @param {object} [opts]     - same shape as {@link renderCard}, plus
+   *                              `gmWhisper` and `flags`.
+   */
+  async postSkald(content, opts = {}) {
+    const variant = opts.variant ?? "default";
+    const alias   = opts.alias ?? SKALD_NAME;
+
+    const html = this.renderCard(content, opts);
 
     const data = {
       content: html,
@@ -672,6 +883,156 @@ function formatMarkdown(text) {
   s = s.replace(/\n{2,}/g, "</p><p>");
   s = s.replace(/\n/g, "<br/>");
   return `<p>${s}</p>`;
+}
+
+/* ===================================================================== */
+/*  §6b  STREAMING DISPLAY (v0.3.3)                                       */
+/* ===================================================================== */
+
+/**
+ * Strip the AI's structured directives ([[MOVE:...]] / [[EFFECT:...]])
+ * from text destined for live display. Unlike {@link Integration.parseMoveSuggestion}
+ * /{@link Integration.parseEffects}, which run once on the COMPLETE reply,
+ * this also trims a *partial* trailing directive (e.g. "...the door `[[MOVE`")
+ * so half-streamed tokens never flash raw bracket syntax at the player.
+ *
+ * The full raw reply is still processed normally after the stream ends, so
+ * no move suggestion or effect is lost — this only affects what's shown.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function stripDirectivesForDisplay(text) {
+  if (typeof text !== "string") return "";
+  let s = text;
+  // Remove any COMPLETE directives anywhere in the text.
+  s = s.replace(/\[\[\s*(?:MOVE|EFFECT)\s*:[^\]]*?\]\]/gi, "");
+  // Remove a partial directive still being streamed at the very end:
+  //   "[[", "[[MO", "[[MOVE: Fac", "[[EFFECT: harm" …
+  s = s.replace(/\[\[\s*(?:M(?:O(?:V(?:E)?)?)?|E(?:F(?:F(?:E(?:C(?:T)?)?)?)?)?)?(?:\s*:[^\]]*)?$/i, "");
+  return s;
+}
+
+/**
+ * The streaming counterpart to a "post a Skald reply" call (v0.3.3).
+ *
+ * It posts a chat message IMMEDIATELY with a thinking indicator, then
+ * consumes the SSE token stream and rewrites that same message in place as
+ * text arrives — throttled to ~140ms so we don't hammer Foundry's socket /
+ * database with an update per token. The final update is always flushed.
+ *
+ * Display text has MOVE/EFFECT directives stripped (see
+ * {@link stripDirectivesForDisplay}); the untouched raw reply is returned so
+ * the caller can run its normal post-processing (suggestion cards, effect
+ * application, memory) against the complete text.
+ *
+ * On a failure BEFORE any token arrives it transparently falls back to the
+ * buffered {@link Client.chat} call and renders that into the same message,
+ * so the player always gets a reply. If it cannot recover, the message is
+ * rewritten with a readable error and the function rethrows.
+ *
+ * @param {Array<{role:string,content:string}>} messages
+ * @param {object} [opts]
+ * @param {string} [opts.variant]
+ * @param {string} [opts.title]
+ * @param {string} [opts.alias]
+ * @param {boolean}[opts.gmWhisper]
+ * @param {object} [opts.chatOpts]  - temperature/maxTokens passed to the client
+ * @returns {Promise<{reply: string, message: ChatMessage}>}
+ */
+async function callSkaldStreaming(messages, opts = {}) {
+  const variant   = opts.variant ?? "default";
+  const title     = opts.title;
+  const alias     = opts.alias ?? SKALD_NAME;
+  const cardOpts  = { variant, title, alias };
+  const chatOpts  = opts.chatOpts ?? {};
+
+  const THINKING_HTML = `<p class="es-thinking"><em>The Skald gathers the threads of fate…</em></p>`;
+
+  // 1) Post the placeholder card immediately for instant feedback.
+  const data = {
+    content: Chat.renderCard(THINKING_HTML, cardOpts),
+    speaker: ChatMessage.getSpeaker({ alias }),
+    flags: { [MODULE_ID]: { variant, alias, streaming: true } }
+  };
+  if (opts.gmWhisper) {
+    data.whisper = game.users.filter(u => u.isGM).map(u => u.id);
+  }
+  const message = await ChatMessage.create(data);
+
+  // 2) Throttled in-place updater.
+  const THROTTLE_MS = 140;
+  let lastRendered  = "";
+  let pendingFull   = "";
+  let timer         = null;
+  let updating      = false;
+
+  const renderNow = async (raw, isFinal = false) => {
+    const display = stripDirectivesForDisplay(raw).trim();
+    const bodyHtml = display ? formatMarkdown(display) : THINKING_HTML;
+    const cardHtml = Chat.renderCard(bodyHtml, { ...cardOpts, streaming: !isFinal });
+    if (cardHtml === lastRendered) return;
+    lastRendered = cardHtml;
+    updating = true;
+    try {
+      await message.update({ content: cardHtml });
+    } catch (e) {
+      console.warn(LOG_PREFIX, "stream message.update failed:", e?.message || e);
+    } finally {
+      updating = false;
+    }
+  };
+
+  const scheduleUpdate = (full) => {
+    pendingFull = full;
+    if (timer) return;
+    timer = setTimeout(() => {
+      timer = null;
+      // Skip if a previous update is still in flight; the next chunk reschedules.
+      if (!updating) renderNow(pendingFull);
+    }, THROTTLE_MS);
+  };
+
+  const clearTimer = () => { if (timer) { clearTimeout(timer); timer = null; } };
+
+  // 3) Stream, with graceful fallback to the buffered call.
+  let reply = "";
+  let gotAnyChunk = false;
+
+  try {
+    reply = await Client.chatStream(messages, chatOpts, {
+      onChunk: (_delta, full) => { gotAnyChunk = true; scheduleUpdate(full); },
+      onDone:  () => {},
+      onError: () => {}   // partial-stream error; handled after the loop
+    });
+  } catch (streamErr) {
+    clearTimer();
+    if (!gotAnyChunk) {
+      // Nothing was shown yet — fall back to the reliable buffered path.
+      console.warn(LOG_PREFIX, "streaming failed, falling back to buffered chat:", streamErr?.message || streamErr);
+      try {
+        reply = await Client.chat(messages, chatOpts);
+      } catch (fallbackErr) {
+        const msg = escapeHtml(fallbackErr?.message || String(fallbackErr));
+        await message.update({
+          content: Chat.renderCard(`<p class="es-error"><strong>The Skald falls silent:</strong><br/>${msg}</p>`, cardOpts)
+        });
+        throw fallbackErr;
+      }
+    } else {
+      // We already streamed partial text; keep whatever we captured.
+      reply = streamErr?.partial || reply;
+      if (!reply) throw streamErr;
+    }
+  } finally {
+    clearTimer();
+  }
+
+  // 4) Final flush — render the complete (directive-stripped) reply and
+  //    drop the live-streaming caret.
+  await renderNow(reply, true);
+
+  return { reply, message };
 }
 
 /* ===================================================================== */
@@ -872,6 +1233,29 @@ async function runConversation(channel, userText, { task, label, variant = "defa
       { role: "system", content: buildSystemPrompt({ task, allowMoves, context }) },
       ...Memory.get(channel)
     ];
+
+    // ── Streaming path (v0.3.3) ──────────────────────────────────────
+    // The live card IS the immediate feedback, so we skip the "listens to
+    // the wind" whisper. Directives are stripped from the streamed display;
+    // the full raw reply is still parsed afterwards for the move card.
+    if (Settings.get("streamingEnabled") !== false) {
+      try {
+        const { reply } = await callSkaldStreaming(messages, { variant, title: label });
+        Memory.push(channel, "assistant", reply);
+        if (allowMoves && Integration.active()) {
+          await Integration.postSuggestionFromReply(reply);
+        }
+        return reply;
+      } catch (streamErr) {
+        // callSkaldStreaming already rendered a readable error into its card
+        // (or recovered via buffered fallback). Surface a notification only.
+        console.error(LOG_PREFIX, "runConversation stream:", streamErr);
+        ui.notifications?.error(`${SKALD_NAME}: ${streamErr.message}`);
+        return null;
+      }
+    }
+
+    // ── Buffered path (streaming disabled or unavailable) ────────────
     await Chat.postSystem(`<em>${SKALD_NAME} listens to the wind…</em>`, { gmWhisper: true });
     const reply = await Client.chat(messages);
     Memory.push(channel, "assistant", reply);
@@ -1099,6 +1483,22 @@ const Integration = {
       await this.postSuggestionCard(suggestion);
     }
     return { suggestion, clean };
+  },
+
+  /**
+   * Post ONLY the interactive move-suggestion card for a reply (v0.3.3).
+   *
+   * Used by the streaming path: the narration has already been rendered live
+   * in its own card, so here we just parse the full raw reply for a
+   * [[MOVE:…]] directive and, if present, append the Roll/Choose card.
+   */
+  async postSuggestionFromReply(reply) {
+    const { suggestion } = this.parseMoveSuggestion(reply);
+    if (suggestion && this.active() && (Settings.get("suggestMoves") ?? true)) {
+      this._lastIntent = suggestion.reason || this._lastIntent;
+      await this.postSuggestionCard(suggestion);
+    }
+    return suggestion;
   },
 
   /** Post the interactive "Roll this move / Choose different" card. */
@@ -1561,15 +1961,26 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
         { role: "system", content: buildSystemPrompt({ task, context: ctx, allowEffects }) },
         ...Memory.get("general")
       ];
-      const reply = await Client.chat(messages, { temperature: 0.85, maxTokens: 500 });
+
+      const cardOpts = { variant: "combat", title: `${parsed.moveName} — ${parsed.outcome}` };
+      const streaming = Settings.get("streamingEnabled") !== false;
+
+      let reply;
+      if (streaming) {
+        // Stream the narration live; [[EFFECT:…]] directives are stripped
+        // from the display and applied afterwards from the full raw reply.
+        ({ reply } = await callSkaldStreaming(messages, {
+          ...cardOpts,
+          chatOpts: { temperature: 0.85, maxTokens: 500 }
+        }));
+      } else {
+        reply = await Client.chat(messages, { temperature: 0.85, maxTokens: 500 });
+        const { clean } = this.parseEffects(reply);
+        await Chat.postSkald(formatMarkdown(clean || reply), cardOpts);
+      }
       Memory.push("general", "assistant", reply);
 
-      const { effects, clean } = this.parseEffects(reply);
-      await Chat.postSkald(formatMarkdown(clean || reply), {
-        variant: "combat",
-        title: `${parsed.moveName} — ${parsed.outcome}`
-      });
-
+      const { effects } = this.parseEffects(reply);
       // Strip effects the auto-combat flow already handled, to avoid
       // double-marking progress or flipping initiative twice.
       const safeEffects = this._filterRedundantCombatEffects(effects, parsed, autoSummary);
@@ -1868,15 +2279,23 @@ Then on a new line speak as the NPC — greet the players in-character, in 2-4 s
         ...Memory.get(session.channel),
         { role: "user", content: userLine }
       ];
-      const reply = await Client.chat(messages, { temperature: 0.85 });
+      const alias = this._extractName(session.descriptor, session.stats);
+      let reply;
+      if (Settings.get("streamingEnabled") !== false) {
+        // Stream the NPC's reply live in their own voice/alias.
+        ({ reply } = await callSkaldStreaming(messages, {
+          variant: "npc",
+          alias,
+          chatOpts: { temperature: 0.85 }
+        }));
+      } else {
+        reply = await Client.chat(messages, { temperature: 0.85 });
+        await Chat.postSkald(formatMarkdown(reply), { variant: "npc", alias });
+      }
       Memory.push(session.channel, "user", userLine);
       Memory.push(session.channel, "assistant", reply);
       session.turnCount++;
       session.lastReply = reply;
-      await Chat.postSkald(formatMarkdown(reply), {
-        variant: "npc",
-        alias: this._extractName(session.descriptor, session.stats)
-      });
       return reply;
     } catch (err) {
       console.error(LOG_PREFIX, "NPC respond failed", err);
@@ -1960,11 +2379,18 @@ const OracleInterpreter = {
     const task = `The fates have spoken. The oracle "${oracleLabel}" returned: "${result}" (roll ${roll}).
 Interpret this for the current Ironsworn scene in 2-4 sentences. Be specific and useful — offer a concrete hook the GM can run with. Do not re-roll, do not invent additional oracle results.`;
     try {
-      const reply = await Client.chat([
+      const messages = [
         { role: "system", content: buildSystemPrompt({ task }) },
         { role: "user", content: `Interpret the oracle result: ${result}` }
-      ], { temperature: 0.85 });
-      await Chat.postSkald(formatMarkdown(reply), { variant: "oracle", title: "What the Skald Hears" });
+      ];
+      const cardOpts = { variant: "oracle", title: "What the Skald Hears" };
+      let reply;
+      if (Settings.get("streamingEnabled") !== false) {
+        ({ reply } = await callSkaldStreaming(messages, { ...cardOpts, chatOpts: { temperature: 0.85 } }));
+      } else {
+        reply = await Client.chat(messages, { temperature: 0.85 });
+        await Chat.postSkald(formatMarkdown(reply), cardOpts);
+      }
       return reply;
     } catch (err) {
       console.warn(LOG_PREFIX, "Oracle interpretation failed", err);
