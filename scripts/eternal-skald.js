@@ -98,7 +98,9 @@ const COMMANDS = Object.freeze({
   TIMELINE:      "!timeline",
   RELATIONSHIPS: "!relationships",
   MAP:           "!map",
-  TEMPLATE:      "!template"
+  TEMPLATE:      "!template",
+  // --- UX / polish (v0.9.0) ---
+  LINK_STYLE:    "!link-style"
 });
 
 /* ===================================================================== */
@@ -435,6 +437,89 @@ const Settings = {
       onChange: () => { try { EntityLinker.invalidate(); } catch (_) {} }
     });
 
+    /* ---- Customisable link styles (v0.9.0) ----
+     * When ON, the per-kind colours and leading icons of the inline entity
+     * links the Skald weaves into narration are taken from the user's
+     * `linkStyles` object (editable via the `!link-style` command). When OFF,
+     * the built-in palette is used. Purely cosmetic and degrades gracefully.
+     */
+    game.settings.register(MODULE_ID, "customLinkStyles", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.customLinkStyles.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.customLinkStyles.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: false,
+      onChange: () => {
+        // Re-render the live override stylesheet and rebuild the index so
+        // freshly-narrated links pick up any icon changes.
+        try { EntityLinker.applyCustomStyles(); } catch (_) {}
+        try { EntityLinker.invalidate(); } catch (_) {}
+      }
+    });
+
+    // (v0.9.0) Per-kind colour/icon overrides, keyed by entity kind
+    // ("journal"|"move"|"oracle"|"track"|"asset"). Managed in-code via the
+    // !link-style command; hidden from the config UI.
+    game.settings.register(MODULE_ID, "linkStyles", {
+      scope: "world",
+      config: false,
+      type: Object,
+      default: {},
+      onChange: () => {
+        try { EntityLinker.applyCustomStyles(); } catch (_) {}
+        try { EntityLinker.invalidate(); } catch (_) {}
+      }
+    });
+
+    /* ---- Context-aware next-step suggestions (v0.9.0) ----
+     * When ON, the Skald may close a narration with a brief, optional hint
+     * that references the party's current location/scene
+     * (e.g. "Since you stand within the Ancient Ruins, you might investigate
+     * the collapsed shrine…"). Player agency is preserved — it only ever
+     * suggests, never dictates. Defaults to ON.
+     */
+    game.settings.register(MODULE_ID, "contextSuggestions", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.contextSuggestions.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.contextSuggestions.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true
+    });
+
+    /* ---- Lore contradiction detection (v0.9.0) ----
+     * When ON, newly-narrated facts are quietly checked against the Skald's
+     * established semantic memory (RAG); if a fact appears to conflict with
+     * recorded lore, a private GM-only alert card is posted. Requires
+     * Semantic Memory (RAG). Costs one extra background AI call per ingest,
+     * so it is OFF by default. Never blocks or breaks narration.
+     */
+    game.settings.register(MODULE_ID, "contradictionDetection", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.contradictionDetection.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.contradictionDetection.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: false
+    });
+
+    /* ---- Idle auto session-summary threshold (v0.9.0) ----
+     * Minutes of inactivity (no narration ingested) after which the Skald
+     * automatically weaves a Session Chronicle, provided "Session Chronicle"
+     * (sessionAutoSummary) is enabled and there is unsaved activity. 0
+     * disables the idle timer (manual !end-session still works).
+     */
+    game.settings.register(MODULE_ID, "sessionAutoMinutes", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.sessionAutoMinutes.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.sessionAutoMinutes.hint"),
+      scope: "world",
+      config: true,
+      type: Number,
+      range: { min: 0, max: 240, step: 5 },
+      default: 0
+    });
+
     // (v0.8.0) Living Chronicle timeline — a persistent, world-scoped log of
     // chronicle events (entity activity, revealed facts, decisions, mysteries).
     // Unlike the in-memory `_sessionLog`, this survives reloads and is NOT
@@ -547,9 +632,61 @@ GUIDELINES:
     ? extras.memory.trim()
     : "";
 
-  return [persona, rulesDigest, guidance, memoryBlock, ironswornBlock, journalBlock]
+  // Context-aware next-step suggestions (v0.9.0). Only added for narrative
+  // calls (those that allow move suggestions) so rules-only Q&A and the
+  // session-chronicle prompt stay lean and unhinted.
+  const contextBlock = extras.allowMoves ? buildContextSuggestionBlock() : "";
+
+  return [persona, rulesDigest, guidance, memoryBlock, ironswornBlock, journalBlock, contextBlock]
     .filter(Boolean)
     .join("\n\n") + taskAddendum;
+}
+
+/**
+ * Build the optional CONTEXT-AWARE GUIDANCE block (v0.9.0).
+ *
+ * When the "Context-Aware Suggestions" setting is on, this returns a short
+ * instruction inviting the Skald to occasionally close a narration with a
+ * single, optional next-step hint that references the party's present
+ * location or scene (e.g. "Since you stand within the Ancient Ruins, you
+ * might seek the collapsed shrine…"). The current locale is derived, in
+ * order of preference, from the active canvas scene and the most recently
+ * narrated `location` entity in the session log. Player agency is preserved:
+ * the guidance is explicit that this is an invitation, never a command.
+ *
+ * Fully defensive — returns "" on any failure (or when disabled) so the
+ * prompt builder is never broken.
+ *
+ * @returns {string}
+ */
+function buildContextSuggestionBlock() {
+  try {
+    if (Settings.get("contextSuggestions") === false) return "";
+
+    const hints = [];
+    // 1) The active canvas scene (the literal "where" of play).
+    try { if (canvas?.scene?.name) hints.push(String(canvas.scene.name).trim()); } catch (_) {}
+    // 2) The most recently narrated location entity from the session log.
+    try {
+      const log = (typeof JournalSystem !== "undefined" && Array.isArray(JournalSystem._sessionLog))
+        ? JournalSystem._sessionLog : [];
+      for (let i = log.length - 1; i >= 0; i--) {
+        const ents = log[i]?.entities;
+        if (!Array.isArray(ents)) continue;
+        const loc = ents.find(e => String(e?.type || "").toLowerCase() === "location" && e?.name);
+        if (loc) { hints.push(String(loc.name).trim()); break; }
+      }
+    } catch (_) {}
+
+    const locales = [...new Set(hints.filter(Boolean))];
+    const locLine = locales.length ? `\nThe party's present locale: ${locales.join("; ")}.` : "";
+
+    return `CONTEXT-AWARE GUIDANCE (optional):
+• Where it genuinely serves the fiction, you MAY close your narration with ONE short, optional next-step suggestion grounded in the party's current location or scene (e.g. "Since you stand within the Ancient Ruins, you might seek the collapsed shrine, or follow the cold draught deeper…").
+• Frame it as an invitation, never a command — offer possibilities, do not railroad. Keep it to a single sentence and omit it entirely when the moment doesn't call for one.${locLine}`;
+  } catch (_) {
+    return "";
+  }
 }
 
 /**
@@ -583,6 +720,112 @@ const RagBridge = {
       if (!entry || !BrowserRAG?.isAvailable?.() || !BrowserRAG.autoIndex()) return;
       BrowserRAG.indexJournalEntry(entry).catch(() => {});
     } catch (_) {}
+  }
+};
+
+/**
+ * Lore contradiction detector (v0.9.0).
+ *
+ * When enabled, newly-narrated facts are quietly compared against the Skald's
+ * established semantic memory (Browser RAG). If a new fact appears to conflict
+ * with recorded lore, a private GM-only alert card is posted so the GM can
+ * reconcile the chronicle. Nothing is ever changed automatically.
+ *
+ * Design constraints (carried from earlier versions):
+ *   • Fire-and-forget — NEVER blocks or breaks narration / ingestion.
+ *   • Opt-in (off by default) — it costs one extra background AI call.
+ *   • GM-host-gated — only the active GM runs the check, so a multi-client
+ *     table never double-posts.
+ *   • Defensive — every failure path degrades silently.
+ */
+const ContradictionDetector = {
+  /** True iff the feature is switched on. */
+  enabled() {
+    try { return Settings.get("contradictionDetection") === true; }
+    catch (_) { return false; }
+  },
+
+  /** Only the active GM runs the check (avoids duplicate alerts). */
+  _isHost() {
+    try {
+      if (!game.user?.isGM) return false;
+      const activeGM = game.users?.activeGM;
+      if (activeGM && activeGM.id !== game.user.id) return false;
+      return true;
+    } catch (_) { return false; }
+  },
+
+  /**
+   * Check a parsed metadata object's `facts` against established lore.
+   * Fire-and-forget: callers should NOT await this. (v0.9.0)
+   * @param {object} metadata
+   */
+  async check(metadata) {
+    try {
+      if (!this.enabled() || !this._isHost()) return;
+      if (!BrowserRAG?.isAvailable?.()) return;
+
+      const facts = Array.isArray(metadata?.facts)
+        ? metadata.facts.filter(f => typeof f === "string" && f.trim()).slice(0, 8)
+        : [];
+      if (!facts.length) return;
+
+      // Retrieve the most relevant established lore for these facts.
+      const loreById = new Map();
+      for (const fact of facts) {
+        let hits = [];
+        try { hits = await BrowserRAG.search(fact, { maxResults: 4 }); } catch (_) { hits = []; }
+        for (const h of (hits || [])) {
+          const text = String(h?.text || "").trim();
+          if (text) loreById.set(h.id ?? text, text);
+        }
+      }
+      if (!loreById.size) return; // nothing established yet to contradict
+
+      const lore = [...loreById.values()].slice(0, 12)
+        .map(t => `- ${t.slice(0, 400)}`).join("\n");
+      const newFacts = facts.map(f => `- ${f}`).join("\n");
+
+      const task =
+`Compare the NEW facts against the ESTABLISHED lore from an Ironsworn campaign chronicle. ` +
+`Flag ONLY genuine contradictions — a new fact that cannot both be true alongside established lore. ` +
+`Ignore mere additions, elaborations, new characters, or harmless new detail.\n\n` +
+`Respond with EXACTLY one of:\n` +
+`• "NONE" (a single word) if there is no real contradiction.\n` +
+`• Otherwise one line per conflict, formatted: "CONFLICT: <new fact> ⟂ <established lore> — <short why>"\n\n` +
+`ESTABLISHED LORE:\n${lore}\n\nNEW FACTS:\n${newFacts}`;
+
+      let verdict = "";
+      try {
+        verdict = await Client.chat([
+          { role: "system", content: "You are a precise, terse continuity checker for a tabletop campaign. Only flag true contradictions; when in doubt, answer NONE." },
+          { role: "user", content: task }
+        ], { temperature: 0.1, maxTokens: 400 });
+      } catch (e) {
+        // AI unreachable — skip silently (continuity check is best-effort).
+        console.warn(LOG_PREFIX, "[contradiction] AI check skipped:", e?.message || e);
+        return;
+      }
+
+      verdict = String(verdict || "").trim();
+      if (!verdict || /^none\b/i.test(verdict)) return;
+
+      const conflicts = verdict.split(/\n+/)
+        .map(l => l.trim())
+        .filter(l => /^CONFLICT\s*:/i.test(l))
+        .map(l => l.replace(/^CONFLICT\s*:\s*/i, "").trim())
+        .filter(Boolean);
+      if (!conflicts.length) return;
+
+      const items = conflicts.map(c => `<li>${escapeHtml(c)}</li>`).join("");
+      const body =
+        `<p><strong>⚠ Possible lore contradiction.</strong> The latest narration may conflict with what the chronicle already holds:</p>` +
+        `<ul class="es-contradiction-list">${items}</ul>` +
+        `<p class="es-help-aside"><em>Nothing has been changed — review and reconcile as you see fit. Disable in <strong>Module Settings → The Eternal Skald</strong>.</em></p>`;
+      await Chat.postSkald(body, { variant: "lore", title: "The Chronicle Frowns", gmWhisper: true });
+    } catch (e) {
+      console.warn(LOG_PREFIX, "contradiction check failed:", e?.message || e);
+    }
   }
 };
 
@@ -1263,8 +1506,110 @@ const EntityLinker = {
   _cache: null,
   _dirty: true,
 
-  /** Mark the cached index stale; it rebuilds on next use. */
+  /**
+   * (v0.9.0) Memoised journal sub-index. Scanning every JournalEntry (and
+   * extracting its aliases) is by far the most expensive part of a rebuild,
+   * and for large campaigns (100+ entries) it dominates. We cache the parsed
+   * result keyed by {@link JournalSystem.journalGeneration}, so it is only
+   * re-scanned when a chronicle entry is actually created / renamed / deleted
+   * — NOT on the far more frequent item/actor/token changes that merely
+   * affect the (cheap) move/track/asset portions of the index.
+   * @type {{gen: number, list: Array<[string, object]>}|null}
+   */
+  _journalCache: null,
+
+  /**
+   * Mark the cached index stale; it rebuilds (lazily) on next use. The
+   * journal sub-index is preserved unless the journal generation changed,
+   * so frequent non-journal invalidations stay cheap (v0.9.0).
+   */
   invalidate() { this._dirty = true; this._cache = null; },
+
+  /**
+   * (v0.9.0) Drop ALL caches including the journal sub-index. Used when the
+   * journal collection itself changes so the next rebuild re-scans journals.
+   */
+  invalidateJournal() {
+    this._dirty = true;
+    this._cache = null;
+    this._journalCache = null;
+  },
+
+  /**
+   * (v0.9.0) Build (or reuse) the journal entity sub-index: an array of
+   * `[lowercaseKey, descriptor]` pairs for every chronicle NPC / location /
+   * discovery and its aliases. Cached against the journal generation counter
+   * so repeated narrations within a stable journal state pay the scan cost
+   * only once. Defensive: any failure yields an empty list (links degrade
+   * gracefully, narration is never broken).
+   * @returns {Array<[string, object]>}
+   */
+  _journalSubindex() {
+    let gen = 0;
+    try {
+      gen = (typeof JournalSystem !== "undefined" && typeof JournalSystem.journalGeneration === "function")
+        ? JournalSystem.journalGeneration() : 0;
+    } catch (_) { gen = 0; }
+
+    if (this._journalCache && this._journalCache.gen === gen) {
+      return this._journalCache.list;
+    }
+
+    const list = [];
+    const seenKeys = new Set();
+    try {
+      if (typeof JournalSystem !== "undefined" && typeof JournalSystem.listEntries === "function") {
+        // Single pass over the journal collection (vs. one scan per type) —
+        // we filter to the three linkable chronicle types in-loop.
+        const linkable = new Set(["npc", "location", "discovery"]);
+        for (const j of JournalSystem.listEntries()) {
+          let type = "";
+          try { type = String(j?.getFlag?.(MODULE_ID, "type") || "").toLowerCase(); } catch (_) {}
+          if (!linkable.has(type)) continue;
+
+          const name = (j?.name ?? "").trim();
+          if (name.length < 3) continue;
+          const key = name.toLowerCase();
+          if (seenKeys.has(key)) continue; // first definition wins
+          const uuid = j.uuid ?? `JournalEntry.${j.id}`;
+          seenKeys.add(key);
+          list.push([key, {
+            key: `journal:${key}`,
+            name,
+            kind: "journal",
+            uuid,
+            caseSensitive: false
+          }]);
+
+          // (v0.8.0) Smart entity detection: register the entry's aliases so
+          // narration variations ("the captain", "Reeves") resolve to the
+          // same journal entity. Aliases never clobber an existing name.
+          try {
+            const aliases = (typeof JournalSystem._entryAliases === "function")
+              ? JournalSystem._entryAliases(j) : [];
+            for (const alias of aliases) {
+              const a = String(alias ?? "").trim();
+              if (a.length < 3) continue;
+              const akey = a.toLowerCase();
+              if (seenKeys.has(akey)) continue;
+              seenKeys.add(akey);
+              list.push([akey, {
+                key: `journal:${akey}`,
+                name,            // canonical label keeps the real entity name
+                kind: "journal",
+                uuid,
+                caseSensitive: false,
+                alias: true
+              }]);
+            }
+          } catch (_) { /* alias indexing is best-effort */ }
+        }
+      }
+    } catch (_) { /* journal not ready — skip */ }
+
+    this._journalCache = { gen, list };
+    return list;
+  },
 
   /** True iff the feature is switched on (defaults ON). */
   enabled() { return Settings.get("entityLinking") !== false; },
@@ -1304,50 +1649,20 @@ const EntityLinker = {
    * Returns the cache object (possibly with an empty index).
    */
   _build() {
+    // (v0.9.0) Optional timing for large-campaign performance tuning. Only
+    // computes timestamps when a debug flag is on, so it costs nothing in
+    // normal play.
+    const _t0 = this._perfEnabled() ? (performance?.now?.() ?? Date.now()) : 0;
     const byName = new Map();
 
     // --- 1) Chronicle journal entities (proper nouns; case-insensitive) ---
+    //   Reuse the memoised journal sub-index (v0.9.0). This is the heavy part
+    //   for large campaigns and is only re-scanned when the journal generation
+    //   changes, not on every rebuild.
     try {
-      if (typeof JournalSystem !== "undefined" && typeof JournalSystem.listEntries === "function") {
-        for (const type of ["npc", "location", "discovery"]) {
-          for (const j of JournalSystem.listEntries(type)) {
-            const name = (j?.name ?? "").trim();
-            if (name.length < 3) continue;
-            const key = name.toLowerCase();
-            if (byName.has(key)) continue; // first definition wins
-            const uuid = j.uuid ?? `JournalEntry.${j.id}`;
-            byName.set(key, {
-              key: `journal:${key}`,
-              name,
-              kind: "journal",
-              uuid,
-              caseSensitive: false
-            });
-
-            // (v0.8.0) Smart entity detection: register the entry's aliases so
-            // narration variations ("the captain", "Reeves") resolve to the
-            // same journal entity. Aliases never clobber an existing primary
-            // name and keep the canonical display label.
-            try {
-              const aliases = (typeof JournalSystem._entryAliases === "function")
-                ? JournalSystem._entryAliases(j) : [];
-              for (const alias of aliases) {
-                const a = String(alias ?? "").trim();
-                if (a.length < 3) continue;
-                const akey = a.toLowerCase();
-                if (byName.has(akey)) continue; // never clobber an existing name
-                byName.set(akey, {
-                  key: `journal:${akey}`,
-                  name,            // canonical label keeps the real entity name
-                  kind: "journal",
-                  uuid,
-                  caseSensitive: false,
-                  alias: true
-                });
-              }
-            } catch (_) { /* alias indexing is best-effort */ }
-          }
-        }
+      for (const [key, descriptor] of this._journalSubindex()) {
+        if (byName.has(key)) continue; // first definition wins
+        byName.set(key, descriptor);
       }
     } catch (_) { /* journal not ready — skip */ }
 
@@ -1460,7 +1775,163 @@ const EntityLinker = {
 
     this._cache = { regex, byName };
     this._dirty = false;
+
+    // (v0.9.0) Emit a one-line timing report when performance debugging is on.
+    if (_t0) {
+      try {
+        const ms = ((performance?.now?.() ?? Date.now()) - _t0).toFixed(1);
+        console.log(`${LOG_PREFIX} [perf] EntityLinker index rebuilt: ${byName.size} names in ${ms}ms (journal entries cached).`);
+      } catch (_) { /* timing is best-effort */ }
+    }
     return this._cache;
+  },
+
+  /** (v0.9.0) True when performance/debug logging is requested. */
+  _perfEnabled() {
+    try { return Settings.get("debugLogging") === true || Settings.get("ragDebugMode") === true; }
+    catch (_) { return false; }
+  },
+
+  /* ---------------- customisable link styles (v0.9.0) ---------------- */
+
+  /**
+   * Built-in per-kind link palette (colour + FontAwesome icon class). Mirrors
+   * the defaults baked into eternal-skald.css so the rendered markup and the
+   * stylesheet agree when no custom style is set. (v0.9.0)
+   * @type {Object<string,{color:string,icon:string}>}
+   */
+  LINK_DEFAULTS: Object.freeze({
+    journal: { color: "#d6a85a", icon: "fa-book-open" },
+    move:    { color: "#e8c178", icon: "fa-dice-d6" },
+    oracle:  { color: "#c4a6e8", icon: "fa-dice-d20" },
+    track:   { color: "#9ec99a", icon: "fa-list-check" },
+    asset:   { color: "#8fb8d6", icon: "fa-id-card" }
+  }),
+
+  /** The kinds a user may customise. */
+  STYLE_KINDS: Object.freeze(["journal", "move", "oracle", "track", "asset"]),
+
+  /** True iff the user has opted into custom link styles. */
+  customStylesEnabled() {
+    try { return Settings.get("customLinkStyles") === true; }
+    catch (_) { return false; }
+  },
+
+  /** The raw user override object (always an object). */
+  _userStyles() {
+    try {
+      const s = Settings.get("linkStyles");
+      return (s && typeof s === "object") ? s : {};
+    } catch (_) { return {}; }
+  },
+
+  /**
+   * Resolve the effective {color, icon} for a link kind: the built-in default
+   * merged with any user override (only when custom styles are enabled).
+   * Always returns a complete, sanitised object. (v0.9.0)
+   * @param {string} kind
+   * @returns {{color:string,icon:string}}
+   */
+  _styleFor(kind) {
+    const def = this.LINK_DEFAULTS[kind] || this.LINK_DEFAULTS.move;
+    if (!this.customStylesEnabled()) return { color: def.color, icon: def.icon };
+    const ov = this._userStyles()[kind] || {};
+    const color = (typeof ov.color === "string" && this._isSafeColor(ov.color)) ? ov.color : def.color;
+    const icon  = (typeof ov.icon === "string" && this._isSafeIcon(ov.icon)) ? ov.icon : def.icon;
+    return { color, icon };
+  },
+
+  /** Accept #rgb / #rrggbb / #rrggbbaa hex or a short CSS colour keyword. */
+  _isSafeColor(s) {
+    const v = String(s || "").trim();
+    if (/^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(v)) return true;
+    return /^[a-z]{3,20}$/i.test(v); // simple named colour, no parentheses/escapes
+  },
+
+  /** Accept a FontAwesome glyph class like "fa-dragon" (letters/digits/dashes). */
+  _isSafeIcon(s) {
+    return /^fa-[a-z0-9-]{1,40}$/i.test(String(s || "").trim());
+  },
+
+  /**
+   * Inject / refresh / remove the live override stylesheet that recolours the
+   * inline entity links according to the user's preferences. Driven entirely
+   * by CSS so it also covers the Foundry-enriched journal content-links (whose
+   * markup we don't author). No-ops gracefully in headless contexts. (v0.9.0)
+   */
+  applyCustomStyles() {
+    try {
+      if (typeof document === "undefined" || !document?.head) return;
+      const ID = "es-custom-link-styles";
+      let el = document.getElementById(ID);
+
+      // Disabled → remove any previously-injected overrides and bail.
+      if (!this.customStylesEnabled()) {
+        if (el) el.remove();
+        return;
+      }
+
+      const rules = [];
+      for (const kind of this.STYLE_KINDS) {
+        const { color } = this._styleFor(kind);
+        if (kind === "journal") {
+          // Foundry renders @UUID links as <a class="content-link"> inside our
+          // message; tint those (and their leading icon) within our cards only.
+          rules.push(`.eternal-skald-msg a.content-link { color: ${color}; }`);
+          rules.push(`.eternal-skald-msg a.content-link > i { color: ${color}; }`);
+        } else {
+          rules.push(`.es-entity-link.es-${kind}-link { color: ${color}; }`);
+          rules.push(`.es-entity-link.es-${kind}-link:hover { color: ${color}; border-bottom-color: ${color}; }`);
+        }
+      }
+
+      if (!el) {
+        el = document.createElement("style");
+        el.id = ID;
+        document.head.appendChild(el);
+      }
+      el.textContent = `/* The Eternal Skald — custom link styles (v0.9.0) */\n${rules.join("\n")}`;
+    } catch (_) { /* cosmetic only — never throw */ }
+  },
+
+  /**
+   * Persist a colour/icon override for a link kind and enable custom styles.
+   * Validates input; returns the resolved style or null on bad input. World
+   * setting writes are GM-gated by Foundry, so the caller should be GM. (v0.9.0)
+   * @param {string} kind  one of STYLE_KINDS
+   * @param {{color?:string, icon?:string}} patch
+   * @returns {Promise<{color:string,icon:string}|null>}
+   */
+  async setStyle(kind, patch = {}) {
+    if (!this.STYLE_KINDS.includes(kind)) return null;
+    const next = { ...this._userStyles() };
+    const cur = { ...(next[kind] || {}) };
+    if (typeof patch.color === "string" && patch.color.trim()) {
+      if (!this._isSafeColor(patch.color)) return null;
+      cur.color = patch.color.trim();
+    }
+    if (typeof patch.icon === "string" && patch.icon.trim()) {
+      let ic = patch.icon.trim();
+      if (!/^fa-/i.test(ic)) ic = `fa-${ic}`; // tolerate "dragon" → "fa-dragon"
+      if (!this._isSafeIcon(ic)) return null;
+      cur.icon = ic;
+    }
+    next[kind] = cur;
+    try {
+      await game.settings.set(MODULE_ID, "linkStyles", next);
+      if (!this.customStylesEnabled()) await game.settings.set(MODULE_ID, "customLinkStyles", true);
+    } catch (_) { return null; }
+    // onChange handlers refresh CSS + index; refresh eagerly too.
+    this.applyCustomStyles();
+    this.invalidate();
+    return this._styleFor(kind);
+  },
+
+  /** Clear all user overrides (keeps customLinkStyles toggle as-is). (v0.9.0) */
+  async resetStyles() {
+    try { await game.settings.set(MODULE_ID, "linkStyles", {}); } catch (_) {}
+    this.applyCustomStyles();
+    this.invalidate();
   },
 
   _index() {
@@ -1481,37 +1952,41 @@ const EntityLinker = {
       // Oracle — clicking rolls the oracle and the Skald interprets it.
       const alias = escapeHtml(entry.oracleAlias ?? "");
       const label = escapeHtml(entry.name);
+      const icon = escapeHtml(this._styleFor("oracle").icon); // (v0.9.0) customisable
       return `<a class="es-entity-link es-oracle-link" data-skald-action="link-oracle" ` +
-        `data-oracle="${alias}" ` +
+        `data-es-kind="oracle" data-oracle="${alias}" ` +
         `data-tooltip="Ironsworn oracle: ${label} — click to roll">` +
-        `<i class="fa-solid fa-dice-d20"></i>${escapeHtml(matchedText)}</a>`;
+        `<i class="fa-solid ${icon}"></i>${escapeHtml(matchedText)}</a>`;
     }
     if (entry.kind === "track") {
       // Progress track — clicking shows the track and offers to mark it.
       const tname = escapeHtml(entry.trackName ?? entry.name);
+      const icon = escapeHtml(this._styleFor("track").icon); // (v0.9.0) customisable
       return `<a class="es-entity-link es-track-link" data-skald-action="link-track" ` +
-        `data-track="${tname}" ` +
+        `data-es-kind="track" data-track="${tname}" ` +
         `data-tooltip="Progress track: ${tname} — click to view / mark">` +
-        `<i class="fa-solid fa-list-check"></i>${escapeHtml(matchedText)}</a>`;
+        `<i class="fa-solid ${icon}"></i>${escapeHtml(matchedText)}</a>`;
     }
     if (entry.kind === "asset") {
       // Asset — clicking opens the asset card from the compendium.
       const aname = escapeHtml(entry.assetName ?? entry.name);
       const auuid = escapeHtml(entry.assetUuid ?? "");
+      const icon = escapeHtml(this._styleFor("asset").icon); // (v0.9.0) customisable
       return `<a class="es-entity-link es-asset-link" data-skald-action="link-asset" ` +
-        `data-asset="${aname}" data-asset-uuid="${auuid}" ` +
+        `data-es-kind="asset" data-asset="${aname}" data-asset-uuid="${auuid}" ` +
         `data-tooltip="Ironsworn asset: ${aname} — click to view">` +
-        `<i class="fa-solid fa-id-card"></i>${escapeHtml(matchedText)}</a>`;
+        `<i class="fa-solid ${icon}"></i>${escapeHtml(matchedText)}</a>`;
     }
     // Move — custom link wired by Integration.wireSuggestionCard. We carry
     // the Datasworn ID so the click handler can open the *system's* official
     // move dialog/sheet directly (no intermediate card).
     const move = escapeHtml(entry.moveName);
     const dsid = escapeHtml(entry.moveDsId ?? "");
+    const icon = escapeHtml(this._styleFor("move").icon); // (v0.9.0) customisable
     return `<a class="es-entity-link es-move-link" data-skald-action="link-move" ` +
-      `data-move="${move}" data-move-dsid="${dsid}" ` +
+      `data-es-kind="move" data-move="${move}" data-move-dsid="${dsid}" ` +
       `data-tooltip="Ironsworn move: ${move} — click to roll">` +
-      `<i class="fa-solid fa-dice-d6"></i>${escapeHtml(matchedText)}</a>`;
+      `<i class="fa-solid ${icon}"></i>${escapeHtml(matchedText)}</a>`;
   },
 
   /**
@@ -1864,6 +2339,8 @@ function dispatchCommand(rawText) {
       case COMMANDS.RELATIONSHIPS: return () => Commands.relationships(args);
       case COMMANDS.MAP:           return () => Commands.relationships(args);
       case COMMANDS.TEMPLATE:      return () => Commands.template(args);
+      // --- UX / polish (v0.9.0) ---
+      case COMMANDS.LINK_STYLE:    return () => Commands.linkStyle(args);
       default:               return null;
     }
   })();
@@ -1930,7 +2407,8 @@ const Commands = {
       [COMMANDS.RAG_STATUS, "Show the state of the Skald's semantic memory (RAG)."],
       [COMMANDS.TIMELINE,      "Show the campaign timeline of events. Filter with a term, e.g. <code>!timeline Reeves</code>"],
       [COMMANDS.RELATIONSHIPS, "Show the web of who-knows-whom across the chronicle. (alias <code>!map</code>)"],
-      [COMMANDS.TEMPLATE,      "GM-only: scribe a structured entry by hand. e.g. <code>!template npc</code>"]
+      [COMMANDS.TEMPLATE,      "GM-only: scribe a structured entry by hand. e.g. <code>!template npc</code>"],
+      [COMMANDS.LINK_STYLE,    "GM-only: customise narration link colours/icons. e.g. <code>!link-style oracle #ff8800 fa-eye</code> (or <code>!link-style reset</code>)"]
     ];
 
     const tableRows = rows.map(([c, d]) =>
@@ -2230,6 +2708,85 @@ const Commands = {
       ui.notifications?.info(`${SKALD_NAME}: Session chronicle written.`);
     }
     return entry;
+  },
+
+  /* ------------------------- !link-style (v0.9.0) ----------------- */
+  /**
+   * Customise the colour and/or icon of the inline entity links the Skald
+   * weaves into narration, per entity kind. Usage:
+   *   !link-style                         → show the current palette
+   *   !link-style reset                   → clear all overrides
+   *   !link-style <kind> [#color] [fa-icon]
+   *      kind ∈ journal | move | oracle | track | asset
+   *      e.g.  !link-style oracle #ff8800 fa-eye
+   *            !link-style move fa-khanda
+   *            !link-style asset #8fb8d6
+   * GM-only (it writes a world setting). Defensive and purely cosmetic.
+   */
+  async linkStyle(args) {
+    if (!game.user?.isGM) {
+      return Chat.postSystem(`<em>Only the GM may reshape the runes of the chronicle's links.</em>`, { gmWhisper: true });
+    }
+    const raw = String(args || "").trim();
+
+    // No args → show the current palette card.
+    if (!raw) return this._showLinkStyles();
+
+    if (/^reset$/i.test(raw)) {
+      await EntityLinker.resetStyles();
+      return Chat.postSystem(`<em>${SKALD_NAME}: link styles reset to their default hues.</em>`, { gmWhisper: true });
+    }
+
+    const tokens = raw.split(/\s+/);
+    const kind = tokens.shift()?.toLowerCase();
+    if (!EntityLinker.STYLE_KINDS.includes(kind)) {
+      return Chat.postSystem(
+        `<em>Unknown link kind <code>${escapeHtml(String(kind))}</code>. Choose one of: ${EntityLinker.STYLE_KINDS.map(k => `<code>${k}</code>`).join(", ")}.</em>`,
+        { gmWhisper: true }
+      );
+    }
+
+    // Remaining tokens: a colour (#hex or word) and/or an icon (fa-… or bare).
+    const patch = {};
+    for (const tok of tokens) {
+      if (/^#?[0-9a-f]{3,8}$/i.test(tok) && /[0-9a-f]/i.test(tok) && (tok.startsWith("#") || /^[0-9a-f]{6}$/i.test(tok))) {
+        patch.color = tok.startsWith("#") ? tok : `#${tok}`;
+      } else if (/^fa-/i.test(tok)) {
+        patch.icon = tok;
+      } else if (/^#/.test(tok)) {
+        patch.color = tok;
+      } else if (/^[a-z]{3,20}$/i.test(tok) && !patch.color) {
+        patch.color = tok; // a named colour like "gold"
+      } else {
+        patch.icon = tok;  // treat as an icon glyph name (setStyle prefixes fa-)
+      }
+    }
+
+    const resolved = await EntityLinker.setStyle(kind, patch);
+    if (!resolved) {
+      return Chat.postSystem(
+        `<em>${SKALD_NAME}: I could not read that style. Try <code>!link-style ${escapeHtml(kind)} #ff8800 fa-eye</code>.</em>`,
+        { gmWhisper: true }
+      );
+    }
+    return this._showLinkStyles(`Set <strong>${escapeHtml(kind)}</strong> → <code>${escapeHtml(resolved.color)}</code> / <code>${escapeHtml(resolved.icon)}</code>.`);
+  },
+
+  /** Render a small card showing the current per-kind link palette. (v0.9.0) */
+  async _showLinkStyles(note = "") {
+    const on = EntityLinker.customStylesEnabled();
+    const rows = EntityLinker.STYLE_KINDS.map(kind => {
+      const s = EntityLinker._styleFor(kind);
+      const swatch = `<span style="display:inline-block;width:12px;height:12px;border-radius:2px;border:1px solid #0006;background:${escapeHtml(s.color)};vertical-align:middle"></span>`;
+      const icon = kind === "journal" ? "" : `<i class="fa-solid ${escapeHtml(s.icon)}"></i> `;
+      return `<tr><td><code>${kind}</code></td><td>${swatch} <code>${escapeHtml(s.color)}</code></td><td>${icon}<code>${escapeHtml(s.icon)}</code></td></tr>`;
+    }).join("");
+    const body = `
+      ${note ? `<p>${note}</p>` : ""}
+      <p>Custom link styles are <strong>${on ? "ON" : "OFF"}</strong>${on ? "" : " — set any style to enable them"}.</p>
+      <table class="es-help-table"><thead><tr><th>Kind</th><th>Colour</th><th>Icon</th></tr></thead><tbody>${rows}</tbody></table>
+      <p class="es-help-aside"><em>Usage:</em> <code>!link-style &lt;kind&gt; [#color] [fa-icon]</code> · <code>!link-style reset</code></p>`;
+    return Chat.postSkald(body, { variant: "help", title: "Chronicle Link Styles", gmWhisper: true });
   },
 
   /* ------------------------- !timeline (v0.8.0) -------------------- */
@@ -4130,12 +4687,123 @@ const JournalSystem = {
   /** Rolling in-memory log of session activity, drained by !end-session. */
   _sessionLog: [],
 
+  /**
+   * (v0.9.0) Monotonic "journal generation" counter. Bumped whenever a
+   * chronicle JournalEntry is created, renamed, or deleted. Consumers that
+   * cache an expensive scan of `game.journal` (notably {@link EntityLinker})
+   * can compare against this cheap integer to know whether their cache is
+   * still valid — avoiding a full re-scan of every journal on each rebuild.
+   * This is the key optimisation for large campaigns (100+ journals), where
+   * the per-narration entity-index rebuild previously re-walked the entire
+   * journal collection (×3, once per entity type) every time.
+   * @type {number}
+   */
+  _journalGen: 0,
+
+  /** (v0.9.0) Handle for the idle auto-summary timer (or null). */
+  _idleTimer: null,
+
+  /** (v0.9.0) Guards against re-entrant / overlapping auto-summary runs. */
+  _autoSummaryRunning: false,
+
+  /** (v0.9.0) Current journal generation token (see {@link _journalGen}). */
+  journalGeneration() { return this._journalGen; },
+
+  /**
+   * (v0.9.0) Invalidate cached journal scans by advancing the generation
+   * counter. Cheap, defensive, and safe to call from hooks at high frequency.
+   */
+  bumpJournalGeneration() {
+    this._journalGen = (this._journalGen + 1) | 0;
+    if (this._journalGen < 0) this._journalGen = 0; // wrap defensively
+  },
+
   /* ---------------- gating / accessors ---------------- */
 
   enabled()       { return Settings.get("autoJournaling") !== false; },
   notifyLevel()   { return Settings.get("journalNotifications") || "minimal"; },
   permission()    { return Settings.get("journalPermissions") || "gm-only"; },
   sessionAuto()   { return Settings.get("sessionAutoSummary") !== false; },
+
+  /**
+   * (v0.9.0) Idle minutes after which an automatic Session Chronicle is
+   * woven if the session has unsaved activity. 0 disables the idle timer
+   * (manual !end-session still works). Clamped to a sane range.
+   */
+  sessionAutoMinutes() {
+    const n = Number(Settings.get("sessionAutoMinutes"));
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.min(240, Math.max(1, Math.round(n)));
+  },
+
+  /* ---------------- idle auto session-summary (v0.9.0) ---------------- */
+
+  /**
+   * Is THIS client the one responsible for writing the automatic chronicle?
+   * Only the active GM runs the idle timer, so a multi-client table never
+   * generates duplicate session chronicles. (v0.9.0)
+   */
+  _isAutoSummaryHost() {
+    try {
+      if (!game.user?.isGM) return false;
+      // Prefer the canonical "active GM" when Foundry exposes it.
+      const activeGM = game.users?.activeGM;
+      if (activeGM && activeGM.id !== game.user.id) return false;
+      return this.sessionAuto() && this.sessionAutoMinutes() > 0;
+    } catch (_) { return false; }
+  },
+
+  /** Cancel any pending idle auto-summary timer. (v0.9.0) */
+  _clearIdleTimer() {
+    try { if (this._idleTimer) { clearTimeout(this._idleTimer); } } catch (_) {}
+    this._idleTimer = null;
+  },
+
+  /**
+   * (Re)arm the inactivity timer. Called whenever the chronicle records new
+   * activity. After `sessionAutoMinutes` of silence, an automatic Session
+   * Chronicle is woven. Fully defensive — never throws into the ingest path.
+   * (v0.9.0)
+   */
+  _resetIdleTimer() {
+    try {
+      this._clearIdleTimer();
+      if (!this._isAutoSummaryHost()) return;
+      const mins = this.sessionAutoMinutes();
+      if (!mins) return;
+      const ms = mins * 60 * 1000;
+      this._idleTimer = setTimeout(() => {
+        this._idleTimer = null;
+        this._runAutoSummary().catch(e =>
+          console.warn(LOG_PREFIX, "auto session-summary failed:", e?.message || e));
+      }, ms);
+    } catch (e) {
+      console.warn(LOG_PREFIX, "_resetIdleTimer failed:", e?.message || e);
+    }
+  },
+
+  /**
+   * Weave an automatic Session Chronicle if there is unsaved activity. Guarded
+   * so it never runs concurrently with itself or a manual !end-session.
+   * (v0.9.0)
+   */
+  async _runAutoSummary() {
+    if (this._autoSummaryRunning) return null;
+    // Re-check conditions at fire time (settings may have changed; the log may
+    // have been drained by a manual !end-session in the meantime).
+    if (!this._isAutoSummaryHost()) return null;
+    if (!Array.isArray(this._sessionLog) || !this._sessionLog.length) return null;
+    this._autoSummaryRunning = true;
+    try {
+      await Chat.postSystem(
+        `<em>${SKALD_NAME} senses a lull and gathers the session's threads…</em>`,
+        { gmWhisper: true }
+      );
+      return await this.generateSessionChronicle({ announce: true, auto: true });
+    } finally {
+      this._autoSummaryRunning = false;
+    }
+  },
 
   /** Only GMs (or users with journal-create rights) write journals. */
   canWrite() {
@@ -4195,11 +4863,21 @@ const JournalSystem = {
     // Keep the log from growing without bound during marathon sessions.
     if (this._sessionLog.length > 500) this._sessionLog.splice(0, this._sessionLog.length - 500);
 
+    // (v0.9.0) Fresh activity — (re)arm the idle auto-summary timer so a
+    // lull eventually weaves a Session Chronicle on its own. Fully defensive.
+    try { this._resetIdleTimer(); } catch (_) { /* never break ingest */ }
+
     // 1b) (v0.8.0) Persist a compact, permanent timeline event so `!timeline`
     // can render the full campaign history across reloads/sessions. This is
     // GM-only (world setting write) and fire-and-forget — never block or break
     // narration if persistence fails.
     try { this._recordTimelineEvent(metadata, ctx); } catch (_) { /* non-fatal */ }
+
+    // 1c) (v0.9.0) Contradiction detection — compare freshly narrated facts
+    // against established lore and surface a gentle GM-only advisory if the
+    // saga seems to be tripping over itself. Fire-and-forget and fully
+    // defensive: a detector hiccup must never interrupt the chronicle.
+    try { ContradictionDetector.check(metadata); } catch (_) { /* never break ingest */ }
 
     const q = this.queue();
 
@@ -4934,7 +5612,11 @@ const JournalSystem = {
    * AI to weave a saga-styled recap, then writes it as a dated journal and
    * clears the log. Triggered by !end-session.
    */
-  async generateSessionChronicle({ announce = true } = {}) {
+  async generateSessionChronicle({ announce = true, auto = false } = {}) {
+    // (v0.9.0) Whether triggered manually (!end-session) or automatically by
+    // the idle timer, cancel any pending idle timer so we don't double-fire.
+    try { this._clearIdleTimer(); } catch (_) {}
+
     if (!this.canWrite()) {
       ui.notifications?.warn(`${SKALD_NAME}: only the GM can close a session chronicle.`);
       return null;
@@ -4975,7 +5657,8 @@ const JournalSystem = {
     }
 
     const folder = await this.getOrCreateFolder("session");
-    const title = `Session Chronicle — ${new Date().toLocaleDateString()}`;
+    // (v0.9.0) Mark auto-generated chronicles so the GM can tell them apart.
+    const title = `Session Chronicle — ${new Date().toLocaleDateString()}${auto ? " (auto)" : ""}`;
     // Stored in a JournalEntry — keep plain (move links have no handler there).
     const html = `<h2>📖 ${escapeHtml(title)}</h2>${formatMarkdown(recap, { link: false })}`;
     const entry = await JournalEntry.create({
@@ -4990,7 +5673,8 @@ const JournalSystem = {
           lastUpdated: Date.now(),
           relatedEntities: [],
           sourceVow: this._currentVowId(),
-          aiContext: digest.slice(0, 6000)
+          aiContext: digest.slice(0, 6000),
+          auto: !!auto // (v0.9.0) idle-timer-generated vs manual !end-session
         }
       }
     });
@@ -4999,7 +5683,10 @@ const JournalSystem = {
       // Embed the session chronicle into semantic memory (v0.5.0).
       RagBridge.indexEntry(entry);
       if (announce) {
-        await Chat.postSkald(formatMarkdown(recap), { variant: "lore", title });
+        const intro = auto
+          ? `<p class="es-help-aside"><em>Auto-woven after a lull. Type <code>!end-session</code> any time to close one yourself.</em></p>`
+          : "";
+        await Chat.postSkald(intro + formatMarkdown(recap), { variant: "lore", title });
         this._toast(title, "session");
       }
     }
@@ -5583,6 +6270,9 @@ Hooks.once("ready", async () => {
     integration: Integration,
     // --- Narration entity linking (v0.5.1) ---
     entityLinker: EntityLinker,
+    // --- Customisable link styles (v0.9.0) ---
+    setLinkStyle: (kind, patch) => EntityLinker.setStyle(kind, patch || {}),
+    resetLinkStyles: () => EntityLinker.resetStyles(),
     // --- Living Chronicle: timeline & relationships (v0.8.0) ---
     timeline: (q) => JournalSystem.getTimeline(q),
     clearTimeline: () => JournalSystem.clearTimeline(),
@@ -5760,7 +6450,15 @@ Hooks.on("deleteJournalEntry", (entry /*, options, userId */) => {
 // index stale so the next narration rebuilds it. Cheap and defensive —
 // never throws.
 for (const hook of ["createJournalEntry", "updateJournalEntry", "deleteJournalEntry"]) {
-  Hooks.on(hook, () => { try { EntityLinker.invalidate(); } catch (_) { /* defensive */ } });
+  Hooks.on(hook, () => {
+    try {
+      // (v0.9.0) The journal collection changed — advance the generation
+      // counter so the memoised journal sub-index is re-scanned, and drop
+      // the linker cache entirely.
+      JournalSystem.bumpJournalGeneration();
+      EntityLinker.invalidateJournal();
+    } catch (_) { /* defensive */ }
+  });
 }
 
 // --- Progress-track upkeep (v0.7.0) ----------------------------------
@@ -5776,7 +6474,11 @@ for (const hook of [
 }
 
 // A fresh world / reload starts with a clean index.
-Hooks.once("ready", () => { try { EntityLinker.invalidate(); } catch (_) { /* defensive */ } });
+Hooks.once("ready", () => {
+  try { EntityLinker.invalidate(); } catch (_) { /* defensive */ }
+  // (v0.9.0) Render any user-customised link styles into the live document.
+  try { EntityLinker.applyCustomStyles(); } catch (_) { /* defensive */ }
+});
 
 // --- Asset index priming (v0.7.0) ------------------------------------
 // The asset compendium index is async to build, but the EntityLinker's

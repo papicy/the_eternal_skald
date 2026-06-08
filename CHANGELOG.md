@@ -13,6 +13,54 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.9.0] — 2026-06-08
+
+### Added
+- **Context-aware suggestions.** When narrating, the Skald can now weave subtle,
+  situation-aware next-step hints drawn from the active scene, the current
+  location entry and recent open story threads. A new
+  `buildContextSuggestionBlock()` assembles a compact, advisory-only block that is
+  injected into the system prompt for narrative calls (gated by `extras.allowMoves`,
+  so session chronicles are unaffected). Purely additive guidance — it never forces
+  the story. Controlled by a new **Context-Aware Suggestions** setting (default ON).
+- **Lore contradiction alerts.** After each narration is ingested, the new
+  `ContradictionDetector` compares the freshly recorded facts against established
+  chronicle lore (recalled via Semantic Memory / RAG) and uses the AI as a terse
+  continuity checker. Genuine conflicts are surfaced as a GM-only whispered
+  advisory card ("The Chronicle Frowns") listing each potential contradiction —
+  **nothing is ever changed automatically.** Runs only on the active GM, is fully
+  fire-and-forget, and degrades silently when RAG or the AI is unavailable.
+  Controlled by a new **Lore Contradiction Alerts** setting (default OFF).
+- **Idle auto-summaries.** A lull in play can now weave a Session Chronicle on its
+  own, so a recap is never lost when `!end-session` is forgotten. A new
+  **Auto-Summary Idle Timer (minutes)** setting (default `0` = off) arms an idle
+  timer that is reset on every narration; when it elapses, the active GM host
+  generates the chronicle automatically (titled with an "(auto)" suffix and a short
+  intro note). Builds on the existing **Session Chronicle on Demand** master toggle
+  and is fully backwards compatible (manual-only when the timer is `0`).
+- **Customizable link styles.** The new GM-only `!link-style` command lets you
+  recolor and re-icon the in-chat entity links (moves, oracles, tracks, assets) to
+  taste. Styles are validated (safe colors / Font Awesome icon names only), stored
+  in a new `linkStyles` object setting, and injected as a scoped
+  `<style id="es-custom-link-styles">` block at runtime; `!link-style reset`
+  restores the saga defaults. Gated by a new **Custom Entity Link Styles** setting
+  (default OFF) and exposed on the public API as `api.setLinkStyle()` /
+  `api.resetLinkStyles()`.
+
+### Changed
+- **Faster entity indexing for large campaigns.** The `EntityLinker` index now
+  memoizes its journal sub-index, keyed by a `JournalSystem` generation counter
+  that is bumped only when journal entries are created/updated/deleted. The journal
+  scan was also reduced from three passes to a single pass over the entries, and
+  optional timing instrumentation was added (gated behind a perf flag). Item, actor
+  and token changes now invalidate only their own portion of the index, preserving
+  the journal cache — keeping linking snappy across campaigns of 100+ journals.
+
+### Notes
+- All new behaviour is additive, backwards-compatible and degrades gracefully:
+  narration is never blocked or broken if a feature's dependency (RAG, AI, DOM) is
+  unavailable. This remains an early (`0.x`) **alpha** build — expect rough edges.
+
 ## [0.8.0] — 2026-06-08
 
 ### Added
@@ -414,6 +462,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.9.0]: https://github.com/papicy/eternal_skald/releases/tag/v0.9.0
 [0.8.0]: https://github.com/papicy/eternal_skald/releases/tag/v0.8.0
 [0.7.0]: https://github.com/papicy/eternal_skald/releases/tag/v0.7.0
 [0.6.0]: https://github.com/papicy/eternal_skald/releases/tag/v0.6.0

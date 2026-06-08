@@ -89,7 +89,23 @@
       },
       "sessionAutoSummary": {
         "name": "Session Chronicle on Demand",
-        "hint": "Enable the !end-session command, which weaves a saga-styled recap of everything recorded this session into a dated Session Chronicle journal. Defaults to ON."
+        "hint": "Enable the !end-session command (and idle auto-summaries), which weave a saga-styled recap of everything recorded this session into a dated Session Chronicle journal. Defaults to ON."
+      },
+      "sessionAutoMinutes": {
+        "name": "Auto-Summary Idle Timer (minutes)",
+        "hint": "Automatically weave a Session Chronicle after this many minutes of inactivity (no new narration). Requires 'Session Chronicle on Demand' to be ON. Set to 0 to disable idle auto-summaries and only chronicle manually via !end-session. Default: 0 (off)."
+      },
+      "contextSuggestions": {
+        "name": "Context-Aware Suggestions",
+        "hint": "Let the Skald offer subtle, situation-aware next-step hints (drawn from the active scene, location and recent story threads) when narrating. Purely advisory and never forces the story. Defaults to ON."
+      },
+      "contradictionDetection": {
+        "name": "Lore Contradiction Alerts",
+        "hint": "After each narration, quietly compare freshly recorded facts against established chronicle lore and whisper a GM-only advisory if they seem to conflict. Nothing is ever changed automatically. Uses Semantic Memory (RAG) and the AI; defaults to OFF."
+      },
+      "customLinkStyles": {
+        "name": "Custom Entity Link Styles",
+        "hint": "Let you recolor and re-icon the in-chat entity links (moves, oracles, tracks, assets) to taste via the !link-style command. When OFF, the built-in saga styling is used. Defaults to OFF."
       },
       "ragEnabled": {
         "name": "Semantic Memory (RAG)",
