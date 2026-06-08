@@ -1205,7 +1205,7 @@ function escapeHtml(str) {
 /**
  * Turns plain entity names the Skald narrates into clickable links.
  *
- * Two sources are cross-referenced:
+ * Several sources are cross-referenced:
  *   1. The Living Chronicle — auto-scribed NPC / location / discovery
  *      Journal Entries. Matches become Foundry content links
  *      (`@UUID[JournalEntry.id]{Name}`) which Foundry auto-enriches in the
@@ -1215,6 +1215,16 @@ function escapeHtml(str) {
  *      {@link Integration.wireSuggestionCard}). Move matching is
  *      case-SENSITIVE so ordinary verbs ("you strike the wolf") are never
  *      mistaken for the move ("make a Strike").
+ *   3. The Ironsworn oracle tables (IronswornData.oracles). Oracle labels
+ *      ("Action Oracle", "Pay the Price Oracle", …) become links that roll
+ *      the oracle via {@link OracleInterpreter}. Case-SENSITIVE to avoid
+ *      matching common words like "action"/"region".
+ *   4. Progress tracks on the active character (vows, journeys, bonds,
+ *      combat tracks). Matches become links that show the track's status
+ *      and offer to mark progress. Case-insensitive (proper-noun-ish names).
+ *   5. Assets from the system's compendia (Companions, Paths, Rituals, …),
+ *      read from an async-built, cached index on {@link IronswornController}.
+ *      Matches become links that open the asset's card. Case-insensitive.
  *
  * The index is built lazily and cached, and invalidated whenever a journal
  * entry is created / updated / deleted or the world reloads. The whole
@@ -1235,6 +1245,33 @@ const EntityLinker = {
 
   /** Escape a literal string for safe inclusion in a RegExp. */
   _escapeRe(str) { return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); },
+
+  /**
+   * Human-readable label for an oracle key (mirrors
+   * {@link OracleInterpreter._labelFor} but kept self-contained so the index
+   * can build before that object is referenced). Unknown keys fall back to a
+   * title-cased version of the key plus an "Oracle" suffix.
+   */
+  _oracleLabel(key) {
+    const map = {
+      action: "Action Oracle",
+      theme: "Theme Oracle",
+      region: "Region Oracle",
+      location: "Location Oracle",
+      coastal: "Coastal Waters Oracle",
+      npcRole: "NPC Role Oracle",
+      npcGoal: "NPC Goal Oracle",
+      npcDescriptor: "NPC Descriptor Oracle",
+      combatAction: "Combat Action Oracle",
+      mysticBacklash: "Mystic Backlash Oracle",
+      payThePrice: "Pay the Price Oracle"
+    };
+    if (map[key]) return map[key];
+    // Fallback: "someKey" → "Some Key Oracle".
+    const words = String(key ?? "").replace(/([a-z])([A-Z])/g, "$1 $2").trim();
+    if (!words) return "";
+    return `${words.charAt(0).toUpperCase()}${words.slice(1)} Oracle`;
+  },
 
   /**
    * (Re)build the name → entry index and the combined matcher regex.
@@ -1287,6 +1324,74 @@ const EntityLinker = {
       }
     } catch (_) { /* controller not ready — skip */ }
 
+    // --- 3) Ironsworn oracles (case-SENSITIVE labels to avoid common-word
+    //        false-positives like "action"/"region"). Clicking an oracle
+    //        link rolls it through the OracleInterpreter. ------------------
+    try {
+      if (typeof IronswornData !== "undefined" && IronswornData?.oracles) {
+        for (const oracleKey of Object.keys(IronswornData.oracles)) {
+          const label = this._oracleLabel(oracleKey); // e.g. "Action Oracle"
+          if (!label || label.length < 3) continue;
+          const key = label.toLowerCase();
+          if (byName.has(key)) continue; // don't clobber an earlier entity
+          byName.set(key, {
+            key: `oracle:${oracleKey}`,
+            name: label,
+            kind: "oracle",
+            oracleAlias: oracleKey,
+            caseSensitive: true
+          });
+        }
+      }
+    } catch (_) { /* oracle data not ready — skip */ }
+
+    // --- 4) Progress tracks on the active character (vows, journeys, bonds,
+    //        combat tracks). Proper-noun-ish names; case-insensitive like
+    //        journal entities. Clicking shows / marks the track. -----------
+    try {
+      if (IronswornController?.isActive?.() && typeof IronswornController.getProgressTracks === "function") {
+        const actor = IronswornController.getActiveCharacter?.();
+        if (actor) {
+          for (const track of IronswornController.getProgressTracks(actor)) {
+            const name = (track?.name ?? "").trim();
+            if (name.length < 3) continue;
+            const key = name.toLowerCase();
+            if (byName.has(key)) continue; // first definition wins
+            byName.set(key, {
+              key: `track:${key}`,
+              name,
+              kind: "track",
+              trackName: name,
+              caseSensitive: false
+            });
+          }
+        }
+      }
+    } catch (_) { /* controller / actor not ready — skip */ }
+
+    // --- 5) Assets from the compendium (Companions, Paths, Rituals, …).
+    //        Read from IronswornController's async-built, cached index
+    //        (primed on `ready`; empty until then — degrades gracefully).
+    //        Case-insensitive; asset names are distinctive proper nouns. ---
+    try {
+      if (IronswornController?.isActive?.() && typeof IronswornController.getAssetNames === "function") {
+        for (const asset of IronswornController.getAssetNames()) {
+          const name = (asset?.name ?? "").trim();
+          if (name.length < 3) continue;
+          const key = name.toLowerCase();
+          if (byName.has(key)) continue; // don't clobber a more-specific entity
+          byName.set(key, {
+            key: `asset:${key}`,
+            name,
+            kind: "asset",
+            assetName: name,
+            assetUuid: asset.uuid ?? "",
+            caseSensitive: false
+          });
+        }
+      }
+    } catch (_) { /* asset index not ready — skip */ }
+
     let regex = null;
     if (byName.size) {
       // Longest names first so multi-word entities win over substrings.
@@ -1322,6 +1427,32 @@ const EntityLinker = {
       // Strip braces from the label defensively so the syntax can't break.
       const label = matchedText.replace(/[{}]/g, "");
       return `@UUID[${entry.uuid}]{${label}}`;
+    }
+    if (entry.kind === "oracle") {
+      // Oracle — clicking rolls the oracle and the Skald interprets it.
+      const alias = escapeHtml(entry.oracleAlias ?? "");
+      const label = escapeHtml(entry.name);
+      return `<a class="es-entity-link es-oracle-link" data-skald-action="link-oracle" ` +
+        `data-oracle="${alias}" ` +
+        `data-tooltip="Ironsworn oracle: ${label} — click to roll">` +
+        `<i class="fa-solid fa-dice-d20"></i>${escapeHtml(matchedText)}</a>`;
+    }
+    if (entry.kind === "track") {
+      // Progress track — clicking shows the track and offers to mark it.
+      const tname = escapeHtml(entry.trackName ?? entry.name);
+      return `<a class="es-entity-link es-track-link" data-skald-action="link-track" ` +
+        `data-track="${tname}" ` +
+        `data-tooltip="Progress track: ${tname} — click to view / mark">` +
+        `<i class="fa-solid fa-list-check"></i>${escapeHtml(matchedText)}</a>`;
+    }
+    if (entry.kind === "asset") {
+      // Asset — clicking opens the asset card from the compendium.
+      const aname = escapeHtml(entry.assetName ?? entry.name);
+      const auuid = escapeHtml(entry.assetUuid ?? "");
+      return `<a class="es-entity-link es-asset-link" data-skald-action="link-asset" ` +
+        `data-asset="${aname}" data-asset-uuid="${auuid}" ` +
+        `data-tooltip="Ironsworn asset: ${aname} — click to view">` +
+        `<i class="fa-solid fa-id-card"></i>${escapeHtml(matchedText)}</a>`;
     }
     // Move — custom link wired by Integration.wireSuggestionCard. We carry
     // the Datasworn ID so the click handler can open the *system's* official
@@ -2387,11 +2518,29 @@ const Integration = {
         const move = btn.dataset.move;
         const moveDsId = btn.dataset.moveDsid;
         const stat = btn.dataset.stat;
+        const oracle = btn.dataset.oracle;
+        const track = btn.dataset.track;
+        const asset = btn.dataset.asset;
+        const assetUuid = btn.dataset.assetUuid;
         try {
           if (action === "roll-move") {
             await this.doTriggerMove(move, stat);
           } else if (action === "choose-move") {
             await this.showMoveSelector(stat);
+          } else if (action === "link-oracle") {
+            // An inline oracle link in narration — roll it and let the Skald
+            // interpret the result (the same pipeline as the !oracle command).
+            await this.doRollOracleLink(oracle);
+          } else if (action === "link-track") {
+            // An inline progress-track link — show its status and offer to
+            // mark progress by rank.
+            await this.showProgressTrackCard(track);
+          } else if (action === "mark-track") {
+            // The "Mark Progress" button on a progress-track card.
+            await this.doMarkTrack(track);
+          } else if (action === "link-asset") {
+            // An inline asset link — open the asset's card from the compendium.
+            await this.showAssetLink(assetUuid || asset);
           } else if (action === "link-move") {
             // An inline move link in narration — open the *system's* own
             // official move dialog directly (the exact pre-roll dialog the
@@ -2434,6 +2583,113 @@ const Integration = {
     // The resulting Ironsworn roll card (or manual card) is picked up by
     // onIronswornRoll(), which narrates the outcome.
     return res;
+  },
+
+  /* ---------------- Inline entity-link handlers (v0.7.0) ---------------- */
+
+  /**
+   * Handle a click on an inline oracle link: roll the oracle through the
+   * shared {@link OracleInterpreter} so the result is posted and narrated
+   * exactly like the `!oracle` command. Degrades gracefully.
+   */
+  async doRollOracleLink(alias) {
+    try {
+      if (typeof OracleInterpreter === "undefined" || typeof OracleInterpreter.roll !== "function") {
+        ui.notifications?.info(`${SKALD_NAME}: oracle roller unavailable.`);
+        return;
+      }
+      await OracleInterpreter.roll(alias);
+    } catch (e) {
+      console.error(LOG_PREFIX, "oracle link failed", e);
+      ui.notifications?.error(`${SKALD_NAME}: ${e?.message ?? e}`);
+    }
+  },
+
+  /**
+   * Handle a click on an inline progress-track link: post a compact card
+   * showing the track's current boxes/rank, with a button to mark progress
+   * by its rank. Degrades gracefully when the system/actor is unavailable.
+   */
+  async showProgressTrackCard(trackName) {
+    try {
+      if (!this.active()) {
+        ui.notifications?.info(`${SKALD_NAME}: ${trackName} — Ironsworn system not active.`);
+        return;
+      }
+      const actor = IronswornController.getActiveCharacter();
+      if (!actor) {
+        ui.notifications?.warn(`${SKALD_NAME}: no active character to read "${trackName}".`);
+        return;
+      }
+      const tracks = IronswornController.getProgressTracks(actor) ?? [];
+      const lc = String(trackName).toLowerCase();
+      const track = tracks.find(t => t.name?.toLowerCase() === lc)
+                 ?? tracks.find(t => t.name?.toLowerCase().includes(lc));
+      if (!track) {
+        ui.notifications?.info(`${SKALD_NAME}: progress track "${trackName}" not found on ${actor.name}.`);
+        return;
+      }
+
+      const boxes = typeof track.boxes === "number" ? track.boxes : Math.floor((track.current ?? 0) / 4);
+      const rank = track.rank ? `<span class="es-track-rank">${escapeHtml(String(track.rank))}</span>` : "";
+      const done = track.completed ? " ✓" : "";
+      const body = `
+        <div class="es-track-card">
+          <p class="es-track-name"><strong>${escapeHtml(track.name)}</strong>${done} ${rank}</p>
+          <p class="es-track-progress">Progress: <strong>${boxes}/10</strong> boxes
+             <span class="es-track-ticks">(${track.current ?? 0}/40 ticks)</span></p>
+          <div class="es-move-buttons">
+            <button type="button" class="es-btn es-btn-roll"
+                    data-skald-action="mark-track"
+                    data-track="${escapeHtml(track.name)}">▰ Mark Progress (by rank)</button>
+          </div>
+        </div>`;
+      await Chat.postSkald(body, { variant: "suggest", title: "Progress Track" });
+    } catch (e) {
+      console.error(LOG_PREFIX, "progress-track link failed", e);
+      ui.notifications?.error(`${SKALD_NAME}: ${e?.message ?? e}`);
+    }
+  },
+
+  /** Mark progress on a track by its rank (wired from the track card). */
+  async doMarkTrack(trackName) {
+    try {
+      if (!this.active()) return;
+      const actor = IronswornController.getActiveCharacter();
+      if (!actor) {
+        ui.notifications?.warn(`${SKALD_NAME}: no active character to mark "${trackName}".`);
+        return;
+      }
+      const res = await IronswornController.markProgressByRank(actor, trackName, 1);
+      if (res?.ok) {
+        ui.notifications?.info(`${SKALD_NAME}: marked progress on ${res.track} — ${res.boxes}/10 boxes.`);
+      } else {
+        ui.notifications?.warn(`${SKALD_NAME}: ${res?.error ?? "could not mark progress."}`);
+      }
+    } catch (e) {
+      console.error(LOG_PREFIX, "mark-track failed", e);
+      ui.notifications?.error(`${SKALD_NAME}: ${e?.message ?? e}`);
+    }
+  },
+
+  /**
+   * Handle a click on an inline asset link: open the asset's card (sheet)
+   * from the compendium via the controller. Degrades gracefully.
+   */
+  async showAssetLink(ref) {
+    try {
+      if (!this.active()) {
+        ui.notifications?.info(`${SKALD_NAME}: ${ref} — Ironsworn system not active.`);
+        return;
+      }
+      const res = await IronswornController.showAsset(ref);
+      if (!res?.ok) {
+        ui.notifications?.info(`${SKALD_NAME}: could not open asset — ${res?.error ?? "not found."}`);
+      }
+    } catch (e) {
+      console.error(LOG_PREFIX, "asset link failed", e);
+      ui.notifications?.error(`${SKALD_NAME}: ${e?.message ?? e}`);
+    }
   },
 
   /** Show a dialog letting the user pick any catalogued move + stat. */
@@ -4700,5 +4956,35 @@ Hooks.on("deleteJournalEntry", (entry /*, options, userId */) => {
 for (const hook of ["createJournalEntry", "updateJournalEntry", "deleteJournalEntry"]) {
   Hooks.on(hook, () => { try { EntityLinker.invalidate(); } catch (_) { /* defensive */ } });
 }
+
+// --- Progress-track upkeep (v0.7.0) ----------------------------------
+// Progress tracks the index links are embedded Items on the active actor.
+// Whenever an actor or any of its items is created / updated / deleted,
+// the set of linkable tracks (or their names) may have changed, so mark
+// the index stale. Cheap and defensive — never throws.
+for (const hook of [
+  "createItem", "updateItem", "deleteItem",
+  "updateActor", "deleteActor", "controlToken"
+]) {
+  Hooks.on(hook, () => { try { EntityLinker.invalidate(); } catch (_) { /* defensive */ } });
+}
+
 // A fresh world / reload starts with a clean index.
 Hooks.once("ready", () => { try { EntityLinker.invalidate(); } catch (_) { /* defensive */ } });
+
+// --- Asset index priming (v0.7.0) ------------------------------------
+// The asset compendium index is async to build, but the EntityLinker's
+// index build is synchronous and reads a cached snapshot. Prime that cache
+// once the world is ready (when the Ironsworn system + its compendia are
+// available), then invalidate the linker so the next narration includes
+// assets. Fire-and-forget; fully defensive — asset linking simply stays
+// off if anything fails.
+Hooks.once("ready", () => {
+  try {
+    if (IronswornController?.isActive?.() && typeof IronswornController._buildAssetIndex === "function") {
+      IronswornController._buildAssetIndex()
+        .then(() => { try { EntityLinker.invalidate(); } catch (_) {} })
+        .catch(() => { /* defensive — asset linking stays off */ });
+    }
+  } catch (_) { /* defensive */ }
+});

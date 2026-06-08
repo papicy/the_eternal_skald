@@ -1117,6 +1117,194 @@ export const IronswornController = {
   },
 
   /* =================================================================
+   *  ASSETS  (v0.7.0 — compendium lookup for entity linking)
+   * =================================================================
+   *  Assets (Companions, Paths, Combat Talents, Rituals, …) are stored by
+   *  the foundry-ironsworn system as `asset` Items inside compendium packs
+   *  (ironswornassets, starforgedassets, …). We index them by name so the
+   *  EntityLinker can turn an asset name the Skald narrates into a clickable
+   *  link that opens the asset's card. Mirrors the foe-index approach:
+   *  async build + in-memory cache, fuzzy matching, fully defensive.
+   * ================================================================= */
+
+  /** In-memory cache of the merged asset index. Cleared on world reload. */
+  _assetIndexCache: null,
+
+  /** Drop the cached asset index (e.g. after enabling an asset module). */
+  clearAssetCache() {
+    this._assetIndexCache = null;
+    dbg("clearAssetCache: asset index cache cleared");
+  },
+
+  /**
+   * Item compendium packs that look like asset catalogs. Covers Ironsworn,
+   * Delve, Starforged and Sundered Isles asset packs, plus any third-party
+   * pack whose id/label mentions assets.
+   */
+  _assetPacks() {
+    const out = [];
+    for (const pack of (game?.packs ?? [])) {
+      try {
+        if (pack.documentName !== "Item") continue;
+        const id = String(pack.metadata?.id ?? pack.collection ?? "");
+        const label = String(pack.metadata?.label ?? pack.title ?? "");
+        if (/asset/i.test(id) || /asset/i.test(label)) out.push(pack);
+      } catch (_) {}
+    }
+    return out;
+  },
+
+  /**
+   * Build (and cache) a flat index of every asset across the asset packs:
+   * [{ name, lc, uuid, packId, _id }]. Returns the cached array on repeat
+   * calls. Never throws — returns [] on failure.
+   *
+   * @returns {Promise<Array<{name:string, lc:string, uuid:string, packId:string, _id:string}>>}
+   */
+  async _buildAssetIndex() {
+    if (Array.isArray(this._assetIndexCache)) return this._assetIndexCache;
+    const entries = [];
+    for (const pack of this._assetPacks()) {
+      try {
+        const index = await pack.getIndex();
+        const packId = String(pack.metadata?.id ?? pack.collection ?? "");
+        for (const e of (index?.contents ?? index ?? [])) {
+          const name = (e?.name ?? "").trim();
+          if (!name) continue;
+          entries.push({
+            name,
+            lc: name.toLowerCase(),
+            uuid: e.uuid ?? `Compendium.${packId}.${e._id}`,
+            packId,
+            _id: e._id
+          });
+        }
+      } catch (e) {
+        warn(`_buildAssetIndex: failed to index "${pack?.metadata?.id}":`, e?.message ?? e);
+      }
+    }
+    this._assetIndexCache = entries;
+    dbg(`_buildAssetIndex: indexed ${entries.length} asset(s) from ${this._assetPacks().length} pack(s)`);
+    return entries;
+  },
+
+  /**
+   * Synchronous read of the cached asset names (for the EntityLinker, whose
+   * index build is synchronous). Returns [] until {@link _buildAssetIndex}
+   * has populated the cache (primed on `ready`). Never triggers a build.
+   *
+   * @returns {Array<{name:string, uuid:string}>}
+   */
+  getAssetNames() {
+    return Array.isArray(this._assetIndexCache)
+      ? this._assetIndexCache.map(a => ({ name: a.name, uuid: a.uuid }))
+      : [];
+  },
+
+  /**
+   * Look up an asset by name in the asset compendia. Matching, best → worst:
+   * exact (case-insensitive) → normalised-equal → substring → token overlap
+   * → close edit-distance. Reuses the foe-matcher's helpers.
+   *
+   * @param {string} assetName
+   * @returns {Promise<{found:boolean, name:string|null, uuid?:string, packId?:string, match?:string, suggestion?:string}>}
+   */
+  async lookupAssetInCompendium(assetName) {
+    const result = { found: false, name: assetName ?? null };
+    if (!assetName || !this.isActive()) return result;
+    let index;
+    try { index = await this._buildAssetIndex(); }
+    catch (e) { warn("lookupAssetInCompendium failed:", e?.message ?? e); return result; }
+    if (!index.length) return result;
+
+    const lc = String(assetName).toLowerCase().trim();
+    const norm = this._normName(assetName);
+
+    let hit = index.find(e => e.lc === lc);
+    let match = hit ? "exact" : null;
+
+    if (!hit) { hit = index.find(e => this._normName(e.name) === norm); if (hit) match = "normalized"; }
+
+    if (!hit && norm) {
+      const subs = index.filter(e => {
+        const en = this._normName(e.name);
+        return en && (en.includes(norm) || norm.includes(en));
+      });
+      if (subs.length) {
+        subs.sort((a, b) => Math.abs(this._normName(a.name).length - norm.length)
+                          - Math.abs(this._normName(b.name).length - norm.length));
+        hit = subs[0]; match = "substring";
+      }
+    }
+
+    if (!hit && norm) {
+      const qTokens = new Set(norm.split(" ").filter(t => t.length >= 3));
+      let best = null, bestScore = 0;
+      for (const e of index) {
+        const eTokens = this._normName(e.name).split(" ").filter(t => t.length >= 3);
+        const overlap = eTokens.filter(t => qTokens.has(t)).length;
+        if (overlap > bestScore) { bestScore = overlap; best = e; }
+      }
+      if (best && bestScore > 0) { hit = best; match = "token"; }
+    }
+
+    if (!hit && norm.length >= 4) {
+      let best = null, bestDist = Infinity;
+      for (const e of index) {
+        const d = this._editDistance(norm, this._normName(e.name));
+        if (d < bestDist) { bestDist = d; best = e; }
+      }
+      const tol = Math.min(3, Math.max(2, Math.floor(norm.length * 0.25)));
+      if (best && bestDist <= tol) { hit = best; match = "fuzzy"; }
+      else if (best && bestDist <= tol + 2) result.suggestion = best.name;
+    }
+
+    if (hit) {
+      dbg(`lookupAssetInCompendium: "${assetName}" → "${hit.name}" via ${match} (${hit.packId})`);
+      return { found: true, name: hit.name, uuid: hit.uuid, packId: hit.packId, match };
+    }
+    return result;
+  },
+
+  /**
+   * Open / display an asset card. Resolves a UUID (preferred) or a name to
+   * the asset Document and renders its sheet. Falls back to a chat card with
+   * the asset's description when no sheet is available. Fully defensive.
+   *
+   * @param {string} ref  asset UUID (Compendium.…) or asset name
+   * @returns {Promise<{ok:boolean, method:string, error?:string}>}
+   */
+  async showAsset(ref) {
+    try {
+      if (!this.isActive()) return { ok: false, method: "none", error: "Ironsworn system not active." };
+      if (!ref) return { ok: false, method: "none", error: "No asset reference." };
+
+      let doc = null;
+      // 1) Direct UUID resolution (works for Compendium.* and world Items).
+      if (/^(Compendium|Item|Actor)\./.test(String(ref))) {
+        try { doc = await fromUuid(ref); } catch (_) { /* fall through to name lookup */ }
+      }
+      // 2) Name lookup via the compendium index.
+      if (!doc) {
+        const found = await this.lookupAssetInCompendium(ref);
+        if (found.found && found.uuid) {
+          try { doc = await fromUuid(found.uuid); } catch (_) {}
+        }
+      }
+      if (!doc) return { ok: false, method: "none", error: `Asset "${ref}" not found.` };
+
+      if (doc.sheet?.render) {
+        doc.sheet.render(true);
+        return { ok: true, method: "sheet" };
+      }
+      return { ok: false, method: "none", error: "Asset has no renderable sheet." };
+    } catch (e) {
+      warn(`showAsset("${ref}") failed:`, e?.message ?? e);
+      return { ok: false, method: "sheet", error: e?.message ?? String(e) };
+    }
+  },
+
+  /* =================================================================
    *  INTERNAL HELPERS
    * ================================================================= */
 
