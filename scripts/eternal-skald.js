@@ -52,12 +52,18 @@ const MODULE_ID  = "the-eternal-skald";
 const SKALD_NAME = "The Eternal Skald";
 const LOG_PREFIX = `${SKALD_NAME} |`;
 
-/** Default endpoint — Abacus AI OpenAI-compatible chat-completions API. */
-const DEFAULT_ENDPOINT  = "https://routellm.abacus.ai/v1/chat/completions";
+/**
+ * Default endpoint — Abacus AI OpenAI-compatible chat-completions API.
+ * (v0.9.2) Aligned with the Abacus AI provider preset (the recommended,
+ * default provider) so a fresh install's endpoint matches its default
+ * provider selection.
+ */
+const DEFAULT_ENDPOINT  = "https://api.abacus.ai/v0/chat/completions";
 const DEFAULT_MODEL     = "gemini-3-flash-preview";
 
 /**
  * (v0.9.1) Provider presets for the AI Provider dropdown setting.
+ * (v0.9.2) Added Abacus AI as the recommended, default preset.
  *
  * The Skald speaks to any OpenAI-compatible chat-completions endpoint, so
  * switching providers is purely a matter of pointing `apiEndpoint` at the
@@ -65,13 +71,21 @@ const DEFAULT_MODEL     = "gemini-3-flash-preview";
  * separately). This map drives both the dropdown's choices and the
  * auto-fill of `apiEndpoint` when a non-custom preset is chosen.
  *
+ * **Abacus AI** is the recommended provider (the Skald is powered by Abacus AI
+ * ChatLLM) and is the default selection. Its OpenAI-compatible endpoint is
+ * `https://api.abacus.ai/v0/chat/completions`.
+ *
  * `endpoint: null` (the "custom" preset) means "leave whatever the user has
- * typed into the API Endpoint field untouched" — used for self-hosted,
- * Abacus AI RouteLLM (the shipped default), or any other endpoint.
+ * typed into the API Endpoint field untouched" — used for self-hosted
+ * gateways, the legacy RouteLLM endpoint, or any other endpoint.
+ *
+ * Insertion order here also defines the dropdown order:
+ *   Abacus AI (default) → OpenAI → OpenRouter → Google AI (Gemini) → Custom.
  *
  * @type {Record<string, {endpoint: string|null}>}
  */
 const PROVIDER_PRESETS = {
+  abacus:     { endpoint: "https://api.abacus.ai/v0/chat/completions" },
   openai:     { endpoint: "https://api.openai.com/v1/chat/completions" },
   openrouter: { endpoint: "https://openrouter.ai/api/v1/chat/completions" },
   google:     { endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions" },
@@ -173,10 +187,12 @@ const Settings = {
     // (v0.9.1) AI Provider preset dropdown. Picking a known provider
     // auto-fills the API Endpoint below with that provider's OpenAI-compatible
     // chat-completions URL — the user still supplies their own API key and
-    // model name. "Custom" leaves the endpoint untouched (used for the shipped
-    // Abacus AI RouteLLM default, self-hosted gateways, or any other URL).
-    // Defaults to "custom" so existing worlds keep their configured endpoint —
-    // fully backwards-compatible, no behaviour change on upgrade.
+    // model name. "Custom" leaves the endpoint untouched (used for self-hosted
+    // gateways, the legacy RouteLLM endpoint, or any other URL).
+    // (v0.9.2) Added Abacus AI as the recommended default provider — the Skald
+    // is powered by Abacus AI ChatLLM, so this is the smoothest path for most
+    // users. Choices are listed in the documented order:
+    //   Abacus AI (default) → OpenAI → OpenRouter → Google AI → Custom.
     game.settings.register(MODULE_ID, "providerPreset", {
       name: game.i18n.localize("ETERNAL_SKALD.settings.providerPreset.name"),
       hint: game.i18n.localize("ETERNAL_SKALD.settings.providerPreset.hint"),
@@ -184,12 +200,13 @@ const Settings = {
       config: true,
       type: String,
       choices: {
-        custom:     game.i18n.localize("ETERNAL_SKALD.settings.providerPreset.choices.custom"),
+        abacus:     game.i18n.localize("ETERNAL_SKALD.settings.providerPreset.choices.abacus"),
         openai:     game.i18n.localize("ETERNAL_SKALD.settings.providerPreset.choices.openai"),
         openrouter: game.i18n.localize("ETERNAL_SKALD.settings.providerPreset.choices.openrouter"),
-        google:     game.i18n.localize("ETERNAL_SKALD.settings.providerPreset.choices.google")
+        google:     game.i18n.localize("ETERNAL_SKALD.settings.providerPreset.choices.google"),
+        custom:     game.i18n.localize("ETERNAL_SKALD.settings.providerPreset.choices.custom")
       },
-      default: "custom",
+      default: "abacus",
       onChange: (value) => { try { applyProviderPreset(value); } catch (_) { /* never break settings */ } }
     });
 
@@ -589,7 +606,8 @@ const Settings = {
  * (v0.9.1) Apply a provider preset: when the user picks a known provider in
  * the AI Provider dropdown, point the API Endpoint at that provider's
  * OpenAI-compatible chat-completions URL. The "custom" preset is a no-op so
- * self-hosted / Abacus AI RouteLLM / other endpoints stay exactly as typed.
+ * self-hosted / legacy RouteLLM / other endpoints stay exactly as typed.
+ * (v0.9.2) Abacus AI is now a first-class preset and the recommended default.
  *
  * Fully defensive — a failure here must never block the settings UI. The
  * write is GM-scoped ("world"); non-GM clients can't persist it, so we guard

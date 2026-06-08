@@ -13,6 +13,23 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.9.2] — 2026-06-08
+
+### Added
+- **Abacus AI provider preset (now the default).** The **AI Provider** dropdown
+  gains an **Abacus AI** option — the engine that powers the Skald — pointing at
+  Abacus AI's OpenAI-compatible endpoint `https://api.abacus.ai/v0/chat/completions`.
+  It is now the **recommended default** selection.
+
+### Changed
+- **AI Provider dropdown order** is now: **Abacus AI** (default) → OpenAI →
+  OpenRouter → Google AI (Gemini) → Custom.
+- **Default API Endpoint** for fresh installs is now the Abacus AI endpoint
+  (`https://api.abacus.ai/v0/chat/completions`), aligned with the default provider
+  preset. Existing worlds keep whatever endpoint they have already saved.
+- Settings labels and hints (`en.json`) updated to present Abacus AI as the
+  recommended provider and to fold the legacy RouteLLM endpoint under **Custom**.
+
 ## [0.9.1] — 2026-06-08
 
 ### Added
@@ -476,6 +493,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.9.2]: https://github.com/papicy/eternal_skald/releases/tag/v0.9.2
 [0.9.1]: https://github.com/papicy/eternal_skald/releases/tag/v0.9.1
 [0.9.0]: https://github.com/papicy/eternal_skald/releases/tag/v0.9.0
 [0.8.0]: https://github.com/papicy/eternal_skald/releases/tag/v0.8.0

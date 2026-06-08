@@ -13,12 +13,13 @@
       },
       "providerPreset": {
         "name": "AI Provider",
-        "hint": "Pick your AI provider to auto-fill the API Endpoint below with that provider's OpenAI-compatible chat-completions URL. You still supply your own API Key and AI Model separately. Choose 'Custom' for the Abacus AI RouteLLM default, a self-hosted gateway, or any other endpoint (leaves the endpoint untouched). World-scoped, GM-only. Default: Custom.",
+        "hint": "Pick your AI provider to auto-fill the API Endpoint below with that provider's OpenAI-compatible chat-completions URL. You still supply your own API Key and AI Model separately. The Skald is powered by Abacus AI ChatLLM, so 'Abacus AI' is the recommended default. Choose 'Custom' for a self-hosted gateway, the legacy RouteLLM endpoint, or any other endpoint (leaves the endpoint untouched). World-scoped, GM-only. Default: Abacus AI.",
         "choices": {
-          "custom": "Custom / Abacus AI (manual endpoint)",
+          "abacus": "Abacus AI (recommended)",
           "openai": "OpenAI",
           "openrouter": "OpenRouter",
-          "google": "Google AI (Gemini)"
+          "google": "Google AI (Gemini)",
+          "custom": "Custom (manual endpoint)"
         }
       },
       "apiKey": {
@@ -31,7 +32,7 @@
       },
       "apiEndpoint": {
         "name": "API Endpoint",
-        "hint": "Chat-completions endpoint URL. Auto-filled when you pick a provider above; defaults to https://routellm.abacus.ai/v1/chat/completions. Edit directly only when using a 'Custom' provider or backend."
+        "hint": "Chat-completions endpoint URL. Auto-filled when you pick a provider above; defaults to the Abacus AI endpoint https://api.abacus.ai/v0/chat/completions. Edit directly only when using a 'Custom' provider or backend."
       },
       "intensity": {
         "name": "Skald Intensity",

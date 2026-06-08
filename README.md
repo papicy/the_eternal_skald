@@ -116,7 +116,7 @@ Browser (Foundry)                    Foundry Server (Node.js)
      │ ─────────────────────────────────────►│
      │   (same origin — no CORS)             │
      │                                       │  HTTPS request to
-     │                                       │  routellm.abacus.ai
+     │                                       │  api.abacus.ai
      │                                       │ ──────────────────►  Abacus AI
      │                                       │ ◄──────────────────
      │  JSON response                        │
@@ -384,10 +384,11 @@ All in **Configure Settings → The Eternal Skald** (world-scoped, GM-only):
 
 | Setting | Default | Description |
 |---|---|---|
-| Abacus AI API Key | *(empty)* | Required. Get from your Abacus AI account. |
+| AI Provider | **Abacus AI** | Pick your provider — **Abacus AI** (recommended), OpenAI, OpenRouter, Google AI (Gemini), or Custom. Selecting one auto-fills the API Endpoint with that provider's OpenAI-compatible URL. |
+| API Key | *(empty)* | Required. Your AI provider's API key (Abacus AI, OpenAI, OpenRouter, Google AI, etc.). |
 | Streaming Responses | **On** | Render replies in real time, word by word, as the AI generates them (Server-Sent Events) for near-instant feedback. Falls back automatically to a buffered reply if streaming is unavailable. |
-| AI Model | `gemini-3-flash-preview` | Any model your Abacus AI deployment exposes. |
-| API Endpoint | `https://routellm.abacus.ai/v1/chat/completions` | Override only for custom AI backends. |
+| AI Model | `gemini-3-flash-preview` | Any model your chosen provider exposes (e.g. `gpt-4o`, `anthropic/claude-3.5-sonnet`, `gemini-1.5-pro`). |
+| API Endpoint | `https://api.abacus.ai/v0/chat/completions` | Auto-filled by the AI Provider dropdown; edit directly only for a Custom backend. |
 | Skald Intensity | 6 | 1 (terse) to 10 (full saga-singer operatic). |
 | Auto-Narrate Combat | On | Short flavour line at each combatant's turn. |
 | AI Controls Enemies | Off | Full AI turn for non-player combatants. |
