@@ -12,6 +12,34 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.7.0] — 2026-06-08
+
+### Added
+- **Entity linking expansion — oracles, progress tracks & assets.** Building on
+  the v0.6.0 clickable NPCs, locations and moves, the Skald now links three more
+  kinds of entity inline in narration:
+  - **Oracles.** Oracle names the Skald mentions (e.g. *Action Oracle*) become
+    one-click links that roll that very oracle via the oracle interpreter. The
+    index is built from `IronswornData.oracles` using case-sensitive labels.
+  - **Progress Tracks.** Progress tracks on the active character become links
+    that open a status card showing rank, progress boxes and ticks, with a
+    one-click **Mark Progress (by rank)** button.
+  - **Assets.** Asset names become links that open the asset's own Foundry sheet,
+    with a graceful chat-card fallback when the sheet can't be opened. Assets are
+    resolved against an in-memory index of the compendium asset packs using fuzzy
+    matching (exact, normalized, substring, token-overlap and edit-distance).
+- **Live index refresh.** The entity index now invalidates automatically on
+  `createItem`, `updateItem`, `deleteItem`, `updateActor`, `deleteActor` and
+  `controlToken`, so progress-track and asset links stay current mid-session.
+- **Asset index priming.** The asset compendium index is primed once on `ready`
+  (with defensive error handling) and the entity linker is refreshed so assets
+  are linkable from the first narration.
+
+### Notes
+- Purely additive and degrades gracefully — unmatched names stay plain text and
+  any failure leaves narration untouched. Governed by the existing **Link
+  Entities in Narration** world setting (default ON).
+
 ## [0.6.0] — 2026-06-08
 
 ### Added
