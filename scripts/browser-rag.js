@@ -1,5 +1,5 @@
 /* =====================================================================
- *  THE ETERNAL SKALD — Browser-Based RAG / AI Memory (v0.5.0)
+ *  THE ETERNAL SKALD — Browser-Based RAG / AI Memory (v0.6.0)
  *  ---------------------------------------------------------------------
  *  Gives the Skald a *semantic long-term memory* of your saga, entirely
  *  inside the browser — no server, no cloud vector DB, no extra setup.

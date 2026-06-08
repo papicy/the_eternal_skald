@@ -4,9 +4,11 @@ An AI-powered storyteller, oracle interpreter, and tactical enemy controller for
 
 Powered by the **Abacus AI ChatLLM** platform (Gemini 3.0 Flash by default).
 
-> ⚠️ **Alpha / Development Version (v0.5.0)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
+> ⚠️ **Alpha / Development Version (v0.6.0)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
 
 As of **v0.3.0**, the Skald integrates directly with the official [**foundry-ironsworn**](https://foundryvtt.com/packages/foundry-ironsworn) system: it reads your character's stats and meters, *suggests* the right Ironsworn move, triggers the system's own dice mechanics on one click, narrates the official strong-hit / weak-hit / miss outcome, and can optionally apply mechanical effects. See [Ironsworn Integration](#ironsworn-integration) below. The module still works standalone in any system — Ironsworn features simply activate when the system is present.
+
+**New in v0.6.0 — Clickable entities in narration.** Names the Skald speaks are now linked inline in chat. NPCs, locations and discoveries already scribed into the [Living Chronicle](#the-living-chronicle-auto-journaling) become Foundry content links that open their Journal Entry, and known Ironsworn moves become one-click links that open the **foundry-ironsworn system's own official move dialog** directly (resolved by the move's Datasworn ID). A new world setting **Link Entities in Narration** (default on) toggles the feature; it is purely additive and degrades gracefully — unmatched names stay plain text and nothing ever breaks narration.
 
 **New in v0.5.0 — AI Memory (Browser-Based RAG).** The Skald now *remembers your whole saga*. Every chronicle entry is embedded into a private, **in-browser** semantic memory, and the most *relevant* NPCs, locations, facts and threads are recalled automatically before the Skald speaks — so continuity holds across sessions without bloating the prompt. It runs entirely in your browser (no server, no cloud, no extra API keys); a small model downloads once and is cached. `!remind` is now semantic, joined by `!reindex` and `!rag-status`. See [AI Memory (Browser-Based RAG)](#ai-memory-browser-based-rag) below.
 
@@ -73,7 +75,7 @@ node --import "./Data/modules/the-eternal-skald/scripts/eternal-skald-server.mjs
 When Foundry starts, you should see this in the console/logs:
 
 ```
-⚔️  Skald | v0.5.0 — server hook active. /skald-api/* routes ready.
+⚔️  Skald | v0.6.0 — server hook active. /skald-api/* routes ready.
 ```
 
 ### 3. Set your API key
@@ -95,7 +97,7 @@ http://your-foundry:30000/skald-api/health
 You should see:
 
 ```json
-{"status":"ok","service":"The Eternal Skald","version":"0.5.0"}
+{"status":"ok","service":"The Eternal Skald","version":"0.6.0"}
 ```
 
 If you get a 404 or Foundry's normal HTML page, the `--import` flag isn't taking effect. Double-check:
@@ -496,7 +498,7 @@ await skald.rag.clear();                       // wipe the whole vector store
 **"The Eternal Skald server hook is not loaded (404)"**
 The `--import` flag isn't in your Foundry startup command, or the path is wrong. See [Setup step 2](#2-add---import-to-your-foundry-startup).
 
-**No `⚔️ Skald | v0.5.0` line in Foundry's console output**
+**No `⚔️ Skald | v0.6.0` line in Foundry's console output**
 The hook file isn't being loaded. Check the path is absolute and correct. Run it in a terminal to see Node.js errors.
 
 **"No Abacus AI API key is set"**

@@ -12,7 +12,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
-## [Unreleased]
+## [0.6.0] — 2026-06-08
 
 ### Added
 - **Clickable entities in narration.** Names the Skald speaks are now linked
