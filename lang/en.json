@@ -32,7 +32,7 @@
       },
       "apiEndpoint": {
         "name": "API Endpoint",
-        "hint": "Chat-completions endpoint URL. Auto-filled when you pick a provider above; defaults to the Abacus AI endpoint https://api.abacus.ai/v0/chat/completions. Edit directly only when using a 'Custom' provider or backend."
+        "hint": "Chat-completions endpoint URL. Auto-filled when you pick a provider above; defaults to the Abacus AI endpoint https://routellm.abacus.ai/v1/chat/completions. Edit directly only when using a 'Custom' provider or backend."
       },
       "intensity": {
         "name": "Skald Intensity",
@@ -169,7 +169,8 @@
     },
 
     "notifications": {
-      "providerPresetApplied": "The Eternal Skald: AI Provider set to {provider}. API Endpoint → {endpoint}"
+      "providerPresetApplied": "The Eternal Skald: AI Provider set to {provider}. API Endpoint → {endpoint}",
+      "abacusEndpointMigrated": "The Eternal Skald: corrected your Abacus AI endpoint to the working https://routellm.abacus.ai/v1/chat/completions."
     },
 
     "ui": {

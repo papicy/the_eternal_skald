@@ -116,7 +116,7 @@ Browser (Foundry)                    Foundry Server (Node.js)
      │ ─────────────────────────────────────►│
      │   (same origin — no CORS)             │
      │                                       │  HTTPS request to
-     │                                       │  api.abacus.ai
+     │                                       │  routellm.abacus.ai
      │                                       │ ──────────────────►  Abacus AI
      │                                       │ ◄──────────────────
      │  JSON response                        │
@@ -388,7 +388,7 @@ All in **Configure Settings → The Eternal Skald** (world-scoped, GM-only):
 | API Key | *(empty)* | Required. Your AI provider's API key (Abacus AI, OpenAI, OpenRouter, Google AI, etc.). |
 | Streaming Responses | **On** | Render replies in real time, word by word, as the AI generates them (Server-Sent Events) for near-instant feedback. Falls back automatically to a buffered reply if streaming is unavailable. |
 | AI Model | `gemini-3-flash-preview` | Any model your chosen provider exposes (e.g. `gpt-4o`, `anthropic/claude-3.5-sonnet`, `gemini-1.5-pro`). |
-| API Endpoint | `https://api.abacus.ai/v0/chat/completions` | Auto-filled by the AI Provider dropdown; edit directly only for a Custom backend. |
+| API Endpoint | `https://routellm.abacus.ai/v1/chat/completions` | Auto-filled by the AI Provider dropdown; edit directly only for a Custom backend. |
 | Skald Intensity | 6 | 1 (terse) to 10 (full saga-singer operatic). |
 | Auto-Narrate Combat | On | Short flavour line at each combatant's turn. |
 | AI Controls Enemies | Off | Full AI turn for non-player combatants. |

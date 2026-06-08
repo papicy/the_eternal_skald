@@ -13,6 +13,24 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.9.3] — 2026-06-08
+
+### Fixed
+- **Corrected the Abacus AI endpoint.** The Abacus AI provider preset and the
+  default API Endpoint now point at the working OpenAI-compatible URL
+  `https://routellm.abacus.ai/v1/chat/completions`. The value shipped in v0.9.2
+  (`https://api.abacus.ai/v0/chat/completions`) was non-functional.
+- **`DEFAULT_ENDPOINT`** realigned to the corrected Abacus AI URL so fresh
+  installs work out of the box.
+
+### Changed
+- **Auto-migration for affected installs.** On `ready`, the GM client detects
+  any world whose saved `apiEndpoint` is still the broken v0.9.2 default and
+  transparently rewrites it to the corrected endpoint — no manual change needed.
+  Endpoints the user deliberately customised are left untouched.
+- Settings hint (`en.json`), README and module description updated to reference
+  the corrected `routellm.abacus.ai/v1` endpoint.
+
 ## [0.9.2] — 2026-06-08
 
 ### Added
@@ -493,6 +511,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.9.3]: https://github.com/papicy/eternal_skald/releases/tag/v0.9.3
 [0.9.2]: https://github.com/papicy/eternal_skald/releases/tag/v0.9.2
 [0.9.1]: https://github.com/papicy/eternal_skald/releases/tag/v0.9.1
 [0.9.0]: https://github.com/papicy/eternal_skald/releases/tag/v0.9.0

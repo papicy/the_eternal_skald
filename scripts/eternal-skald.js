@@ -57,9 +57,25 @@ const LOG_PREFIX = `${SKALD_NAME} |`;
  * (v0.9.2) Aligned with the Abacus AI provider preset (the recommended,
  * default provider) so a fresh install's endpoint matches its default
  * provider selection.
+ * (v0.9.3) Corrected the host/path: the working Abacus AI OpenAI-compatible
+ * endpoint is `https://routellm.abacus.ai/v1/chat/completions`. The value
+ * shipped in v0.9.2 (`https://api.abacus.ai/v0/chat/completions`) was a
+ * non-functional URL; see `LEGACY_ABACUS_ENDPOINT` and
+ * `migrateLegacyAbacusEndpoint()` for the backwards-compatible auto-migration
+ * that quietly repairs existing installs still pointing at the bad URL.
  */
-const DEFAULT_ENDPOINT  = "https://api.abacus.ai/v0/chat/completions";
+const DEFAULT_ENDPOINT  = "https://routellm.abacus.ai/v1/chat/completions";
 const DEFAULT_MODEL     = "gemini-3-flash-preview";
+
+/**
+ * (v0.9.3) The non-functional Abacus AI endpoint that shipped as the default
+ * in v0.9.2. Retained as a named constant so {@link migrateLegacyAbacusEndpoint}
+ * can detect installs whose saved `apiEndpoint` is still pinned to this bad
+ * URL and transparently repair them to {@link DEFAULT_ENDPOINT}. Do not reuse
+ * this value for anything other than the migration check.
+ * @type {string}
+ */
+const LEGACY_ABACUS_ENDPOINT = "https://api.abacus.ai/v0/chat/completions";
 
 /**
  * (v0.9.1) Provider presets for the AI Provider dropdown setting.
@@ -73,7 +89,10 @@ const DEFAULT_MODEL     = "gemini-3-flash-preview";
  *
  * **Abacus AI** is the recommended provider (the Skald is powered by Abacus AI
  * ChatLLM) and is the default selection. Its OpenAI-compatible endpoint is
- * `https://api.abacus.ai/v0/chat/completions`.
+ * `https://routellm.abacus.ai/v1/chat/completions`.
+ * (v0.9.3) Corrected from the non-functional `https://api.abacus.ai/v0/...`
+ * URL that shipped in v0.9.2; existing installs are auto-migrated by
+ * {@link migrateLegacyAbacusEndpoint}.
  *
  * `endpoint: null` (the "custom" preset) means "leave whatever the user has
  * typed into the API Endpoint field untouched" — used for self-hosted
@@ -85,7 +104,7 @@ const DEFAULT_MODEL     = "gemini-3-flash-preview";
  * @type {Record<string, {endpoint: string|null}>}
  */
 const PROVIDER_PRESETS = {
-  abacus:     { endpoint: "https://api.abacus.ai/v0/chat/completions" },
+  abacus:     { endpoint: "https://routellm.abacus.ai/v1/chat/completions" }, // (v0.9.3) corrected from api.abacus.ai/v0
   openai:     { endpoint: "https://api.openai.com/v1/chat/completions" },
   openrouter: { endpoint: "https://openrouter.ai/api/v1/chat/completions" },
   google:     { endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions" },
@@ -641,6 +660,51 @@ async function applyProviderPreset(preset) {
     } catch (_) { /* notification is best-effort */ }
   } catch (e) {
     console.warn(LOG_PREFIX, "applyProviderPreset failed:", e?.message || e);
+  }
+}
+
+/**
+ * (v0.9.3) Backwards-compatible auto-migration for the broken Abacus AI
+ * endpoint that shipped as the v0.9.2 default.
+ *
+ * v0.9.2 set the Abacus AI preset / default endpoint to the non-functional
+ * `https://api.abacus.ai/v0/chat/completions` ({@link LEGACY_ABACUS_ENDPOINT}).
+ * Any world that was created or saved under v0.9.2 will have that bad URL
+ * persisted in its `apiEndpoint` world setting, which would keep failing even
+ * after this patched module loads. To keep those installs working without any
+ * manual intervention, this helper detects the exact legacy value and quietly
+ * rewrites it to the corrected {@link DEFAULT_ENDPOINT}
+ * (`https://routellm.abacus.ai/v1/chat/completions`).
+ *
+ * Fully defensive — never throws, never blocks startup:
+ *   - Only the GM can persist a world-scoped setting, so non-GM clients bail.
+ *   - We migrate *only* the exact legacy URL; any user who deliberately typed
+ *     a different/custom endpoint is left completely untouched.
+ *   - All work is wrapped in try/catch and failures are logged, not surfaced.
+ *
+ * @returns {Promise<void>}
+ */
+async function migrateLegacyAbacusEndpoint() {
+  try {
+    // Only a GM can write the world-scoped `apiEndpoint` setting.
+    if (!game.user?.isGM) return;
+
+    const current = Settings.get("apiEndpoint");
+    // Migrate only the exact, known-bad v0.9.2 default — nothing else.
+    if (current !== LEGACY_ABACUS_ENDPOINT) return;
+
+    await game.settings.set(MODULE_ID, "apiEndpoint", DEFAULT_ENDPOINT);
+    console.log(
+      LOG_PREFIX,
+      `(v0.9.3) Migrated legacy Abacus AI endpoint ${LEGACY_ABACUS_ENDPOINT} → ${DEFAULT_ENDPOINT}`
+    );
+    try {
+      ui.notifications?.info(
+        game.i18n.localize("ETERNAL_SKALD.notifications.abacusEndpointMigrated")
+      );
+    } catch (_) { /* notification is best-effort */ }
+  } catch (e) {
+    console.warn(LOG_PREFIX, "migrateLegacyAbacusEndpoint failed:", e?.message || e);
   }
 }
 
@@ -6582,6 +6646,8 @@ Hooks.once("ready", () => {
   try { EntityLinker.invalidate(); } catch (_) { /* defensive */ }
   // (v0.9.0) Render any user-customised link styles into the live document.
   try { EntityLinker.applyCustomStyles(); } catch (_) { /* defensive */ }
+  // (v0.9.3) Repair installs still pinned to the broken v0.9.2 Abacus AI URL.
+  try { migrateLegacyAbacusEndpoint(); } catch (_) { /* defensive */ }
 });
 
 // --- Asset index priming (v0.7.0) ------------------------------------
