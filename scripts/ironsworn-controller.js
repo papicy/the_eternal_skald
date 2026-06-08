@@ -123,6 +123,32 @@ const MOVE_CATALOG = Object.freeze([
 const MOVE_BY_ID = new Map(MOVE_CATALOG.map(m => [m.id, m]));
 const MOVE_BY_NAME = new Map(MOVE_CATALOG.map(m => [m.name.toLowerCase(), m]));
 
+/* ---------------------------------------------------------------------
+ *  MOVE COMPENDIUM MAP (mirrors foundry-ironsworn's COMPENDIUM_KEY_MAP)
+ *  ---------------------------------------------------------------------
+ *  The official system stores every move as an `sfmove` Item inside one of
+ *  these compendium packs, keyed by the rules-package segment of a Datasworn
+ *  ID (`move:<rulesPackage>/<category>/<key>`). Each move Item carries the
+ *  flag `flags["foundry-ironsworn"].dsid` = its Datasworn ID, which is how
+ *  the system resolves an ID to a Document (see datasworn2/finding.ts:
+ *  getFoundryMoveByDsId). We replicate that lookup so the Skald can turn a
+ *  catalog move into a *real* system move Document / UUID and open the
+ *  system's own move sheet or pre-roll dialog directly.
+ * ------------------------------------------------------------------- */
+const MOVE_COMPENDIUM_BY_RULESET = Object.freeze({
+  classic:        "foundry-ironsworn.ironswornmoves",
+  delve:          "foundry-ironsworn.ironsworndelvemoves",
+  starforged:     "foundry-ironsworn.starforgedmoves",
+  sundered_isles: "foundry-ironsworn.sunderedislesmoves"
+});
+
+/** Parse the rules-package segment from a Datasworn move ID. */
+function dsRulesPackage(dsid) {
+  // "move:classic/combat/strike" → "classic"
+  const m = /^move:([^/]+)\//.exec(String(dsid ?? ""));
+  return m ? m[1] : null;
+}
+
 /* The five Ironsworn stats + the standard condition meters. */
 const STAT_KEYS  = ["edge", "heart", "iron", "shadow", "wits"];
 const METER_KEYS = ["health", "spirit", "supply", "momentum"];
@@ -388,6 +414,121 @@ export const IronswornController = {
       method: "none",
       error: `Could not trigger "${move?.name ?? moveRef}" automatically (no dialog and no rollable stat). Resolve it manually on the sheet.`
     };
+  },
+
+  /* =================================================================
+   *  MOVE DOCUMENT RESOLUTION (system move sheets / direct dialog)
+   * ================================================================= */
+
+  /**
+   * Resolve a move reference (catalog name or Datasworn ID) to its
+   * Datasworn ID, the canonical identifier the foundry-ironsworn system
+   * uses for official moves.
+   *
+   * @param {string} ref
+   * @returns {string|null}
+   */
+  moveDsId(ref) {
+    const move = this._resolveMove(ref);
+    if (move?.id) return move.id;
+    return (typeof ref === "string" && ref.startsWith("move:")) ? ref : null;
+  },
+
+  /**
+   * Find the *actual* foundry-ironsworn move Item for a Datasworn ID by
+   * replicating the system's own lookup (datasworn2/finding.ts): locate the
+   * right move compendium for the rules package, read its index with the
+   * `flags` field, and match on `flags["foundry-ironsworn"].dsid`.
+   *
+   * Returns null (never throws) if the system isn't active, the pack is
+   * missing, or no entry matches — callers degrade gracefully.
+   *
+   * @param {string} dsid  e.g. "move:classic/combat/strike"
+   * @returns {Promise<Item|null>}
+   */
+  async getFoundryMoveByDsId(dsid) {
+    try {
+      if (!this.isActive() || !dsid) return null;
+      const rulesPackage = dsRulesPackage(dsid);
+      const packId = rulesPackage && MOVE_COMPENDIUM_BY_RULESET[rulesPackage];
+      if (!packId) return null;
+
+      const pack = game.packs?.get(packId);
+      if (!pack) return null;
+
+      const index = await pack.getIndex({ fields: ["flags"] });
+      const entry = (index?.contents ?? index ?? []).find(
+        (x) => x?.flags?.[SYSTEM_ID]?.dsid === dsid
+      );
+      if (!entry) return null;
+
+      return await pack.getDocument(entry._id);
+    } catch (e) {
+      warn(`getFoundryMoveByDsId("${dsid}") failed:`, e?.message ?? e);
+      return null;
+    }
+  },
+
+  /**
+   * Resolve a move reference to the UUID of its system move Item, suitable
+   * for a Foundry content link (`@UUID[...]`). Async because the move
+   * compendium index must be read. Returns null on any failure.
+   *
+   * @param {string} ref  catalog name or Datasworn ID
+   * @returns {Promise<string|null>}
+   */
+  async getMoveUuid(ref) {
+    const dsid = this.moveDsId(ref);
+    if (!dsid) return null;
+    const item = await this.getFoundryMoveByDsId(dsid);
+    return item?.uuid ?? null;
+  },
+
+  /**
+   * Open the foundry-ironsworn move's reference sheet (its rules text), the
+   * same window you get by clicking a move's title on the character sheet.
+   * Falls back to {@link openMoveDialog} if the move Item can't be resolved.
+   *
+   * @param {string} ref  catalog name or Datasworn ID
+   * @returns {Promise<{ok:boolean, method:string, error?:string}>}
+   */
+  async openMoveSheet(ref) {
+    try {
+      if (!this.isActive()) return { ok: false, method: "none", error: "Ironsworn system not active." };
+      const dsid = this.moveDsId(ref);
+      const item = await this.getFoundryMoveByDsId(dsid);
+      if (item?.sheet?.render) {
+        item.sheet.render(true);
+        return { ok: true, method: "sheet" };
+      }
+      // No document — fall back to the roll dialog.
+      return await this.openMoveDialog(ref);
+    } catch (e) {
+      warn(`openMoveSheet("${ref}") failed:`, e?.message ?? e);
+      return { ok: false, method: "sheet", error: e?.message ?? String(e) };
+    }
+  },
+
+  /**
+   * Open the system's official pre-roll dialog for a move directly (the
+   * exact dialog the system shows when you click a move on the sheet),
+   * using the Datasworn ID. This is the system API path — no fake rolls.
+   *
+   * @param {string} ref  catalog name or Datasworn ID
+   * @param {object} [opts]  forwarded to showForOfficialMove (e.g. progress)
+   * @returns {Promise<{ok:boolean, method:string, error?:string}>}
+   */
+  async openMoveDialog(ref, opts = {}) {
+    const dsid = this.moveDsId(ref);
+    if (dsid && this.hasPrerollDialog()) {
+      try {
+        await this.api().applications.IronswornPrerollDialog.showForOfficialMove(dsid, opts);
+        return { ok: true, method: "dialog" };
+      } catch (e) {
+        warn(`openMoveDialog showForOfficialMove("${dsid}") failed:`, e?.message ?? e);
+      }
+    }
+    return { ok: false, method: "none", error: `Could not open the move dialog for "${ref}".` };
   },
 
   /**

@@ -71,6 +71,10 @@
         "name": "Debug Logging",
         "hint": "Print verbose Ironsworn integration diagnostics to the browser console (F12). Useful for troubleshooting move detection and effect parsing."
       },
+      "entityLinking": {
+        "name": "Link Entities in Narration",
+        "hint": "Turn names the Skald narrates into clickable links: NPCs, locations and discoveries already scribed into the chronicle open their Journal Entry, and known Ironsworn moves offer a one-click roll. Purely additive — if a name has no match it stays plain text. Defaults to ON."
+      },
       "autoJournaling": {
         "name": "Auto-Journaling",
         "hint": "Let the Skald automatically scribe NPCs, locations, discoveries, world facts and story threads into Foundry Journal Entries as they emerge in play — organized into folders under 'The Eternal Skald'. Runs quietly in the background and never interrupts narration. Defaults to ON."

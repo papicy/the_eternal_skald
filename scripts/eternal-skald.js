@@ -412,6 +412,23 @@ const Settings = {
       default: false,
       onChange: (v) => { try { IronswornController.setDebug(!!v); } catch (_) {} }
     });
+
+    /* ---- Entity linking in narration (v0.5.1) ----
+     * When ON, names the Skald narrates that match an auto-scribed
+     * chronicle entry (NPC / location / discovery) or a known Ironsworn
+     * move are turned into clickable links in the chat — journal entities
+     * open their JournalEntry, moves offer a one-click roll. Purely
+     * additive and degrades gracefully if nothing matches. Defaults to ON.
+     */
+    game.settings.register(MODULE_ID, "entityLinking", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.entityLinking.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.entityLinking.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true,
+      onChange: () => { try { EntityLinker.invalidate(); } catch (_) {} }
+    });
   },
 
   /** Convenience accessor — returns undefined if the setting isn't ready. */
@@ -1181,11 +1198,213 @@ function escapeHtml(str) {
     .replace(/'/g, "&#039;");
 }
 
+/* ===================================================================== */
+/*  §6a-b  ENTITY LINKING (v0.5.1)                                        */
+/* ===================================================================== */
+
+/**
+ * Turns plain entity names the Skald narrates into clickable links.
+ *
+ * Two sources are cross-referenced:
+ *   1. The Living Chronicle — auto-scribed NPC / location / discovery
+ *      Journal Entries. Matches become Foundry content links
+ *      (`@UUID[JournalEntry.id]{Name}`) which Foundry auto-enriches in the
+ *      chat log into clickable links that open the entry.
+ *   2. The Ironsworn move catalog. Matches become a custom in-chat link
+ *      that, when clicked, offers a one-click roll (wired by
+ *      {@link Integration.wireSuggestionCard}). Move matching is
+ *      case-SENSITIVE so ordinary verbs ("you strike the wolf") are never
+ *      mistaken for the move ("make a Strike").
+ *
+ * The index is built lazily and cached, and invalidated whenever a journal
+ * entry is created / updated / deleted or the world reloads. The whole
+ * feature is additive and wrapped in try/catch: if anything goes wrong the
+ * original (already-formatted) HTML is returned untouched, so narration is
+ * never broken by linking.
+ */
+const EntityLinker = {
+  /** @type {{regex: RegExp, byName: Map<string, object>}|null} */
+  _cache: null,
+  _dirty: true,
+
+  /** Mark the cached index stale; it rebuilds on next use. */
+  invalidate() { this._dirty = true; this._cache = null; },
+
+  /** True iff the feature is switched on (defaults ON). */
+  enabled() { return Settings.get("entityLinking") !== false; },
+
+  /** Escape a literal string for safe inclusion in a RegExp. */
+  _escapeRe(str) { return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); },
+
+  /**
+   * (Re)build the name → entry index and the combined matcher regex.
+   * Returns the cache object (possibly with an empty index).
+   */
+  _build() {
+    const byName = new Map();
+
+    // --- 1) Chronicle journal entities (proper nouns; case-insensitive) ---
+    try {
+      if (typeof JournalSystem !== "undefined" && typeof JournalSystem.listEntries === "function") {
+        for (const type of ["npc", "location", "discovery"]) {
+          for (const j of JournalSystem.listEntries(type)) {
+            const name = (j?.name ?? "").trim();
+            if (name.length < 3) continue;
+            const key = name.toLowerCase();
+            if (byName.has(key)) continue; // first definition wins
+            const uuid = j.uuid ?? `JournalEntry.${j.id}`;
+            byName.set(key, {
+              key: `journal:${key}`,
+              name,
+              kind: "journal",
+              uuid,
+              caseSensitive: false
+            });
+          }
+        }
+      }
+    } catch (_) { /* journal not ready — skip */ }
+
+    // --- 2) Ironsworn moves (case-SENSITIVE to avoid verb false-positives) ---
+    try {
+      if (IronswornController?.isActive?.() && Array.isArray(IronswornController.moves)) {
+        for (const m of IronswornController.moves) {
+          const name = (m?.name ?? "").trim();
+          if (name.length < 3) continue;
+          const key = name.toLowerCase();
+          if (byName.has(key)) continue; // don't clobber a journal entity
+          byName.set(key, {
+            key: `move:${key}`,
+            name,
+            kind: "move",
+            moveName: name,
+            // Datasworn ID (e.g. "move:classic/combat/strike") — lets the
+            // click handler open the *system's* official move directly.
+            moveDsId: (typeof m?.id === "string" && m.id.startsWith("move:")) ? m.id : "",
+            caseSensitive: true
+          });
+        }
+      }
+    } catch (_) { /* controller not ready — skip */ }
+
+    let regex = null;
+    if (byName.size) {
+      // Longest names first so multi-word entities win over substrings.
+      const alts = [...byName.values()]
+        .map(e => e.name)
+        .sort((a, b) => b.length - a.length)
+        .map(n => this._escapeRe(n));
+      // Unicode-aware word boundaries via lookarounds so we don't match
+      // inside a longer word and so apostrophes/digits count as "word".
+      try {
+        regex = new RegExp(`(?<![\\p{L}\\p{N}'’])(?:${alts.join("|")})(?![\\p{L}\\p{N}'’])`, "giu");
+      } catch (_) {
+        // Engines without lookbehind: fall back to plain \b boundaries.
+        regex = new RegExp(`\\b(?:${alts.join("|")})\\b`, "gi");
+      }
+    }
+
+    this._cache = { regex, byName };
+    this._dirty = false;
+    return this._cache;
+  },
+
+  _index() {
+    if (this._dirty || !this._cache) return this._build();
+    return this._cache;
+  },
+
+  /** Build the replacement HTML for a single matched entity. */
+  _renderLink(entry, matchedText) {
+    if (entry.kind === "journal") {
+      // Content-link TEXT — Foundry enriches this into a clickable link in
+      // the chat log (same mechanism the !journals command relies on).
+      // Strip braces from the label defensively so the syntax can't break.
+      const label = matchedText.replace(/[{}]/g, "");
+      return `@UUID[${entry.uuid}]{${label}}`;
+    }
+    // Move — custom link wired by Integration.wireSuggestionCard. We carry
+    // the Datasworn ID so the click handler can open the *system's* official
+    // move dialog/sheet directly (no intermediate card).
+    const move = escapeHtml(entry.moveName);
+    const dsid = escapeHtml(entry.moveDsId ?? "");
+    return `<a class="es-entity-link es-move-link" data-skald-action="link-move" ` +
+      `data-move="${move}" data-move-dsid="${dsid}" ` +
+      `data-tooltip="Ironsworn move: ${move} — click to roll">` +
+      `<i class="fa-solid fa-dice-d6"></i>${escapeHtml(matchedText)}</a>`;
+  },
+
+  /**
+   * Link entities inside an already-formatted (safe) HTML fragment.
+   * Only text *between* tags is rewritten — never tag names/attributes,
+   * never the contents of <code> or existing <a> elements. Each distinct
+   * entity is linked at most once (its first mention) to avoid noise.
+   *
+   * @param {string} html  HTML produced by {@link formatMarkdown}
+   * @returns {string}
+   */
+  link(html) {
+    if (typeof html !== "string" || !html) return html;
+    if (!this.enabled()) return html;
+
+    let idx;
+    try { idx = this._index(); } catch (_) { return html; }
+    if (!idx?.regex || !idx.byName?.size) return html;
+
+    try {
+      const seen = new Set();
+      // Split into tags vs. text, keeping the delimiters.
+      const parts = html.split(/(<[^>]+>)/);
+      let inCode = 0;
+      let inAnchor = 0;
+
+      for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        if (!part) continue;
+
+        if (part[0] === "<") {
+          // It's a tag — track contexts we must not touch.
+          const tag = part.toLowerCase();
+          if (/^<code[\s>]/.test(tag)) inCode++;
+          else if (/^<\/code>/.test(tag)) inCode = Math.max(0, inCode - 1);
+          else if (/^<a[\s>]/.test(tag)) inAnchor++;
+          else if (/^<\/a>/.test(tag)) inAnchor = Math.max(0, inAnchor - 1);
+          continue; // never rewrite tags themselves
+        }
+
+        if (inCode || inAnchor) continue; // leave code / existing links alone
+
+        idx.regex.lastIndex = 0;
+        parts[i] = part.replace(idx.regex, (m) => {
+          const entry = idx.byName.get(m.toLowerCase());
+          if (!entry) return m;
+          // Moves only link when the canonical capitalization matches.
+          if (entry.caseSensitive && m !== entry.name) return m;
+          if (seen.has(entry.key)) return m; // first mention only
+          seen.add(entry.key);
+          return this._renderLink(entry, m);
+        });
+      }
+
+      return parts.join("");
+    } catch (e) {
+      console.warn(LOG_PREFIX, "entity linking failed:", e?.message || e);
+      return html; // graceful: never break narration
+    }
+  }
+};
+
 /**
  * Light formatter: convert simple markdown (**bold**, *italic*, line
  * breaks) coming back from the LLM into safe HTML.
+ *
+ * @param {string} text
+ * @param {object} [opts]
+ * @param {boolean} [opts.link=true]  Run entity linking as a final pass.
+ *   Pass `false` for intermediate streaming frames so half-typed names
+ *   aren't linked prematurely (the final frame links normally).
  */
-function formatMarkdown(text) {
+function formatMarkdown(text, opts = {}) {
   // Escape first, then re-introduce a tiny safe subset.
   let s = escapeHtml(text);
   s = s.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
@@ -1193,7 +1412,9 @@ function formatMarkdown(text) {
   s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
   s = s.replace(/\n{2,}/g, "</p><p>");
   s = s.replace(/\n/g, "<br/>");
-  return `<p>${s}</p>`;
+  let html = `<p>${s}</p>`;
+  if (opts.link !== false) html = EntityLinker.link(html);
+  return html;
 }
 
 /* ===================================================================== */
@@ -1322,7 +1543,9 @@ async function callSkaldStreaming(messages, opts = {}) {
 
   const renderNow = async (raw, isFinal = false) => {
     const display = stripDirectivesForDisplay(raw).trim();
-    const bodyHtml = display ? formatMarkdown(display) : THINKING_HTML;
+    // Only link entities on the final frame — half-streamed names should
+    // not be linked prematurely (and we avoid re-indexing on every frame).
+    const bodyHtml = display ? formatMarkdown(display, { link: isFinal }) : THINKING_HTML;
     const cardHtml = Chat.renderCard(bodyHtml, { ...cardOpts, streaming: !isFinal });
     if (cardHtml === lastRendered) return;
     lastRendered = cardHtml;
@@ -2162,12 +2385,26 @@ const Integration = {
         ev.stopPropagation();
         const action = btn.dataset.skaldAction;
         const move = btn.dataset.move;
+        const moveDsId = btn.dataset.moveDsid;
         const stat = btn.dataset.stat;
         try {
           if (action === "roll-move") {
             await this.doTriggerMove(move, stat);
           } else if (action === "choose-move") {
             await this.showMoveSelector(stat);
+          } else if (action === "link-move") {
+            // An inline move link in narration — open the *system's* own
+            // official move dialog directly (the exact pre-roll dialog the
+            // foundry-ironsworn system shows for that move), resolved via its
+            // Datasworn ID. Degrade gracefully: fall back to the interactive
+            // suggestion card if the system/dialog can't be reached.
+            if (!this.active()) {
+              ui.notifications?.info(`${SKALD_NAME}: ${move} — Ironsworn system not active.`);
+            } else {
+              const ref = moveDsId || move;
+              const res = await IronswornController.openMoveDialog(ref);
+              if (!res?.ok) await this.postSuggestionCard({ name: move });
+            }
           }
         } catch (e) {
           console.error(LOG_PREFIX, "suggestion button failed", e);
@@ -3083,7 +3320,9 @@ const LoreGenerator = {
       // Create a JournalEntry if the user is permitted to do so.
       if (game.user.can("JOURNAL_CREATE") || game.user.isGM) {
         const folder = await this._getOrCreateFolder();
-        const journalContent = `<h2>${escapeHtml(topic)}</h2>${formatMarkdown(reply)}`;
+        // Stored in a JournalEntry — skip move links (no chat handler there);
+        // @UUID journal links would still enrich, but keep stored lore plain.
+        const journalContent = `<h2>${escapeHtml(topic)}</h2>${formatMarkdown(reply, { link: false })}`;
         const entry = await JournalEntry.create({
           name: topic.slice(0, 80),
           folder: folder?.id ?? null,
@@ -3696,7 +3935,8 @@ const JournalSystem = {
 
     const folder = await this.getOrCreateFolder("session");
     const title = `Session Chronicle — ${new Date().toLocaleDateString()}`;
-    const html = `<h2>📖 ${escapeHtml(title)}</h2>${formatMarkdown(recap)}`;
+    // Stored in a JournalEntry — keep plain (move links have no handler there).
+    const html = `<h2>📖 ${escapeHtml(title)}</h2>${formatMarkdown(recap, { link: false })}`;
     const entry = await JournalEntry.create({
       name: title,
       folder: folder?.id ?? null,
@@ -4299,7 +4539,9 @@ Hooks.once("ready", async () => {
     IronswornData,
     // --- Ironsworn rules-engine integration (v0.3.0) ---
     ironsworn: IronswornController,
-    integration: Integration
+    integration: Integration,
+    // --- Narration entity linking (v0.5.1) ---
+    entityLinker: EntityLinker
   };
 
   // Log Ironsworn integration status for diagnostics.
@@ -4449,3 +4691,14 @@ Hooks.on("deleteJournalEntry", (entry /*, options, userId */) => {
     if (id) BrowserRAG?.remove?.(id);
   } catch (_) { /* defensive — memory upkeep must never break deletes */ }
 });
+
+// --- Entity-linking cache upkeep (v0.5.1) ----------------------------
+// The narration entity-link index is built from the chronicle's journal
+// entries. Whenever an entry is created, renamed, or removed, mark the
+// index stale so the next narration rebuilds it. Cheap and defensive —
+// never throws.
+for (const hook of ["createJournalEntry", "updateJournalEntry", "deleteJournalEntry"]) {
+  Hooks.on(hook, () => { try { EntityLinker.invalidate(); } catch (_) { /* defensive */ } });
+}
+// A fresh world / reload starts with a clean index.
+Hooks.once("ready", () => { try { EntityLinker.invalidate(); } catch (_) { /* defensive */ } });
