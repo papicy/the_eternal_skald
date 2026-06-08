@@ -12,6 +12,22 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [Unreleased]
+
+### Added
+- **Clickable entities in narration.** Names the Skald speaks are now linked
+  inline in the chat. NPCs, locations and discoveries already scribed into the
+  Living Chronicle become Foundry content links that open their Journal Entry,
+  and known Ironsworn moves become one-click links that offer a roll. The
+  entity index is built from the chronicle and the move catalog, cached, and
+  rebuilt automatically when journal entries change. New world setting **Link
+  Entities in Narration** (default ON) toggles the feature; it is purely
+  additive and degrades gracefully (unmatched names stay plain text, `<code>`
+  and existing links are never touched, and any failure leaves narration
+  untouched). Move references match case-sensitively so ordinary verbs ("you
+  strike the wolf") are never mistaken for the move. Exposed on the public API
+  as `game.modules.get('the-eternal-skald').api.entityLinker`.
+
 ## [0.5.0] — 2026-06-07
 
 ### Added
