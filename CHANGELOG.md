@@ -2,8 +2,9 @@
 
 All notable changes to **The Eternal Skald** are documented here.
 
-This project adheres to [Semantic Versioning](https://semver.org/). It is currently in
-the `0.x` **pre-release (alpha)** stage — see
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/). It is
+currently in the `0.x` **pre-release (alpha)** stage — see
 [Versioning & Release Strategy](README.md#versioning--release-strategy) in the README.
 Until `1.0.0`, treat every release as an experimental development build.
 
@@ -48,7 +49,7 @@ Until `1.0.0`, treat every release as an experimental development build.
   variation becomes a clickable link to the canonical entry. Manual entries accept
   aliases too.
 
-### Compatibility & behaviour
+### Notes
 - Purely additive and **backwards-compatible** with existing journals: entries
   without the new flags/fields render exactly as before, and every new code path
   is wrapped defensively so a failure never interrupts narration or play.
@@ -413,6 +414,11 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.8.0]: https://github.com/papicy/eternal_skald/releases/tag/v0.8.0
+[0.7.0]: https://github.com/papicy/eternal_skald/releases/tag/v0.7.0
+[0.6.0]: https://github.com/papicy/eternal_skald/releases/tag/v0.6.0
+[0.5.0]: https://github.com/papicy/eternal_skald/releases/tag/v0.5.0
+[0.4.0]: https://github.com/papicy/eternal_skald/releases/tag/v0.4.0
 [0.3.3]: https://github.com/papicy/eternal_skald/releases/tag/v0.3.3
 [0.3.2]: https://github.com/papicy/eternal_skald/releases/tag/v0.3.2
 [0.3.1]: https://github.com/papicy/eternal_skald/releases/tag/v0.3.1
