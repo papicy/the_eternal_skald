@@ -12,6 +12,47 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.8.0] — 2026-06-08
+
+### Added
+- **Relationship mapping.** The chronicle now records how entities are connected.
+  When the AI supplies a `related` array in its `[[SKALD_META]]` block (each item
+  either a name string or `{name, rel}` object), the journal system resolves each
+  target to an existing entry and stores the link as a UUID in a new
+  `relatedEntities` flag — **bidirectionally**, so both sides of a bond stay in
+  sync. A **Connections** section is rendered (idempotently) at the bottom of each
+  entity's journal page as Foundry content-links, and the new `!relationships`
+  command (alias `!map`) shows the whole web grouped by entity, with an optional
+  name filter. Exposed on the public API as `api.relationships(nameOrUuid?)`.
+- **Persistent campaign timeline.** A new world-scoped `timelineEvents` setting
+  records a compact, permanent event for every metadata pulse (entities touched,
+  facts revealed, mysteries raised, decisions made) — surviving reloads and *not*
+  cleared at the end of a session (unlike the in-memory session log). The new
+  `!timeline` command renders a chronological, newest-first card with human
+  timestamps, channel tags and journal content-links for entities; pass a term to
+  filter (`!timeline Reeves`) or `!timeline clear` (GM-only) to wipe it. Capped at
+  1000 events and written GM-side only. Exposed as `api.timeline(query?)`.
+- **Structured entity templates.** NPC, Location and Discovery entries now define
+  structured **fields** (NPCs: rank, harm, motivations, goals, relationships;
+  Locations: region, features, dangers, resources; Discoveries: significance,
+  connectedTo). The journal prompt block asks the AI to populate them, the entity
+  renderer displays them, and a new GM-only `!template` command opens a dialog
+  (DialogV2 with a classic-Dialog fallback) to hand-author a structured entry —
+  including a name + aliases — created with `createdBy: "manual"` so it lives
+  alongside AI-scribed entries.
+- **Smart entity detection (aliases & fuzzy matching).** Entities now carry an
+  `aliases` array. Entry lookup matches by exact name → alias → normalized form →
+  edit-distance fuzzy match, so narration variations ("the captain" →
+  *Captain Reeves*) augment the existing entry instead of creating a duplicate.
+  Aliases are also registered in the narration entity-linker, so every recognised
+  variation becomes a clickable link to the canonical entry. Manual entries accept
+  aliases too.
+
+### Compatibility & behaviour
+- Purely additive and **backwards-compatible** with existing journals: entries
+  without the new flags/fields render exactly as before, and every new code path
+  is wrapped defensively so a failure never interrupts narration or play.
+
 ## [0.7.0] — 2026-06-08
 
 ### Added

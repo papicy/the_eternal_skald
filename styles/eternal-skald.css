@@ -604,3 +604,138 @@
   border-top: 1px dashed rgba(201, 165, 90, 0.4);
   margin: 0.6em 0;
 }
+
+
+
+/* ===================================================================== */
+/*  Living Chronicle v0.8.0 — templates, connections, timeline, web      */
+/* ===================================================================== */
+
+/* --- Structured entity fields (rendered inside journal pages) -------- */
+.es-entity-fields {
+  margin: 0.4em 0;
+  padding-left: 1.2em;
+}
+.es-entity-fields li {
+  margin: 0.2em 0;
+  line-height: 1.45;
+}
+.es-entity-fields li strong {
+  color: var(--es-gold, #d6a85a);
+  font-variant: small-caps;
+  letter-spacing: 0.03em;
+}
+.es-entity-desc {
+  margin: 0.3em 0 0.5em;
+  line-height: 1.5;
+}
+
+/* --- Connections block appended to entity journal pages -------------- */
+.es-connections {
+  margin-top: 0.6em;
+}
+.es-connections .es-connections-head {
+  margin: 0.3em 0 0.2em;
+  color: var(--es-gold, #d6a85a);
+}
+.es-connections .es-connections-list {
+  margin: 0.2em 0 0.4em;
+  padding-left: 1.2em;
+}
+.es-connections .es-connections-list li { margin: 0.14em 0; }
+
+/* --- Timeline card (!timeline) --------------------------------------- */
+.eternal-skald-card .es-timeline {
+  list-style: none;
+  margin: 0.4em 0;
+  padding: 0;
+  border-left: 2px solid rgba(201, 165, 90, 0.35);
+}
+.eternal-skald-card .es-timeline-event {
+  position: relative;
+  margin: 0 0 0.7em;
+  padding: 0 0 0.3em 0.9em;
+}
+.eternal-skald-card .es-timeline-event::before {
+  content: "";
+  position: absolute;
+  left: -5px;
+  top: 0.35em;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--es-gold, #d6a85a);
+  box-shadow: 0 0 4px rgba(214, 168, 90, 0.7);
+}
+.eternal-skald-card .es-timeline-when {
+  color: var(--es-muted, #a89878);
+  font-size: 0.82rem;
+  font-variant: small-caps;
+  letter-spacing: 0.03em;
+  margin-bottom: 0.15em;
+}
+.eternal-skald-card .es-timeline-chan {
+  display: inline-block;
+  margin-left: 0.4em;
+  padding: 0 0.4em;
+  font-size: 0.72rem;
+  color: #1a1610;
+  background: var(--es-rune, #b8924c);
+  border-radius: 8px;
+  vertical-align: middle;
+}
+.eternal-skald-card .es-timeline-ents { margin: 0.1em 0; }
+.eternal-skald-card .es-timeline-fact,
+.eternal-skald-card .es-timeline-mystery,
+.eternal-skald-card .es-timeline-decision {
+  font-size: 0.9rem;
+  line-height: 1.4;
+  margin: 0.06em 0;
+}
+.eternal-skald-card .es-timeline-mystery { color: #d8c2e8; }
+.eternal-skald-card .es-timeline-decision { color: #cdd8b8; }
+
+/* --- Relationship web (!relationships / !map) ----------------------- */
+.eternal-skald-card .es-rel-group {
+  margin: 0.4em 0 0.7em;
+  padding-left: 0.2em;
+  border-left: 2px solid rgba(201, 165, 90, 0.25);
+}
+.eternal-skald-card .es-rel-name {
+  margin: 0 0 0.2em;
+  padding-left: 0.5em;
+}
+.eternal-skald-card .es-rel-list {
+  margin: 0.1em 0 0.3em;
+  padding-left: 1.6em;
+}
+.eternal-skald-card .es-rel-list li { margin: 0.12em 0; }
+
+/* --- Template dialog (!template) ------------------------------------- */
+.es-template-dialog .form-group {
+  margin: 0.4em 0;
+}
+.es-template-dialog label {
+  display: block;
+  font-variant: small-caps;
+  letter-spacing: 0.03em;
+  color: var(--es-gold, #d6a85a);
+  margin-bottom: 0.15em;
+}
+.es-template-dialog label .notes {
+  font-variant: normal;
+  letter-spacing: normal;
+  color: var(--es-muted, #a89878);
+  font-size: 0.8rem;
+}
+.es-template-dialog input[type="text"],
+.es-template-dialog textarea,
+.es-template-dialog select {
+  width: 100%;
+  box-sizing: border-box;
+}
+.es-template-dialog hr {
+  border: none;
+  border-top: 1px dashed rgba(201, 165, 90, 0.4);
+  margin: 0.5em 0;
+}

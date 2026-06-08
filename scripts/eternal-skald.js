@@ -93,7 +93,12 @@ const COMMANDS = Object.freeze({
   END_SESSION: "!end-session",
   // --- Browser-based RAG / AI memory (v0.5.0) ---
   REINDEX:    "!reindex",
-  RAG_STATUS: "!rag-status"
+  RAG_STATUS: "!rag-status",
+  // --- Living Chronicle (v0.8.0) ---
+  TIMELINE:      "!timeline",
+  RELATIONSHIPS: "!relationships",
+  MAP:           "!map",
+  TEMPLATE:      "!template"
 });
 
 /* ===================================================================== */
@@ -429,6 +434,18 @@ const Settings = {
       default: true,
       onChange: () => { try { EntityLinker.invalidate(); } catch (_) {} }
     });
+
+    // (v0.8.0) Living Chronicle timeline — a persistent, world-scoped log of
+    // chronicle events (entity activity, revealed facts, decisions, mysteries).
+    // Unlike the in-memory `_sessionLog`, this survives reloads and is NOT
+    // cleared when a session chronicle is generated, so `!timeline` can render
+    // the full campaign history. Hidden from the config UI (managed in-code).
+    game.settings.register(MODULE_ID, "timelineEvents", {
+      scope: "world",
+      config: false,
+      type: Array,
+      default: []
+    });
   },
 
   /** Convenience accessor — returns undefined if the setting isn't ready. */
@@ -668,7 +685,7 @@ anything worth remembering, append EXACTLY ONE metadata block as the very
 last thing in your reply, on its own lines, in this precise shape:
 
 [[SKALD_META]]
-{"entities":[{"type":"npc","name":"Kendra","action":"create","description":"A scarred warden of the iron marches who guards the barrow road.","motivations":"Avenge her slain kin","relationships":"Wary ally of the player"}],"facts":["The barrow road floods at every dusk tide"],"mysteries":["Who lit the signal fire on the Broken Tor?"],"worldState":{"weather":"iron storm rising"},"decisions":["The player swore to escort Kendra to Highmount"]}
+{"entities":[{"type":"npc","name":"Captain Reeves","action":"create","description":"A scarred warden of the iron marches who guards the barrow road.","rank":"dangerous","harm":"unharmed","motivations":"Avenge her slain kin","goals":"Reach Highmount before the dusk tide","relationships":"Wary ally of the player","aliases":["Reeves","the captain"],"related":[{"name":"Highmount","rel":"sworn to defend"}]}],"facts":["The barrow road floods at every dusk tide"],"mysteries":["Who lit the signal fire on the Broken Tor?"],"worldState":{"weather":"iron storm rising"},"decisions":["The player swore to escort Captain Reeves to Highmount"]}
 [[/SKALD_META]]
 
 Rules for the block:
@@ -680,9 +697,18 @@ Rules for the block:
     - "name": short proper name (the journal title)
     - "action": "create" (new) or "update" (add to an existing entry)
     - "description": 1–3 sentences of GM-usable detail
-    - optional extras by type:
-        npc       → "motivations", "relationships"
-        location  → "features", "dangers"
+    - "aliases": OPTIONAL array of other names the SAME entity is called by
+      (nicknames, titles, shorthand — e.g. ["Reeves","the captain"]). This
+      lets the chronicle link later mentions and avoid duplicate entries.
+    - "related": OPTIONAL array of connections to OTHER named entities, each
+      {"name":"<other entity's name>","rel":"<short relationship phrase>"}
+      (e.g. {"name":"Highmount","rel":"sworn to defend"}). Links are tracked
+      both ways automatically.
+    - structured fields by type (fill what the fiction establishes):
+        npc       → "rank" (troublesome|dangerous|formidable|extreme|epic),
+                    "harm" (status/condition), "motivations", "goals",
+                    "relationships"
+        location  → "region", "features", "dangers", "resources"
         discovery → "significance", "connectedTo"
 • "facts": short strings of established continuity the GM must keep true.
 • "mysteries": unresolved questions / open story threads.
@@ -1297,6 +1323,29 @@ const EntityLinker = {
               uuid,
               caseSensitive: false
             });
+
+            // (v0.8.0) Smart entity detection: register the entry's aliases so
+            // narration variations ("the captain", "Reeves") resolve to the
+            // same journal entity. Aliases never clobber an existing primary
+            // name and keep the canonical display label.
+            try {
+              const aliases = (typeof JournalSystem._entryAliases === "function")
+                ? JournalSystem._entryAliases(j) : [];
+              for (const alias of aliases) {
+                const a = String(alias ?? "").trim();
+                if (a.length < 3) continue;
+                const akey = a.toLowerCase();
+                if (byName.has(akey)) continue; // never clobber an existing name
+                byName.set(akey, {
+                  key: `journal:${akey}`,
+                  name,            // canonical label keeps the real entity name
+                  kind: "journal",
+                  uuid,
+                  caseSensitive: false,
+                  alias: true
+                });
+              }
+            } catch (_) { /* alias indexing is best-effort */ }
           }
         }
       }
@@ -1810,6 +1859,11 @@ function dispatchCommand(rawText) {
       // --- Browser-based RAG / AI memory (v0.5.0) ---
       case COMMANDS.REINDEX:    return () => Commands.reindex(args);
       case COMMANDS.RAG_STATUS: return () => Commands.ragStatus(args);
+      // --- Living Chronicle (v0.8.0) ---
+      case COMMANDS.TIMELINE:      return () => Commands.timeline(args);
+      case COMMANDS.RELATIONSHIPS: return () => Commands.relationships(args);
+      case COMMANDS.MAP:           return () => Commands.relationships(args);
+      case COMMANDS.TEMPLATE:      return () => Commands.template(args);
       default:               return null;
     }
   })();
@@ -1873,7 +1927,10 @@ const Commands = {
       [COMMANDS.REMIND,    "Recall what the chronicle holds — now with semantic memory. e.g. <code>!remind Keldra</code>"],
       [COMMANDS.END_SESSION, "GM-only: weave a Session Chronicle from this session's events."],
       [COMMANDS.REINDEX,   "GM-only: rebuild the Skald's semantic memory from all chronicle entries."],
-      [COMMANDS.RAG_STATUS, "Show the state of the Skald's semantic memory (RAG)."]
+      [COMMANDS.RAG_STATUS, "Show the state of the Skald's semantic memory (RAG)."],
+      [COMMANDS.TIMELINE,      "Show the campaign timeline of events. Filter with a term, e.g. <code>!timeline Reeves</code>"],
+      [COMMANDS.RELATIONSHIPS, "Show the web of who-knows-whom across the chronicle. (alias <code>!map</code>)"],
+      [COMMANDS.TEMPLATE,      "GM-only: scribe a structured entry by hand. e.g. <code>!template npc</code>"]
     ];
 
     const tableRows = rows.map(([c, d]) =>
@@ -2173,6 +2230,319 @@ const Commands = {
       ui.notifications?.info(`${SKALD_NAME}: Session chronicle written.`);
     }
     return entry;
+  },
+
+  /* ------------------------- !timeline (v0.8.0) -------------------- */
+  /**
+   * Render the persistent campaign timeline as a chronological card. Events
+   * are shown newest-first with a human timestamp, the channel, the entities
+   * touched (as @UUID journal links when an entry exists), and short summaries
+   * of facts / mysteries / decisions. An optional argument filters the log by
+   * a free-text term (entity name, fact text, channel…).
+   */
+  async timeline(args) {
+    const query = (args || "").trim();
+
+    // Allow "!timeline clear" (GM-only) to wipe history.
+    if (query.toLowerCase() === "clear") {
+      if (!game.user?.isGM) {
+        return Chat.postSystem(`<em>Only the GM may erase the timeline.</em>`, { gmWhisper: true });
+      }
+      const ok = await JournalSystem.clearTimeline();
+      return Chat.postSystem(
+        ok ? `<em>The timeline has been cleared.</em>` : `<em>The timeline could not be cleared.</em>`,
+        { gmWhisper: true }
+      );
+    }
+
+    let events = [];
+    try { events = JournalSystem.getTimeline(query); } catch (_) { events = []; }
+
+    if (!events.length) {
+      const msg = query
+        ? `<em>No timeline events match “${escapeHtml(query)}”.</em>`
+        : `<em>The timeline is empty. Play on — I mark each turn of the saga as it happens.</em>`;
+      return Chat.postSystem(msg, { gmWhisper: true });
+    }
+
+    // Newest first, cap the rendered count so the card stays readable.
+    const ordered = events.slice().sort((a, b) => (b.t || 0) - (a.t || 0));
+    const MAX = 40;
+    const shown = ordered.slice(0, MAX);
+
+    const fmtTime = (t) => {
+      try {
+        const d = new Date(t || 0);
+        if (isNaN(d.getTime())) return "—";
+        return d.toLocaleString(undefined, {
+          year: "numeric", month: "short", day: "numeric",
+          hour: "2-digit", minute: "2-digit"
+        });
+      } catch (_) { return "—"; }
+    };
+
+    // Turn an entity {name,type} into a journal content-link when we can find
+    // a matching chronicle entry; otherwise show the bare (escaped) name.
+    const entityLink = (e) => {
+      const name = String(e?.name ?? "").trim();
+      if (!name) return "";
+      try {
+        const hit = JournalSystem._findEntry?.(e?.type || "", name) || JournalSystem._findAnyEntry?.(name);
+        if (hit) {
+          const uuid = hit.uuid ?? `JournalEntry.${hit.id}`;
+          return `@UUID[${uuid}]{${escapeHtml(hit.name || name)}}`;
+        }
+      } catch (_) { /* fall through to plain text */ }
+      return escapeHtml(name);
+    };
+
+    const rows = shown.map(ev => {
+      const ents = (ev.entities || []).map(entityLink).filter(Boolean).join(", ");
+      const bits = [];
+      if (ents) bits.push(`<div class="es-timeline-ents">👤 ${ents}</div>`);
+      for (const f of (ev.facts || []).slice(0, 4)) {
+        bits.push(`<div class="es-timeline-fact">• ${escapeHtml(f)}</div>`);
+      }
+      for (const m of (ev.mysteries || []).slice(0, 3)) {
+        bits.push(`<div class="es-timeline-mystery">❓ ${escapeHtml(m)}</div>`);
+      }
+      for (const d of (ev.decisions || []).slice(0, 3)) {
+        bits.push(`<div class="es-timeline-decision">⚖️ ${escapeHtml(d)}</div>`);
+      }
+      const chan = ev.channel ? `<span class="es-timeline-chan">${escapeHtml(ev.channel)}</span>` : "";
+      return `<li class="es-timeline-event">
+        <div class="es-timeline-when">🕮 ${escapeHtml(fmtTime(ev.t))} ${chan}</div>
+        ${bits.join("")}
+      </li>`;
+    }).join("");
+
+    const head = query
+      ? `<p>Timeline — events matching “<strong>${escapeHtml(query)}</strong>” (${shown.length}${ordered.length > MAX ? ` of ${ordered.length}` : ""}):</p>`
+      : `<p>The saga so far — newest first (${shown.length}${ordered.length > MAX ? ` of ${ordered.length}` : ""}):</p>`;
+
+    const tip = ordered.length > MAX
+      ? `<p class="es-help-aside"><em>Showing the latest ${MAX}. Use <code>!timeline &lt;term&gt;</code> to filter.</em></p>`
+      : `<p class="es-help-aside"><em>Tip: <code>!timeline &lt;term&gt;</code> filters by name or keyword.</em></p>`;
+
+    return Chat.postSkald(
+      `${head}<ul class="es-timeline">${rows}</ul>${tip}`,
+      { variant: "lore", title: "The Living Timeline" }
+    );
+  },
+
+  /* ---------------------- !relationships / !map (v0.8.0) ----------- */
+  /**
+   * Render the chronicle's relationship web as a grouped list view. For every
+   * entity that has recorded connections we show the entity (as a journal
+   * link) and its outgoing relationships (also links) with their relationship
+   * phrase. An optional argument filters to entities whose name matches.
+   */
+  async relationships(args) {
+    const query = (args || "").trim().toLowerCase();
+
+    let entries = [];
+    try { entries = JournalSystem.listEntries("npc")
+      .concat(JournalSystem.listEntries("location"))
+      .concat(JournalSystem.listEntries("discovery")); } catch (_) { entries = []; }
+
+    // Build [{name, uuid, rels:[{name,uuid,rel}]}] for entries that have any.
+    const groups = [];
+    for (const j of entries) {
+      let rels = [];
+      try { rels = JournalSystem._entryRelated(j); } catch (_) { rels = []; }
+      if (!Array.isArray(rels) || !rels.length) continue;
+      const name = j?.name ?? "";
+      if (query && !name.toLowerCase().includes(query)) continue;
+      const uuid = j.uuid ?? `JournalEntry.${j.id}`;
+      groups.push({ name, uuid, rels });
+    }
+
+    if (!groups.length) {
+      const msg = query
+        ? `<em>No mapped relationships match “${escapeHtml(args.trim())}”.</em>`
+        : `<em>No relationships yet woven. As folk and places connect in play, I map them here.</em>`;
+      return Chat.postSystem(msg, { gmWhisper: true });
+    }
+
+    groups.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+    const blocks = groups.map(g => {
+      const selfLink = `@UUID[${g.uuid}]{${escapeHtml(g.name)}}`;
+      const items = g.rels.map(r => {
+        const label = escapeHtml(String(r.name ?? "").replace(/[{}]/g, "")) || "(unknown)";
+        const link = r.uuid ? `@UUID[${r.uuid}]{${label}}` : label;
+        const rel = (r.rel && r.rel !== "related") ? ` — <em>${escapeHtml(String(r.rel))}</em>` : "";
+        return `<li>${link}${rel}</li>`;
+      }).join("");
+      return `<div class="es-rel-group">
+        <p class="es-rel-name"><strong>🔗 ${selfLink}</strong> <span class="es-journal-count">(${g.rels.length})</span></p>
+        <ul class="es-rel-list">${items}</ul>
+      </div>`;
+    }).join("");
+
+    const head = query
+      ? `<p>Relationships for entities matching “<strong>${escapeHtml(args.trim())}</strong>”:</p>`
+      : `<p>The web of who-knows-whom across the chronicle:</p>`;
+
+    return Chat.postSkald(
+      `${head}${blocks}<p class="es-help-aside"><em>Tip: open any entry to see its Connections, or use <code>!map &lt;name&gt;</code> to focus.</em></p>`,
+      { variant: "lore", title: "The Web of Bonds" }
+    );
+  },
+
+  /* --------------------------- !template (v0.8.0) ------------------ */
+  /**
+   * Open a structured-entry dialog so the GM can hand-author an NPC, Location
+   * or Discovery using the same template fields the AI fills. On submit the
+   * entry is created via JournalSystem with createdBy:"manual" so it lives
+   * alongside AI-scribed entries (and participates in linking/relationships).
+   *
+   * Usage: "!template", "!template npc", "!template location", "!template discovery".
+   */
+  async template(args) {
+    if (!game.user?.isGM) {
+      return Chat.postSystem(`<em>Only the GM may scribe structured entries by hand.</em>`, { gmWhisper: true });
+    }
+
+    const TYPES = JournalSystem.TYPES || {};
+    const allowed = ["npc", "location", "discovery"].filter(t => TYPES[t]);
+    let initialType = (args || "").trim().toLowerCase();
+    if (!allowed.includes(initialType)) initialType = allowed[0] || "npc";
+
+    // Build the form HTML for a given type's fields.
+    const fieldsHtml = (type) => {
+      const spec = TYPES[type] || {};
+      const fields = Array.isArray(spec.fields) ? spec.fields : [];
+      const parts = [
+        `<div class="form-group"><label>Name</label><input type="text" name="es-name" placeholder="e.g. Captain Reeves" autofocus/></div>`,
+        `<div class="form-group"><label>Aliases <span class="notes">(comma-separated)</span></label><input type="text" name="es-aliases" placeholder="the captain, Reeves"/></div>`
+      ];
+      for (const f of fields) {
+        if (!f || !f.key) continue;
+        const label = escapeHtml(f.label || f.key);
+        const nm = `es-f-${escapeHtml(f.key)}`;
+        if (Array.isArray(f.choices) && f.choices.length) {
+          const opts = f.choices.map(c => `<option value="${escapeHtml(String(c))}">${escapeHtml(String(c))}</option>`).join("");
+          parts.push(`<div class="form-group"><label>${label}</label><select name="${nm}"><option value=""></option>${opts}</select></div>`);
+        } else if (f.area) {
+          parts.push(`<div class="form-group"><label>${label}</label><textarea name="${nm}" rows="2"></textarea></div>`);
+        } else {
+          parts.push(`<div class="form-group"><label>${label}</label><input type="text" name="${nm}"/></div>`);
+        }
+      }
+      return parts.join("");
+    };
+
+    const typeOptions = allowed.map(t =>
+      `<option value="${t}"${t === initialType ? " selected" : ""}>${escapeHtml(TYPES[t].label || t)}</option>`
+    ).join("");
+
+    const content = `
+      <div class="es-template-dialog">
+        <div class="form-group">
+          <label>Entry Type</label>
+          <select name="es-type" class="es-template-type">${typeOptions}</select>
+        </div>
+        <hr/>
+        <div class="es-template-fields">${fieldsHtml(initialType)}</div>
+      </div>`;
+
+    // Read a submitted form into an entity object and create the entry.
+    const submit = async (form) => {
+      try {
+        if (!form) return;
+        const get = (n) => {
+          const el = form.querySelector(`[name="${n}"]`);
+          return el ? String(el.value || "").trim() : "";
+        };
+        const type = get("es-type") || initialType;
+        const name = get("es-name");
+        if (!name) {
+          ui.notifications?.warn(`${SKALD_NAME}: a name is required.`);
+          return;
+        }
+        const spec = TYPES[type] || {};
+        const fields = Array.isArray(spec.fields) ? spec.fields : [];
+        const entity = { type, name };
+        const aliasRaw = get("es-aliases");
+        if (aliasRaw) {
+          entity.aliases = aliasRaw.split(",").map(s => s.trim()).filter(Boolean);
+        }
+        for (const f of fields) {
+          if (!f || !f.key) continue;
+          const v = get(`es-f-${f.key}`);
+          if (v) entity[f.key] = v;
+        }
+        const created = await JournalSystem._createEntity(type, entity, null, { createdBy: "manual" });
+        if (created) {
+          try { EntityLinker.invalidate(); } catch (_) {}
+          const uuid = created.uuid ?? `JournalEntry.${created.id}`;
+          await Chat.postSkald(
+            `<p>Scribed a new ${escapeHtml(spec.label || type)}: @UUID[${uuid}]{${escapeHtml(name)}}.</p>`,
+            { variant: "lore", title: "Entry Scribed" }
+          );
+        } else {
+          ui.notifications?.warn(`${SKALD_NAME}: the entry could not be scribed.`);
+        }
+      } catch (e) {
+        console.warn(LOG_PREFIX, "template submit failed:", e?.message || e);
+        ui.notifications?.error(`${SKALD_NAME}: scribing failed — ${e?.message || e}`);
+      }
+    };
+
+    // Wire the type-selector so the field set updates live (best-effort).
+    const wireTypeSwitch = (root) => {
+      try {
+        const sel = root.querySelector?.("select.es-template-type");
+        const box = root.querySelector?.(".es-template-fields");
+        if (!sel || !box) return;
+        sel.addEventListener("change", () => { box.innerHTML = fieldsHtml(sel.value); });
+      } catch (_) { /* non-fatal */ }
+    };
+
+    // Prefer DialogV2 (v12+), fall back to the classic Dialog.
+    const DV2 = foundry?.applications?.api?.DialogV2;
+    if (DV2?.prompt) {
+      try {
+        return await DV2.prompt({
+          window: { title: "Scribe a Structured Entry" },
+          content,
+          ok: {
+            label: "Scribe",
+            callback: (_ev, button) => submit(button?.form)
+          },
+          rejectClose: false,
+          render: (_ev, dialog) => {
+            try { wireTypeSwitch(dialog?.element ?? dialog); } catch (_) {}
+          }
+        });
+      } catch (e) {
+        console.warn(LOG_PREFIX, "DialogV2 template failed, falling back:", e?.message || e);
+      }
+    }
+
+    // Classic Dialog fallback.
+    return new Promise((resolve) => {
+      const dlg = new Dialog({
+        title: "Scribe a Structured Entry",
+        content,
+        buttons: {
+          ok: {
+            label: "Scribe",
+            callback: async (html) => {
+              const root = html?.[0] ?? html;
+              const form = root?.querySelector?.("form") ?? root;
+              await submit(form);
+              resolve(true);
+            }
+          },
+          cancel: { label: "Cancel", callback: () => resolve(false) }
+        },
+        default: "ok",
+        render: (html) => { try { wireTypeSwitch(html?.[0] ?? html); } catch (_) {} }
+      });
+      dlg.render(true);
+    });
   }
 };
 
@@ -3694,14 +4064,61 @@ const JournalSystem = {
   ROOT_FOLDER: SKALD_NAME,            // "The Eternal Skald"
   _folderColor: "#8c6a2f",
 
-  /** type-key → { folder, title (for rolling journals), label, emoji } */
+  /**
+   * type-key → spec. Each individual-entry type (npc / location / discovery)
+   * now carries a `fields` template (v0.8.0): an ordered list of structured
+   * fields the AI is asked to fill, the !template dialog renders as inputs,
+   * and {@link _renderEntityHtml} displays. Each field is
+   * `{ key, label, area?, choices? }`:
+   *   • key     — the metadata/flag property name
+   *   • label   — human-readable label for prompts, dialogs and rendering
+   *   • area    — render as a multi-line <textarea> in the !template dialog
+   *   • choices — optional fixed value list (rendered as a <select>)
+   * The template is purely additive: legacy entries that lack a field simply
+   * omit it, and unknown fields on an entity are ignored.
+   */
   TYPES: {
-    npc:         { folder: "NPCs",               label: "NPC",          emoji: "👤", rolling: false },
-    location:    { folder: "Locations",          label: "Location",     emoji: "🗺️", rolling: false },
-    discovery:   { folder: "Discoveries",        label: "Discovery",    emoji: "🔍", rolling: false },
+    npc: {
+      folder: "NPCs", label: "NPC", emoji: "👤", rolling: false,
+      fields: [
+        { key: "description",   label: "Description",   area: true },
+        { key: "rank",          label: "Rank",          choices: ["troublesome", "dangerous", "formidable", "extreme", "epic"] },
+        { key: "harm",          label: "Harm / Status" },
+        { key: "motivations",   label: "Motivations",   area: true },
+        { key: "goals",         label: "Goals",         area: true },
+        { key: "relationships", label: "Relationships", area: true }
+      ]
+    },
+    location: {
+      folder: "Locations", label: "Location", emoji: "🗺️", rolling: false,
+      fields: [
+        { key: "description", label: "Description",      area: true },
+        { key: "region",      label: "Region" },
+        { key: "features",    label: "Notable features", area: true },
+        { key: "dangers",     label: "Dangers",          area: true },
+        { key: "resources",   label: "Resources",        area: true }
+      ]
+    },
+    discovery: {
+      folder: "Discoveries", label: "Discovery", emoji: "🔍", rolling: false,
+      fields: [
+        { key: "description",  label: "Description",  area: true },
+        { key: "significance", label: "Significance", area: true },
+        { key: "connectedTo",  label: "Connected to" }
+      ]
+    },
     worldFact:   { folder: "World Facts",        label: "World Fact",   emoji: "📜", rolling: true, journalName: "Established Facts" },
     storyThread: { folder: "Story Threads",      label: "Story Thread", emoji: "🧵", rolling: true, journalName: "Threads & Mysteries" },
     session:     { folder: "Session Chronicles", label: "Session",      emoji: "📖", rolling: false }
+  },
+
+  /** All structured field keys across the templated types (for update/context). */
+  _allFieldKeys() {
+    const keys = new Set();
+    for (const t of ["npc", "location", "discovery"]) {
+      for (const f of (this.TYPES[t]?.fields ?? [])) keys.add(f.key);
+    }
+    return [...keys];
   },
 
   /** Cache of resolved Folder documents keyed by folder name (per session). */
@@ -3778,6 +4195,12 @@ const JournalSystem = {
     // Keep the log from growing without bound during marathon sessions.
     if (this._sessionLog.length > 500) this._sessionLog.splice(0, this._sessionLog.length - 500);
 
+    // 1b) (v0.8.0) Persist a compact, permanent timeline event so `!timeline`
+    // can render the full campaign history across reloads/sessions. This is
+    // GM-only (world setting write) and fire-and-forget — never block or break
+    // narration if persistence fails.
+    try { this._recordTimelineEvent(metadata, ctx); } catch (_) { /* non-fatal */ }
+
     const q = this.queue();
 
     // 2) Entities → individual NPC / Location / Discovery journals.
@@ -3803,6 +4226,95 @@ const JournalSystem = {
     }
   },
 
+  /* ---------------- timeline (v0.8.0) ---------------- */
+
+  /**
+   * (v0.8.0) Append a compact, permanent event to the world-scoped timeline.
+   * Only the GM (a client that `canWrite()`) persists events, avoiding races
+   * from multiple clients. Each event is small (names + short summaries) so the
+   * log stays lightweight even across long campaigns; capped at 1000 entries.
+   *
+   * @param {object} metadata  Parsed SKALD metadata.
+   * @param {object} ctx        Ingestion context ({ channel, sourceVow }).
+   */
+  _recordTimelineEvent(metadata, ctx = {}) {
+    if (!this.canWrite()) return;
+    if (!metadata || typeof metadata !== "object") return;
+
+    const entities = Array.isArray(metadata.entities)
+      ? metadata.entities
+          .filter(e => e && typeof e === "object" && typeof e.name === "string" && e.name.trim())
+          .map(e => ({ type: String(e.type || "").toLowerCase(), name: e.name.trim() }))
+      : [];
+    const facts = Array.isArray(metadata.facts)
+      ? metadata.facts.filter(s => typeof s === "string" && s.trim()).map(s => s.trim()) : [];
+    const mysteries = Array.isArray(metadata.mysteries)
+      ? metadata.mysteries.filter(s => typeof s === "string" && s.trim()).map(s => s.trim()) : [];
+    const decisions = Array.isArray(metadata.decisions)
+      ? metadata.decisions.filter(s => typeof s === "string" && s.trim()).map(s => s.trim()) : [];
+
+    // Skip empty pulses — nothing worth remembering happened.
+    if (!entities.length && !facts.length && !mysteries.length && !decisions.length) return;
+
+    const event = {
+      id: `tl-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+      t: Date.now(),
+      channel: ctx.channel ?? "general",
+      entities,
+      facts,
+      mysteries,
+      decisions
+    };
+
+    // Read → push → cap → write. Fire-and-forget; persistence must never throw
+    // into the narration path.
+    Promise.resolve()
+      .then(() => {
+        let log = [];
+        try { log = Settings.get("timelineEvents") || []; } catch (_) { log = []; }
+        if (!Array.isArray(log)) log = [];
+        log.push(event);
+        if (log.length > 1000) log.splice(0, log.length - 1000);
+        return game.settings.set(MODULE_ID, "timelineEvents", log);
+      })
+      .catch(() => { /* non-fatal: timeline persistence is best-effort */ });
+  },
+
+  /**
+   * (v0.8.0) Return the persisted timeline events (oldest → newest), optionally
+   * filtered by a free-text query matching entity names, facts, mysteries,
+   * decisions, or channel.
+   *
+   * @param {string} [query]  Optional case-insensitive search string.
+   * @returns {Array<object>} Matching timeline events.
+   */
+  getTimeline(query = "") {
+    let log = [];
+    try { log = Settings.get("timelineEvents") || []; } catch (_) { log = []; }
+    if (!Array.isArray(log)) log = [];
+    const q = String(query || "").trim().toLowerCase();
+    if (!q) return log.slice();
+    return log.filter(ev => {
+      try {
+        const hay = [
+          ev.channel,
+          ...(ev.entities || []).map(e => e?.name),
+          ...(ev.facts || []),
+          ...(ev.mysteries || []),
+          ...(ev.decisions || [])
+        ].filter(Boolean).join(" ").toLowerCase();
+        return hay.includes(q);
+      } catch (_) { return false; }
+    });
+  },
+
+  /** (v0.8.0) Wipe the persistent timeline (GM-only). */
+  async clearTimeline() {
+    if (!this.canWrite()) return false;
+    try { await game.settings.set(MODULE_ID, "timelineEvents", []); return true; }
+    catch (_) { return false; }
+  },
+
   /* ---------------- queue processor ---------------- */
 
   async _process(job) {
@@ -3817,17 +4329,20 @@ const JournalSystem = {
 
   async _processEntity(job) {
     const { type, entity, sourceVow } = job;
-    // Dedupe by name: if an entry already exists (regardless of whether the
-    // AI said "create" or "update"), augment it instead of making a twin.
-    const existing = this._findEntry(type, entity.name);
+    // Dedupe by name (now alias- and fuzzy-aware, v0.8.0): if an entry already
+    // exists for this name OR any of its aliases/synonyms, augment it instead
+    // of making a twin.
+    const aliases = this._extractAliases(entity);
+    const existing = this._findEntry(type, entity.name, aliases);
     if (existing) return this._updateEntity(existing, type, entity, sourceVow);
     return this._createEntity(type, entity, sourceVow);
   },
 
-  async _createEntity(type, entity, sourceVow) {
+  async _createEntity(type, entity, sourceVow, opts = {}) {
     const folder = await this.getOrCreateFolder(type);
     const name = String(entity.name).slice(0, 100);
     const html = this._renderEntityHtml(type, entity);
+    const aliases = this._extractAliases(entity);
     const entry = await JournalEntry.create({
       name,
       folder: folder?.id ?? null,
@@ -3840,9 +4355,10 @@ const JournalSystem = {
       flags: {
         [MODULE_ID]: {
           type,
-          createdBy: "ai",
+          createdBy: opts.createdBy ?? "ai",
           lastUpdated: Date.now(),
           relatedEntities: [],
+          aliases,
           sourceVow: sourceVow ?? null,
           aiContext: this._entityContext(entity)
         }
@@ -3850,8 +4366,13 @@ const JournalSystem = {
     });
     if (entry) {
       this._toast(name, type);
+      // Resolve & persist any AI-declared relationships, both directions (v0.8.0).
+      try { await this._syncRelationships(entry, entity); }
+      catch (e) { console.warn(LOG_PREFIX, "relationship sync failed:", e?.message || e); }
       // Embed into semantic memory (v0.5.0) — fire-and-forget.
       RagBridge.indexEntry(entry);
+      // A new linkable entity exists — refresh the narration link index.
+      try { EntityLinker.invalidate(); } catch (_) {}
     }
     return entry;
   },
@@ -3866,25 +4387,191 @@ const JournalSystem = {
         await page.update({ "text.content": merged });
       }
       const existingCtx = entry.getFlag?.(MODULE_ID, "aiContext") || "";
+      // Merge any newly-supplied aliases with the ones already stored.
+      const mergedAliases = this._mergeAliases(
+        this._entryAliases(entry), this._extractAliases(entity)
+      );
       await entry.update({
         flags: {
           [MODULE_ID]: {
             type,
-            createdBy: "ai",
             lastUpdated: Date.now(),
+            aliases: mergedAliases,
             sourceVow: sourceVow ?? entry.getFlag?.(MODULE_ID, "sourceVow") ?? null,
             aiContext: `${existingCtx}\n${this._entityContext(entity)}`.trim().slice(0, 4000)
           }
         }
       });
+      // Resolve & persist any AI-declared relationships, both directions (v0.8.0).
+      try { await this._syncRelationships(entry, entity); }
+      catch (e) { console.warn(LOG_PREFIX, "relationship sync failed:", e?.message || e); }
       // Updates are quieter than creates — only toast in "detailed" mode.
       if (this.notifyLevel() === "detailed") this._toast(entry.name, type, "Updated");
       // Re-embed the updated entry so memory reflects the new content (v0.5.0).
       RagBridge.indexEntry(entry);
+      try { EntityLinker.invalidate(); } catch (_) {}
       return entry;
     } catch (e) {
       console.warn(LOG_PREFIX, "_updateEntity failed:", e?.message || e);
       return null;
+    }
+  },
+
+  /* ---------------- aliases & relationships (v0.8.0) ---------------- */
+
+  /** Sanitise the AI-supplied `aliases` array into clean, de-duped strings. */
+  _extractAliases(entity) {
+    const raw = entity?.aliases;
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    const seen = new Set();
+    for (const a of raw) {
+      const s = String(a ?? "").trim().slice(0, 80);
+      if (!s) continue;
+      const k = s.toLowerCase();
+      // Don't store an "alias" that merely repeats the entity's own name.
+      if (k === String(entity?.name ?? "").toLowerCase().trim()) continue;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(s);
+    }
+    return out.slice(0, 12);
+  },
+
+  /** Union two alias lists, de-duped case-insensitively, capped. */
+  _mergeAliases(existing, incoming) {
+    const out = [];
+    const seen = new Set();
+    for (const a of [...(existing || []), ...(incoming || [])]) {
+      const s = String(a ?? "").trim();
+      if (!s) continue;
+      const k = s.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(s);
+    }
+    return out.slice(0, 16);
+  },
+
+  /** Sanitise the AI-supplied `related` array into [{name, rel}] tuples. */
+  _extractRelated(entity) {
+    const raw = entity?.related ?? entity?.relatedEntities;
+    if (!Array.isArray(raw)) return [];
+    const out = [];
+    for (const r of raw) {
+      if (!r) continue;
+      let name, rel;
+      if (typeof r === "string") { name = r; rel = "related"; }
+      else if (typeof r === "object") {
+        name = r.name ?? r.entity ?? r.target;
+        rel = r.rel ?? r.relationship ?? r.relation ?? "related";
+      }
+      name = String(name ?? "").trim().slice(0, 100);
+      rel = String(rel ?? "related").trim().slice(0, 80) || "related";
+      if (name) out.push({ name, rel });
+    }
+    return out.slice(0, 24);
+  },
+
+  /** Find any individual (npc/location/discovery) entry by name/alias. */
+  _findAnyEntry(name) {
+    for (const t of ["npc", "location", "discovery"]) {
+      const hit = this._findEntry(t, name);
+      if (hit) return hit;
+    }
+    return null;
+  },
+
+  /** Read the relatedEntities array off an entry (always an array). */
+  _entryRelated(entry) {
+    try {
+      const r = entry?.getFlag?.(MODULE_ID, "relatedEntities");
+      return Array.isArray(r) ? r.slice() : [];
+    } catch (_) { return []; }
+  },
+
+  /** Merge a relationship into a relatedEntities list, de-duped by uuid. */
+  _mergeRelated(list, rec) {
+    const out = (list || []).filter(x => x && x.uuid !== rec.uuid);
+    out.push(rec);
+    return out.slice(0, 50);
+  },
+
+  /**
+   * Resolve an entity's declared `related` connections to existing chronicle
+   * entries and persist them as UUIDs in the `relatedEntities` flag — on BOTH
+   * sides (bidirectional, v0.8.0). Targets that don't yet have an entry are
+   * skipped silently (they'll link the next time either side is mentioned).
+   */
+  async _syncRelationships(entry, entity) {
+    const related = this._extractRelated(entity);
+    if (!related.length || !entry) return;
+    const selfUuid = entry.uuid ?? `JournalEntry.${entry.id}`;
+    let myList = this._entryRelated(entry);
+    const touched = new Set(); // target entries whose connections block needs refresh
+
+    for (const { name, rel } of related) {
+      const target = this._findAnyEntry(name);
+      // Skip self-references and unresolved targets.
+      if (!target) continue;
+      const tUuid = target.uuid ?? `JournalEntry.${target.id}`;
+      if (tUuid === selfUuid) continue;
+
+      // Forward: me → target.
+      myList = this._mergeRelated(myList, { uuid: tUuid, name: target.name, rel });
+
+      // Reciprocal: target → me (only if not already present with this uuid).
+      try {
+        const tList = this._mergeRelated(this._entryRelated(target),
+          { uuid: selfUuid, name: entry.name, rel });
+        await target.update({ flags: { [MODULE_ID]: { relatedEntities: tList } } });
+        await this._refreshConnectionsBlock(target, tList);
+        touched.add(tUuid);
+      } catch (e) {
+        console.warn(LOG_PREFIX, "reciprocal relationship write failed:", e?.message || e);
+      }
+    }
+
+    try {
+      await entry.update({ flags: { [MODULE_ID]: { relatedEntities: myList } } });
+      await this._refreshConnectionsBlock(entry, myList);
+    } catch (e) {
+      console.warn(LOG_PREFIX, "relationship write failed:", e?.message || e);
+    }
+  },
+
+  /** Build the HTML for an entry's Connections section (content links). */
+  _renderConnectionsBlock(list) {
+    if (!Array.isArray(list) || !list.length) return "";
+    const items = list.map(r => {
+      const label = escapeHtml(String(r.name ?? "").replace(/[{}]/g, "")) || "(unknown)";
+      const link = r.uuid ? `@UUID[${r.uuid}]{${label}}` : label;
+      const rel = r.rel && r.rel !== "related" ? ` — <em>${escapeHtml(String(r.rel))}</em>` : "";
+      return `<li>${link}${rel}</li>`;
+    }).join("");
+    return `<div class="es-connections" data-es-connections="1">` +
+      `<hr class="es-journal-sep"/>` +
+      `<p class="es-connections-head"><strong>🔗 Connections</strong></p>` +
+      `<ul class="es-connections-list">${items}</ul></div>`;
+  },
+
+  /**
+   * Rewrite (idempotently) the Connections block at the end of an entry's
+   * first page so the relationship list is visible inside the journal too.
+   * Strips any previous block first, keyed by the data-es-connections marker.
+   */
+  async _refreshConnectionsBlock(entry, list) {
+    try {
+      const page = entry.pages?.contents?.[0] ?? entry.pages?.find?.(() => true);
+      if (!page) return;
+      let content = page.text?.content ?? "";
+      // Remove a previously-injected connections block, if any.
+      content = content.replace(/<div class="es-connections"[\s\S]*?<\/div>\s*$/i, "").trimEnd();
+      const block = this._renderConnectionsBlock(list);
+      if (block) content = `${content}\n${block}`;
+      await page.update({ "text.content": content });
+    } catch (e) {
+      console.warn(LOG_PREFIX, "connections block refresh failed:", e?.message || e);
     }
   },
 
@@ -3983,23 +4670,26 @@ const JournalSystem = {
 
   /* ---------------- entry rendering ---------------- */
 
+  /**
+   * Render the full HTML body for a new templated entry (v0.8.0). Driven by
+   * the type's `fields` template: the `description` field becomes the lead
+   * paragraph; every other populated field becomes a labelled row. Unknown /
+   * empty fields are skipped, so legacy and partial entities render fine.
+   */
   _renderEntityHtml(type, e) {
-    const desc = e.description ? `<p>${escapeHtml(e.description)}</p>` : "";
+    const spec = this.TYPES[type];
+    const fields = spec?.fields ?? [{ key: "description", label: "Description", area: true }];
+    const desc = e.description ? `<p class="es-entity-desc">${escapeHtml(e.description)}</p>` : "";
     const rows = [];
-    if (type === "npc") {
-      if (e.motivations)   rows.push(["Motivations", e.motivations]);
-      if (e.relationships) rows.push(["Relationships", e.relationships]);
-    } else if (type === "location") {
-      if (e.features) rows.push(["Notable features", e.features]);
-      if (e.dangers)  rows.push(["Dangers", e.dangers]);
-    } else if (type === "discovery") {
-      if (e.significance) rows.push(["Significance", e.significance]);
-      if (e.connectedTo)  rows.push(["Connected to", e.connectedTo]);
+    for (const f of fields) {
+      if (f.key === "description") continue; // rendered above
+      const v = e[f.key];
+      if (v == null || String(v).trim() === "") continue;
+      rows.push([f.label, v]);
     }
     const list = rows.length
-      ? `<ul>${rows.map(([k, v]) => `<li><strong>${escapeHtml(k)}:</strong> ${escapeHtml(String(v))}</li>`).join("")}</ul>`
+      ? `<ul class="es-entity-fields">${rows.map(([k, v]) => `<li><strong>${escapeHtml(k)}:</strong> ${escapeHtml(String(v))}</li>`).join("")}</ul>`
       : "";
-    const spec = this.TYPES[type];
     return `<h2>${spec?.emoji ?? ""} ${escapeHtml(e.name)}</h2>${desc}${list}` +
            `<p class="es-journal-foot"><em>Recorded by The Eternal Skald.</em></p>`;
   },
@@ -4008,15 +4698,20 @@ const JournalSystem = {
     const stamp = new Date().toLocaleString();
     const desc = e.description ? `<p>${escapeHtml(e.description)}</p>` : "";
     const extras = [];
-    for (const k of ["motivations", "relationships", "features", "dangers", "significance", "connectedTo"]) {
-      if (e[k]) extras.push(`<li><strong>${escapeHtml(k)}:</strong> ${escapeHtml(String(e[k]))}</li>`);
+    // Iterate every templated field key so new fields (rank/harm/goals/
+    // region/resources) are picked up on updates too.
+    for (const k of this._allFieldKeys()) {
+      if (k === "description") continue;
+      if (e[k] != null && String(e[k]).trim() !== "") {
+        extras.push(`<li><strong>${escapeHtml(k)}:</strong> ${escapeHtml(String(e[k]))}</li>`);
+      }
     }
     const list = extras.length ? `<ul>${extras.join("")}</ul>` : "";
     return `<p class="es-journal-stamp"><em>Update — ${escapeHtml(stamp)}</em></p>${desc}${list}`;
   },
 
   _entityContext(e) {
-    const bits = [e.name, e.description, e.motivations, e.relationships, e.features, e.dangers, e.significance, e.connectedTo]
+    const bits = [e.name, ...this._allFieldKeys().map(k => e[k])]
       .filter(Boolean).join(" | ");
     return bits.slice(0, 2000);
   },
@@ -4068,16 +4763,106 @@ const JournalSystem = {
     try {
       return (game.journal?.contents ?? []).filter(j => {
         const t = j.getFlag?.(MODULE_ID, "type");
-        if (!t || j.getFlag?.(MODULE_ID, "createdBy") !== "ai") return false;
+        const by = j.getFlag?.(MODULE_ID, "createdBy");
+        // Accept both AI-scribed and manually-templated (v0.8.0) entries.
+        if (!t || (by !== "ai" && by !== "manual")) return false;
         return typeFilter ? t === typeFilter : true;
       });
     } catch (_) { return []; }
   },
 
-  /** Find an existing individual entry of a type by case-insensitive name. */
-  _findEntry(type, name) {
+  /* ---------------- fuzzy name matching (v0.8.0) ---------------- */
+
+  /** Strip punctuation/articles and collapse whitespace for fuzzy compares. */
+  _normName(s) {
+    return String(s ?? "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\b(the|a|an|of|some)\b/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  },
+
+  /** Damerau-Levenshtein distance (small strings) for typo tolerance. */
+  _editDistance(a, b) {
+    a = String(a); b = String(b);
+    const m = a.length, n = b.length;
+    if (!m) return n; if (!n) return m;
+    const d = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+    for (let i = 0; i <= m; i++) d[i][0] = i;
+    for (let j = 0; j <= n; j++) d[0][j] = j;
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+        if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+          d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+        }
+      }
+    }
+    return d[m][n];
+  },
+
+  /** Read the stored alias array off an entry (always an array). */
+  _entryAliases(entry) {
+    try {
+      const a = entry?.getFlag?.(MODULE_ID, "aliases");
+      return Array.isArray(a) ? a.filter(s => typeof s === "string" && s.trim()) : [];
+    } catch (_) { return []; }
+  },
+
+  /**
+   * Find an existing individual entry of a type by name. Tries, best → worst:
+   * exact (case-insensitive) → stored-alias match → normalised-equal →
+   * close edit-distance. This lets later mentions ("the captain", "Reeves",
+   * "Capt. Reeves") resolve to the same "Captain Reeves" entry instead of
+   * spawning a duplicate. Returns null when no confident match is found.
+   *
+   * @param {string} type   entity type ("npc"|"location"|"discovery")
+   * @param {string} name   the name to resolve
+   * @param {string[]} [aliases]  extra alias candidates to also match on
+   */
+  _findEntry(type, name, aliases = []) {
+    const list = this.listEntries(type);
+    if (!list.length) return null;
     const lc = String(name).toLowerCase().trim();
-    return this.listEntries(type).find(j => j.name?.toLowerCase().trim() === lc) ?? null;
+
+    // 1. Exact (case-insensitive) title match.
+    let hit = list.find(j => j.name?.toLowerCase().trim() === lc);
+    if (hit) return hit;
+
+    // Candidate set of names we're trying to resolve (the name + any aliases
+    // the AI supplied for this mention).
+    const candidates = [lc, ...aliases.map(a => String(a).toLowerCase().trim())]
+      .filter(Boolean);
+    const candNorms = [...new Set(candidates.map(c => this._normName(c)).filter(Boolean))];
+
+    // 2. Match against each entry's stored title OR its stored aliases.
+    for (const j of list) {
+      const names = [j.name, ...this._entryAliases(j)].filter(Boolean);
+      for (const nm of names) {
+        const nmLc = String(nm).toLowerCase().trim();
+        if (candidates.includes(nmLc)) return j;
+        const nmNorm = this._normName(nm);
+        if (nmNorm && candNorms.includes(nmNorm)) return j;
+      }
+    }
+
+    // 3. Fuzzy edit-distance on the normalised primary name (typo tolerance).
+    const norm = this._normName(name);
+    if (norm.length >= 4) {
+      let best = null, bestDist = Infinity;
+      for (const j of list) {
+        const names = [j.name, ...this._entryAliases(j)];
+        for (const nm of names) {
+          const d = this._editDistance(norm, this._normName(nm));
+          if (d < bestDist) { bestDist = d; best = j; }
+        }
+      }
+      const tol = Math.min(3, Math.max(2, Math.floor(norm.length * 0.25)));
+      if (best && bestDist <= tol) return best;
+    }
+    return null;
   },
 
   /** Find the single rolling journal for a silent type. */
@@ -4797,7 +5582,28 @@ Hooks.once("ready", async () => {
     ironsworn: IronswornController,
     integration: Integration,
     // --- Narration entity linking (v0.5.1) ---
-    entityLinker: EntityLinker
+    entityLinker: EntityLinker,
+    // --- Living Chronicle: timeline & relationships (v0.8.0) ---
+    timeline: (q) => JournalSystem.getTimeline(q),
+    clearTimeline: () => JournalSystem.clearTimeline(),
+    relationships: (uuidOrName) => {
+      // Convenience: return the relatedEntities for a given entry name/uuid,
+      // or a full map of {name: rels[]} when called with no argument.
+      try {
+        if (uuidOrName) {
+          const hit = JournalSystem._findAnyEntry?.(String(uuidOrName));
+          return hit ? JournalSystem._entryRelated(hit) : [];
+        }
+        const out = {};
+        for (const t of ["npc", "location", "discovery"]) {
+          for (const j of JournalSystem.listEntries(t)) {
+            const rels = JournalSystem._entryRelated(j);
+            if (rels.length) out[j.name] = rels;
+          }
+        }
+        return out;
+      } catch (_) { return uuidOrName ? [] : {}; }
+    }
   };
 
   // Log Ironsworn integration status for diagnostics.
