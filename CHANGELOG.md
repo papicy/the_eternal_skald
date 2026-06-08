@@ -13,6 +13,20 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.9.1] — 2026-06-08
+
+### Added
+- **AI Provider preset dropdown.** A new world-scoped **AI Provider** setting lets
+  you choose between **OpenAI**, **OpenRouter**, **Google AI (Gemini)** and
+  **Custom** from a dropdown. Picking a known provider auto-fills the **API
+  Endpoint** with that provider's OpenAI-compatible chat-completions URL via the
+  new `applyProviderPreset()` helper and a `PROVIDER_PRESETS` map — you still
+  supply your own **API Key** and **AI Model** separately. The **Custom** preset
+  (the default) leaves the endpoint untouched, so the shipped Abacus AI RouteLLM
+  default, self-hosted gateways and any other endpoint keep working unchanged.
+  GM-only writes, fully defensive, and backwards-compatible (no behaviour change
+  on upgrade). Setting labels and a confirmation notification added to `en.json`.
+
 ## [0.9.0] — 2026-06-08
 
 ### Added
@@ -462,6 +476,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.9.1]: https://github.com/papicy/eternal_skald/releases/tag/v0.9.1
 [0.9.0]: https://github.com/papicy/eternal_skald/releases/tag/v0.9.0
 [0.8.0]: https://github.com/papicy/eternal_skald/releases/tag/v0.8.0
 [0.7.0]: https://github.com/papicy/eternal_skald/releases/tag/v0.7.0

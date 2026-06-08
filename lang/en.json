@@ -11,17 +11,27 @@
         "name": "Streaming Responses",
         "hint": "Render the Skald's replies in real time, word by word, as the AI generates them — instead of waiting for the whole reply to arrive. Gives near-instant feedback and a livelier feel. If streaming is ever unavailable (older server hook, network issue), the Skald automatically falls back to a normal buffered reply, so it is safe to leave ON. Defaults to ON."
       },
+      "providerPreset": {
+        "name": "AI Provider",
+        "hint": "Pick your AI provider to auto-fill the API Endpoint below with that provider's OpenAI-compatible chat-completions URL. You still supply your own API Key and AI Model separately. Choose 'Custom' for the Abacus AI RouteLLM default, a self-hosted gateway, or any other endpoint (leaves the endpoint untouched). World-scoped, GM-only. Default: Custom.",
+        "choices": {
+          "custom": "Custom / Abacus AI (manual endpoint)",
+          "openai": "OpenAI",
+          "openrouter": "OpenRouter",
+          "google": "Google AI (Gemini)"
+        }
+      },
       "apiKey": {
-        "name": "Abacus AI API Key",
-        "hint": "Your ChatLLM API key from Abacus AI. Keep this private — it will be sent with every request. World-scoped, GM-only."
+        "name": "API Key",
+        "hint": "Your AI provider's API key (Abacus AI, OpenAI, OpenRouter, Google AI, etc.). Keep this private — it will be sent with every request. World-scoped, GM-only."
       },
       "modelName": {
         "name": "AI Model",
-        "hint": "Model identifier to use for generation. Defaults to gemini-3-flash-preview. Any model exposed by your Abacus AI deployment is acceptable."
+        "hint": "Model identifier to use for generation. Defaults to gemini-3-flash-preview. Use any model your chosen provider exposes (e.g. gpt-4o for OpenAI, anthropic/claude-3.5-sonnet for OpenRouter, gemini-1.5-pro for Google AI)."
       },
       "apiEndpoint": {
         "name": "API Endpoint",
-        "hint": "Chat-completions endpoint URL. Defaults to https://routellm.abacus.ai/v1/chat/completions. Override only if you use a custom AI backend."
+        "hint": "Chat-completions endpoint URL. Auto-filled when you pick a provider above; defaults to https://routellm.abacus.ai/v1/chat/completions. Edit directly only when using a 'Custom' provider or backend."
       },
       "intensity": {
         "name": "Skald Intensity",
@@ -155,6 +165,10 @@
       "emptySkald": "Speak, Ironsworn. Usage: !skald <your question or prompt>",
       "emptyNpc": "Name the one you would meet. Usage: !npc <name or description>",
       "emptyLore": "What chronicle shall I write? Usage: !lore <topic>"
+    },
+
+    "notifications": {
+      "providerPresetApplied": "The Eternal Skald: AI Provider set to {provider}. API Endpoint → {endpoint}"
     },
 
     "ui": {

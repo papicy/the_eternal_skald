@@ -57,6 +57,28 @@ const DEFAULT_ENDPOINT  = "https://routellm.abacus.ai/v1/chat/completions";
 const DEFAULT_MODEL     = "gemini-3-flash-preview";
 
 /**
+ * (v0.9.1) Provider presets for the AI Provider dropdown setting.
+ *
+ * The Skald speaks to any OpenAI-compatible chat-completions endpoint, so
+ * switching providers is purely a matter of pointing `apiEndpoint` at the
+ * right URL (the user still supplies their own API key and model name
+ * separately). This map drives both the dropdown's choices and the
+ * auto-fill of `apiEndpoint` when a non-custom preset is chosen.
+ *
+ * `endpoint: null` (the "custom" preset) means "leave whatever the user has
+ * typed into the API Endpoint field untouched" — used for self-hosted,
+ * Abacus AI RouteLLM (the shipped default), or any other endpoint.
+ *
+ * @type {Record<string, {endpoint: string|null}>}
+ */
+const PROVIDER_PRESETS = {
+  openai:     { endpoint: "https://api.openai.com/v1/chat/completions" },
+  openrouter: { endpoint: "https://openrouter.ai/api/v1/chat/completions" },
+  google:     { endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions" },
+  custom:     { endpoint: null }
+};
+
+/**
  * The ONE endpoint this client talks to. It's a relative URL so it
  * resolves same-origin against whatever host/port/protocol Foundry is
  * served from. The server-side hook (eternal-skald-server.mjs) handles
@@ -146,6 +168,29 @@ const Settings = {
       config: true,
       type: Boolean,
       default: true
+    });
+
+    // (v0.9.1) AI Provider preset dropdown. Picking a known provider
+    // auto-fills the API Endpoint below with that provider's OpenAI-compatible
+    // chat-completions URL — the user still supplies their own API key and
+    // model name. "Custom" leaves the endpoint untouched (used for the shipped
+    // Abacus AI RouteLLM default, self-hosted gateways, or any other URL).
+    // Defaults to "custom" so existing worlds keep their configured endpoint —
+    // fully backwards-compatible, no behaviour change on upgrade.
+    game.settings.register(MODULE_ID, "providerPreset", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.providerPreset.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.providerPreset.hint"),
+      scope: "world",
+      config: true,
+      type: String,
+      choices: {
+        custom:     game.i18n.localize("ETERNAL_SKALD.settings.providerPreset.choices.custom"),
+        openai:     game.i18n.localize("ETERNAL_SKALD.settings.providerPreset.choices.openai"),
+        openrouter: game.i18n.localize("ETERNAL_SKALD.settings.providerPreset.choices.openrouter"),
+        google:     game.i18n.localize("ETERNAL_SKALD.settings.providerPreset.choices.google")
+      },
+      default: "custom",
+      onChange: (value) => { try { applyProviderPreset(value); } catch (_) { /* never break settings */ } }
     });
 
     game.settings.register(MODULE_ID, "apiKey", {
@@ -539,6 +584,47 @@ const Settings = {
     catch (e) { return undefined; }
   }
 };
+
+/**
+ * (v0.9.1) Apply a provider preset: when the user picks a known provider in
+ * the AI Provider dropdown, point the API Endpoint at that provider's
+ * OpenAI-compatible chat-completions URL. The "custom" preset is a no-op so
+ * self-hosted / Abacus AI RouteLLM / other endpoints stay exactly as typed.
+ *
+ * Fully defensive — a failure here must never block the settings UI. The
+ * write is GM-scoped ("world"); non-GM clients can't persist it, so we guard
+ * and inform gently rather than throwing.
+ *
+ * @param {string} preset - one of the keys of {@link PROVIDER_PRESETS}
+ * @returns {Promise<void>}
+ */
+async function applyProviderPreset(preset) {
+  const def = PROVIDER_PRESETS[preset];
+  // Unknown preset or "custom" → leave the endpoint untouched.
+  if (!def || !def.endpoint) return;
+
+  // Only a GM can write a world-scoped setting; bail quietly otherwise.
+  if (!game.user?.isGM) return;
+
+  const current = Settings.get("apiEndpoint");
+  if (current === def.endpoint) return; // already correct — nothing to do
+
+  try {
+    await game.settings.set(MODULE_ID, "apiEndpoint", def.endpoint);
+    console.log(LOG_PREFIX, `Provider preset "${preset}" → endpoint set to ${def.endpoint}`);
+    try {
+      const label = game.i18n.localize(`ETERNAL_SKALD.settings.providerPreset.choices.${preset}`);
+      ui.notifications?.info(
+        game.i18n.format("ETERNAL_SKALD.notifications.providerPresetApplied", {
+          provider: label,
+          endpoint: def.endpoint
+        })
+      );
+    } catch (_) { /* notification is best-effort */ }
+  } catch (e) {
+    console.warn(LOG_PREFIX, "applyProviderPreset failed:", e?.message || e);
+  }
+}
 
 /* ===================================================================== */
 /*  §3  SYSTEM PROMPT BUILDER                                             */
