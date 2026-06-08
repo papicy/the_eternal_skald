@@ -18,15 +18,28 @@ Until `1.0.0`, treat every release as an experimental development build.
 - **Clickable entities in narration.** Names the Skald speaks are now linked
   inline in the chat. NPCs, locations and discoveries already scribed into the
   Living Chronicle become Foundry content links that open their Journal Entry,
-  and known Ironsworn moves become one-click links that offer a roll. The
-  entity index is built from the chronicle and the move catalog, cached, and
-  rebuilt automatically when journal entries change. New world setting **Link
-  Entities in Narration** (default ON) toggles the feature; it is purely
-  additive and degrades gracefully (unmatched names stay plain text, `<code>`
-  and existing links are never touched, and any failure leaves narration
-  untouched). Move references match case-sensitively so ordinary verbs ("you
-  strike the wolf") are never mistaken for the move. Exposed on the public API
-  as `game.modules.get('the-eternal-skald').api.entityLinker`.
+  and known Ironsworn moves become one-click links. The entity index is built
+  from the chronicle and the move catalog, cached, and rebuilt automatically
+  when journal entries change. New world setting **Link Entities in Narration**
+  (default ON) toggles the feature; it is purely additive and degrades
+  gracefully (unmatched names stay plain text, `<code>` and existing links are
+  never touched, and any failure leaves narration untouched). Move references
+  match case-sensitively so ordinary verbs ("you strike the wolf") are never
+  mistaken for the move. Exposed on the public API as
+  `game.modules.get('the-eternal-skald').api.entityLinker`.
+- **Move links open the *real* Ironsworn move.** Clicking a linked move now
+  opens the **foundry-ironsworn system's own official pre-roll dialog** for that
+  move directly — the exact dialog the system shows when you click the move on a
+  character sheet — instead of an intermediate Skald card. Links carry the
+  move's **Datasworn ID** (e.g. `move:classic/combat/strike`); the controller
+  resolves it to the system's actual move Document by mirroring the system's own
+  compendium lookup (`flags["foundry-ironsworn"].dsid`) across the classic,
+  delve, Starforged and Sundered Isles move packs, then calls
+  `CONFIG.IRONSWORN.applications.IronswornPrerollDialog.showForOfficialMove()`.
+  If the system or dialog is unavailable, it falls back to the previous
+  suggestion card so play is never interrupted. New controller helpers are
+  available for integrations: `IronswornController.getMoveUuid(ref)` (returns
+  the system move Item's `@UUID`), `openMoveDialog(ref)` and `openMoveSheet(ref)`.
 
 ## [0.5.0] — 2026-06-07
 

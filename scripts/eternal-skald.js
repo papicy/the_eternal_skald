@@ -1278,6 +1278,9 @@ const EntityLinker = {
             name,
             kind: "move",
             moveName: name,
+            // Datasworn ID (e.g. "move:classic/combat/strike") — lets the
+            // click handler open the *system's* official move directly.
+            moveDsId: (typeof m?.id === "string" && m.id.startsWith("move:")) ? m.id : "",
             caseSensitive: true
           });
         }
@@ -1320,10 +1323,14 @@ const EntityLinker = {
       const label = matchedText.replace(/[{}]/g, "");
       return `@UUID[${entry.uuid}]{${label}}`;
     }
-    // Move — custom link wired by Integration.wireSuggestionCard.
+    // Move — custom link wired by Integration.wireSuggestionCard. We carry
+    // the Datasworn ID so the click handler can open the *system's* official
+    // move dialog/sheet directly (no intermediate card).
     const move = escapeHtml(entry.moveName);
+    const dsid = escapeHtml(entry.moveDsId ?? "");
     return `<a class="es-entity-link es-move-link" data-skald-action="link-move" ` +
-      `data-move="${move}" data-tooltip="Ironsworn move: ${move} — click to roll">` +
+      `data-move="${move}" data-move-dsid="${dsid}" ` +
+      `data-tooltip="Ironsworn move: ${move} — click to roll">` +
       `<i class="fa-solid fa-dice-d6"></i>${escapeHtml(matchedText)}</a>`;
   },
 
@@ -2378,6 +2385,7 @@ const Integration = {
         ev.stopPropagation();
         const action = btn.dataset.skaldAction;
         const move = btn.dataset.move;
+        const moveDsId = btn.dataset.moveDsid;
         const stat = btn.dataset.stat;
         try {
           if (action === "roll-move") {
@@ -2385,12 +2393,17 @@ const Integration = {
           } else if (action === "choose-move") {
             await this.showMoveSelector(stat);
           } else if (action === "link-move") {
-            // An inline move link in narration — offer the interactive
-            // suggestion card so the player can roll it or pick another.
+            // An inline move link in narration — open the *system's* own
+            // official move dialog directly (the exact pre-roll dialog the
+            // foundry-ironsworn system shows for that move), resolved via its
+            // Datasworn ID. Degrade gracefully: fall back to the interactive
+            // suggestion card if the system/dialog can't be reached.
             if (!this.active()) {
               ui.notifications?.info(`${SKALD_NAME}: ${move} — Ironsworn system not active.`);
             } else {
-              await this.postSuggestionCard({ name: move });
+              const ref = moveDsId || move;
+              const res = await IronswornController.openMoveDialog(ref);
+              if (!res?.ok) await this.postSuggestionCard({ name: move });
             }
           }
         } catch (e) {

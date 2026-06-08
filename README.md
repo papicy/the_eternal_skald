@@ -407,7 +407,7 @@ All in **Configure Settings → The Eternal Skald** (world-scoped, GM-only):
 | Auto-Index Journals | **On** | **(v0.5.0)** Automatically embed chronicle entries into semantic memory as they are created or updated. Off means memory only updates when you run `!reindex`. |
 | Memory Relevance Threshold | 0.3 | **(v0.5.0)** Minimum cosine similarity (0–1) an entry must reach to be recalled. Higher = stricter/more precise, fewer results. Range 0–1, step 0.05. |
 | Memory Debug Logging | Off | **(v0.5.0)** Verbose RAG diagnostics (embedding, scoring, retrieval) in the browser console. |
-| Link Entities in Narration | **On** | Turn names the Skald narrates into clickable links — chronicled NPCs/locations/discoveries open their Journal Entry, and known Ironsworn moves offer a one-click roll. Purely additive; unmatched names stay plain text. |
+| Link Entities in Narration | **On** | Turn names the Skald narrates into clickable links — chronicled NPCs/locations/discoveries open their Journal Entry, and known Ironsworn moves open the system's own official move dialog directly (resolved by the move's Datasworn ID). Purely additive; unmatched names stay plain text. |
 | Debug Logging | Off | Verbose Ironsworn integration diagnostics in the browser console. |
 
 ---
