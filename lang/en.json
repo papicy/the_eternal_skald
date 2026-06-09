@@ -141,9 +141,32 @@
       },
       "visionModel": {
         "name": "Vision Model",
-        "hint": "Which AI model performs map/image analysis. 'Inherit' reuses your Narration Model (ideal when it is already multimodal, e.g. gemini-3-flash-preview or gpt-4o). Otherwise pin a known vision-capable model just for scouting. If the chosen model cannot see images, the Skald skips analysis with a GM-only notice rather than wasting a call.",
+        "hint": "Which AI model performs map/image analysis. 'Inherit' reuses your Narration Model (ideal when it is already multimodal, e.g. gemini-3-flash-preview or gpt-4o). Models marked ★ are recommended for reading detailed fantasy maps with small text labels — gpt-4o, claude-3-5-sonnet, gemini-2.0-flash and gemini-2.5-pro have the strongest OCR/fine-detail vision. Lightweight tiers (e.g. gpt-4o-mini) accept images but routinely miss small labels and faint paths. If the chosen model cannot see images, the Skald skips analysis with a GM-only notice rather than wasting a call.",
         "choices": {
           "inherit": "Inherit from Narration Model"
+        }
+      },
+      "mapAnalysisQuality": {
+        "name": "Map Analysis Quality",
+        "hint": "How thoroughly the Skald reads a map. Fast: a single full-map pass (1 AI call, cheapest). Balanced: a full-map overview plus a 2×2 sectioned detail pass on larger maps — much better text and POI recall (recommended). Thorough: overview plus a 2×2 or 3×3 sectioned pass chosen by map resolution, combining all findings — best recall, but uses several AI calls (and tokens) per scene.",
+        "choices": {
+          "fast": "Fast — single full-map pass",
+          "balanced": "Balanced — overview + sections (recommended)",
+          "thorough": "Thorough — overview + fine grid (most calls)"
+        }
+      },
+      "maxMapResolution": {
+        "name": "Max Map Resolution",
+        "hint": "Longest-edge pixel size the base map is downscaled to before it is sent to the model. Higher keeps small text and labels legible (better recall) at the cost of more image tokens. 4096 px (★) suits most detailed fantasy maps; 'Original' disables downscaling for the sharpest possible read (highest cost).",
+        "choices": {
+          "original": "Original (no downscaling)"
+        }
+      },
+      "imageFormat": {
+        "name": "Map Image Format",
+        "hint": "How captured map images are encoded before upload. Auto (recommended) uses lossless PNG so text stays crisp. PNG forces lossless. JPEG produces the smallest payload but its compression blurs small labels and fine lines, hurting text recognition.",
+        "choices": {
+          "auto": "Auto — PNG for crisp text (recommended)"
         }
       },
       "ragEnabled": {

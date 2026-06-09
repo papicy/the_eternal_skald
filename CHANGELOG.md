@@ -13,6 +13,71 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.24] — 2026-06-09
+
+### Added
+- **Map Analysis Quality setting (grid sectioning).** A new world setting
+  — **Fast / Balanced / Thorough** (default *Balanced*) — controls how
+  hard map vision looks. *Fast* runs a single whole-map pass; *Balanced*
+  and *Thorough* additionally split larger maps into a **grid of
+  overlapping sections** (2×2 or up to 3×3) and read each section closely,
+  dramatically improving recovery of **small text labels, place names, and
+  tiny symbols**.
+  - **`MapVision._planGrid(w, h, quality)`** decides the grid (1×1 / 2×2 /
+    3×3) from image size and quality; **`MapVision._gridRegions()`**
+    computes section crop rectangles with **~8% overlap padding** and
+    human-readable compass labels (e.g. *north-west*).
+  - **`MapVision._analyzeMapInSections()`** runs the whole-map overview
+    pass plus one pass per section, and **`MapVision._mergeAnalyses()`**
+    merges them — de-duplicating POIs by name, keeping the **longer
+    description** and the **higher confidence**, and unioning labels.
+- **Max Map Resolution setting.** Choose the longest-edge the captured map
+  is downscaled to before sending: **2048 / 3072 / 4096 / Original**
+  (default **4096&nbsp;px**, up from the fixed 2048&nbsp;px in v0.10.23).
+  Higher resolution keeps small labels legible at the cost of more tokens.
+- **Image Format setting.** Choose the capture encoding: **Auto**
+  (lossless **PNG**), **PNG**, or **JPEG** (default *Auto*). PNG preserves
+  tiny text and thin lines that JPEG compression used to smear.
+- **Per-POI confidence and text labels.** The vision prompt now requests a
+  **`confidence`** rating and a **`labels[]`** array (verbatim text read
+  off the map) for each point of interest. Low-confidence finds are kept
+  but **flagged** in the scouting card and journal note rather than
+  silently dropped, and any legible labels are surfaced.
+- **Strong/weak model guidance.** `Client._visionModelTier()` classifies
+  the configured vision model as **strong / weak / unknown**. The Vision
+  Model picker now **★-marks the strongest map/OCR readers** (gpt-4o,
+  claude-3-5-sonnet, gemini-2.5-pro/flash, gemini-3-flash-preview) and the
+  Skald **whispers the GM a heads-up** when a weak model (e.g.
+  `gpt-4o-mini`) is used — and asks for confirmation on on-demand
+  `!scout`. Added `gemini-2.0-flash` as an explicit choice.
+
+### Changed
+- **Capture defaults raised for accuracy.** `MapVision._captureSceneImage()`
+  now downscales to the **Max Map Resolution** (default 4096&nbsp;px) and
+  encodes as **lossless PNG** by default instead of JPEG q0.85.
+  `MapVision._downscaleToDataUrl()` was reworked to take an **options
+  object** (`{ maxDim, mime, quality, region }`) and can crop to a
+  **region** for section analysis via `drawImage()` source-rect cropping.
+- **Cartographer prompt rewritten.** `MapVision.VISION_PROMPT` now frames
+  the model as a **fantasy cartographer** and explicitly directs it to
+  hunt for **text labels, route/road lines, faint paths, structures, and
+  terrain**, and to report **confidence** — while still returning **strict
+  JSON**. Section passes inject compass guidance via
+  `_buildVisionMessages(imageUrl, sceneName, sectionLabel)`.
+- **Richer cache & cards.** Stored analysis now records **quality**,
+  **section count**, and per-POI **labels** & **confidence**; the scouting
+  card and journal locations display labels and an `[uncertain]` flag for
+  low-confidence finds.
+- All affected JSDoc and the in-file version header bumped to
+  **v0.10.24**.
+
+### Tests
+- Extended `test/map-vision.test.mjs` with coverage for
+  `_visionModelTier`, `_planGrid`, `_gridRegions` (overlap/labels),
+  `_mergeAnalyses` (dedup/confidence), the new `_parseAnalysis` fields
+  (`labels`, `confidence`), and the rewritten `VISION_PROMPT`. Full suite
+  green (417 assertions).
+
 ## [0.10.23] — 2026-06-09
 
 ### Added
@@ -1186,6 +1251,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.24]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.24
 [0.10.23]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.23
 [0.10.22]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.22
 [0.10.21]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.21

@@ -1,13 +1,21 @@
 /* =====================================================================
- *  Map vision / scouting test for The Eternal Skald (v0.10.23).
+ *  Map vision / scouting test for The Eternal Skald (v0.10.24).
  *
- *  v0.10.23 gives the Skald EYES: the MapVision module captures a scene's
- *  base background art, downscales it to a JPEG data URL, sends it to a
+ *  v0.10.23 gave the Skald EYES: the MapVision module captures a scene's
+ *  base background art, downscales it to a data URL, sends it to a
  *  vision-capable model with a strict-JSON prompt, parses the returned
  *  points of interest, caches the result on the scene's flags and scribes
  *  the POIs into the Living Chronicle as Location entries. A `canvasReady`
  *  hook auto-scouts new scenes, and `!scout` / `!survey` / `!analyze-map`
  *  force a re-scout on demand.
+ *
+ *  v0.10.24 sharpens that sight for detailed fantasy maps: lossless PNG at
+ *  up to 4096px, an enhanced cartographer prompt that OCRs text labels and
+ *  hunts faint paths, grid-sectioned analysis (2×2 / 3×3) that combines an
+ *  overview pass with zoomed section passes, a weak-vision-model advisory,
+ *  and three new settings (Map Analysis Quality, Max Map Resolution, Image
+ *  Format). These tests exercise the new grid planning / region / merge
+ *  logic and the updated capture, prompt and parse signatures.
  *
  *  MapVision/Client live inside an ESM that registers Foundry hooks at
  *  import time, so they cannot be imported in isolation. We therefore
@@ -52,13 +60,16 @@ function extractFrom(src, marker) {
   }
   return src.slice(start, i);
 }
-/** Build a callable from a marker, returning just the `{ body }` braces. */
+/** Build a callable from a marker, returning just the `{ body }` braces.
+ * Locates the body brace AFTER the parameter list's closing paren so that
+ * default-object params (e.g. `opts = {}`) don't get mistaken for the body. */
 function bodyOf(marker) {
   const m = extractFrom(SRC, marker);
-  return m.slice(m.indexOf("{"));
+  const paramClose = m.indexOf(")");
+  return m.slice(m.indexOf("{", paramClose));
 }
 
-console.log("Map vision / scouting test (v0.10.23)\n");
+console.log("Map vision / scouting test (v0.10.24)\n");
 
 /* --------------------------------------------------------------------- *
  * [1] Client._modelSupportsVision() — name-based multimodal detection.
@@ -132,10 +143,10 @@ eq(bgSrc({ background: { src: "   " } }), null, "[3] blank src → null");
  * [4] MapVision._parseAnalysis() — tolerant JSON/POI parsing.
  * --------------------------------------------------------------------- */
 const parseAnalysis = (() => {
-  const b = bodyOf("_parseAnalysis(text) {");
+  const b = bodyOf("_parseAnalysis(text, opts = {}) {");
   // eslint-disable-next-line no-new-func
-  const fn = new Function("text", `return (function(text) ${b}).call(null, text);`);
-  return (t) => fn(t);
+  const fn = new Function("text", "opts", `return (function(text, opts) ${b}).call(null, text, opts);`);
+  return (t, opts = {}) => fn(t, opts);
 })();
 
 {
@@ -194,23 +205,29 @@ const parseAnalysis = (() => {
  * [5] MapVision._buildVisionMessages() — OpenAI-compatible multimodal shape.
  * --------------------------------------------------------------------- */
 const buildMessages = (() => {
-  const b = bodyOf("_buildVisionMessages(imageUrl, sceneName) {");
+  const b = bodyOf("_buildVisionMessages(imageUrl, sceneName, sectionLabel) {");
   // eslint-disable-next-line no-new-func
-  const fn = new Function("imageUrl", "sceneName",
-    `return (function(imageUrl, sceneName) ${b}).call(this, imageUrl, sceneName);`);
-  return (img, name, prompt) => fn.call({ VISION_PROMPT: prompt }, img, name);
+  const fn = new Function("imageUrl", "sceneName", "sectionLabel",
+    `return (function(imageUrl, sceneName, sectionLabel) ${b}).call(this, imageUrl, sceneName, sectionLabel);`);
+  return (img, name, prompt, section) => fn.call({ VISION_PROMPT: prompt }, img, name, section);
 })();
 {
-  const msgs = buildMessages("data:image/jpeg;base64,Zz", "The Hollow Vale", "PROMPT_TEXT");
+  const msgs = buildMessages("data:image/png;base64,Zz", "The Hollow Vale", "PROMPT_TEXT");
   ok(Array.isArray(msgs) && msgs.length === 2, "[5] two messages (system + user)");
   eq(msgs[0].role, "system", "[5] first message is system");
   eq(msgs[1].role, "user", "[5] second message is user");
   ok(Array.isArray(msgs[1].content), "[5] user content is a multimodal array");
   eq(msgs[1].content[0].type, "text", "[5] first part is text");
   eq(msgs[1].content[1].type, "image_url", "[5] second part is image_url");
-  eq(msgs[1].content[1].image_url.url, "data:image/jpeg;base64,Zz", "[5] image_url carries the data URL");
+  eq(msgs[1].content[1].image_url.url, "data:image/png;base64,Zz", "[5] image_url carries the data URL");
   ok(msgs[1].content[0].text.includes("PROMPT_TEXT"), "[5] text part includes the vision prompt");
   ok(msgs[1].content[0].text.includes("The Hollow Vale"), "[5] scene name woven into the text part");
+  // (v0.10.24) A section label injects explicit per-section guidance.
+  const sectioned = buildMessages("data:image/png;base64,Zz", "Vale", "P", "north-west");
+  ok(/north-west/.test(sectioned[1].content[0].text) && /SECTION/.test(sectioned[1].content[0].text),
+     "[5] section label woven into the prompt as explicit region guidance");
+  ok(!/SECTION of a larger map/.test(msgs[1].content[0].text),
+     "[5] no section guidance when analysing the whole map");
 }
 
 /* --------------------------------------------------------------------- *
@@ -298,23 +315,31 @@ const makeJournalPois = (() => {
   ok(/const cached = this\.getCached\(sc\)/.test(analyze) && /if \(cached && !force\)/.test(analyze),
      "[9] cached scenes are skipped unless force is set");
   ok(/_modelSupportsVision\(model\)/.test(analyze), "[9] checks the model can see before calling");
-  ok(/this\._captureSceneImage\(sc\)/.test(analyze), "[9] captures the scene image");
+  // (v0.10.24) Capture now happens inside the per-pass / sectioning helpers.
+  ok(/this\._runVisionPass\(sc, sceneName, model/.test(analyze), "[9] runs a single vision pass for fast quality");
+  ok(/this\._analyzeMapInSections\(sc, sceneName, model, quality\)/.test(analyze), "[9] runs sectioned analysis otherwise");
   ok(/this\._storeAnalysis\(sc, analysis\)/.test(analyze), "[9] caches the analysis on the scene");
   ok(/this\._journalPois\(parsed\.pois, sc\)/.test(analyze), "[9] journals discovered POIs");
   ok(/this\._postScoutCard\(analysis/.test(analyze), "[9] posts the scout chat card");
   ok(/timestamp: Date\.now\(\)/.test(analyze) && /model,/.test(analyze) && /pois: parsed\.pois/.test(analyze),
      "[9] stored analysis records timestamp, model and POIs");
+  ok(/labels: Array\.isArray\(parsed\.labels\)/.test(analyze), "[9] stored analysis records transcribed labels");
   ok(/this\._canWrite\(\)/.test(analyze), "[9] GM-only guard inside analyzeScene");
+  ok(/_visionModelTier\?\.\(model\) === "weak"/.test(analyze), "[9] warns the GM when the vision model is a weak tier");
 
   const store = extractFrom(SRC, "async _storeAnalysis(scene, analysis) {");
   ok(/setFlag\(MODULE_ID, this\.FLAG_KEY, analysis\)/.test(store), "[9] stores under scene.flags[MODULE_ID].mapAnalysis");
 
   const capture = extractFrom(SRC, "async _captureSceneImage(scene, opts = {}) {");
-  ok(/maxDim = opts\.maxDim \?\? 2048/.test(capture), "[9] downscales to max 2048px by default");
-  ok(/quality = opts\.quality \?\? 0\.85/.test(capture), "[9] JPEG quality defaults to 0.85");
+  ok(/maxDim = opts\.maxDim \?\? this\._maxResolution\(\)/.test(capture), "[9] downscale cap follows the Max Map Resolution setting");
+  ok(/const enc = this\._imageEncoding\(\)/.test(capture), "[9] encoding follows the Image Format setting");
+  ok(/region/.test(capture), "[9] capture supports a crop region (grid sectioning)");
 
-  const down = extractFrom(SRC, "_downscaleToDataUrl(src, maxDim = 2048, quality = 0.85) {");
-  ok(/toDataURL\("image\/jpeg", quality\)/.test(down), "[9] exports JPEG data URL");
+  const down = extractFrom(SRC, "_downscaleToDataUrl(src, opts = {}) {");
+  ok(/opts\.maxDim/.test(down) && /\? opts\.maxDim : 4096/.test(down), "[9] downscale defaults to 4096px");
+  ok(/opts\.mime === "image\/jpeg" \? "image\/jpeg" : "image\/png"/.test(down), "[9] exports PNG by default (JPEG opt-in)");
+  ok(/toDataURL\(mime, quality\)/.test(down), "[9] honours the chosen mime + quality");
+  ok(/drawImage\(img, sx, sy, sw, sh, 0, 0, w, h\)/.test(down), "[9] draws the (optionally cropped) source rect");
   ok(/crossOrigin = "anonymous"/.test(down), "[9] sets crossOrigin for remote images");
   ok(/tainted/i.test(down), "[9] handles CORS-tainted canvas gracefully");
 }
@@ -343,11 +368,23 @@ const makeJournalPois = (() => {
   ok(/register\(MODULE_ID, "visionModel",[\s\S]*?type: String,[\s\S]*?default: "inherit"/.test(SRC),
      "[11] visionModel registered (String, default 'inherit')");
   ok(/"gemini-3-flash-preview":\s*"gemini-3-flash-preview"/.test(SRC), "[11] visionModel offers a concrete vision model");
+  // (v0.10.24) New analysis-quality / resolution / format settings.
+  ok(/register\(MODULE_ID, "mapAnalysisQuality",[\s\S]*?type: String,[\s\S]*?default: "balanced"/.test(SRC),
+     "[11] mapAnalysisQuality registered (String, default 'balanced')");
+  ok(/register\(MODULE_ID, "maxMapResolution",[\s\S]*?type: String,[\s\S]*?default: "4096"/.test(SRC),
+     "[11] maxMapResolution registered (String, default '4096')");
+  ok(/register\(MODULE_ID, "imageFormat",[\s\S]*?type: String,[\s\S]*?default: "auto"/.test(SRC),
+     "[11] imageFormat registered (String, default 'auto')");
 
   const s = LANG.ETERNAL_SKALD.settings;
   ok(s.autoAnalyzeScenes && s.autoAnalyzeScenes.name && s.autoAnalyzeScenes.hint, "[11] lang: autoAnalyzeScenes name+hint");
   ok(s.visionModel && s.visionModel.name && s.visionModel.hint, "[11] lang: visionModel name+hint");
   ok(s.visionModel.choices && s.visionModel.choices.inherit, "[11] lang: visionModel.choices.inherit");
+  ok(s.mapAnalysisQuality && s.mapAnalysisQuality.name && s.mapAnalysisQuality.hint, "[11] lang: mapAnalysisQuality name+hint");
+  ok(s.mapAnalysisQuality.choices && s.mapAnalysisQuality.choices.fast && s.mapAnalysisQuality.choices.balanced && s.mapAnalysisQuality.choices.thorough,
+     "[11] lang: mapAnalysisQuality has fast/balanced/thorough choices");
+  ok(s.maxMapResolution && s.maxMapResolution.name && s.maxMapResolution.hint && s.maxMapResolution.choices.original, "[11] lang: maxMapResolution name+hint+original");
+  ok(s.imageFormat && s.imageFormat.name && s.imageFormat.hint && s.imageFormat.choices.auto, "[11] lang: imageFormat name+hint+auto");
 
   const apiIdx = SRC.indexOf("game.modules.get(MODULE_ID).api = {");
   const api = SRC.slice(apiIdx, apiIdx + 2000);
@@ -363,6 +400,144 @@ const makeJournalPois = (() => {
   ok(/background\?\.src/.test(bg), "[12] reads only scene.background.src (base map)");
   ok(!/\.tokens/.test(bg) && !/fog/i.test(bg) && !/drawings/i.test(bg),
      "[12] never reads tokens / fog / drawings (read-only base map)");
+}
+
+/* --------------------------------------------------------------------- *
+ * [13] Client._visionModelTier() — strong / weak / unknown classification.
+ * --------------------------------------------------------------------- */
+const visionTier = (() => {
+  const b = bodyOf("_visionModelTier(model) {");
+  // eslint-disable-next-line no-new-func
+  const fn = new Function("model", `return (function(model) ${b}).call(null, model);`);
+  return (m) => fn(m);
+})();
+for (const m of ["gpt-4o", "claude-3-5-sonnet", "gemini-2.0-flash", "gemini-2.5-pro", "gpt-4-vision-preview"]) {
+  eq(visionTier(m), "strong", `[13] '${m}' classified as a strong vision model`);
+}
+for (const m of ["gpt-4o-mini", "claude-3-haiku", "gemini-1.5-flash-lite", "llama-3.2-3b", "phi-3-vision"]) {
+  eq(visionTier(m), "weak", `[13] '${m}' classified as a weak vision model`);
+}
+eq(visionTier(""), "unknown", "[13] empty model → unknown");
+
+/* --------------------------------------------------------------------- *
+ * [14] MapVision._planGrid() — resolution + quality → grid layout.
+ * --------------------------------------------------------------------- */
+const planGrid = (() => {
+  const b = bodyOf("_planGrid(width, height, quality) {");
+  // eslint-disable-next-line no-new-func
+  const fn = new Function("width", "height", "quality", `return (function(width, height, quality) ${b}).call(null, width, height, quality);`);
+  return (w, h, q) => fn(w, h, q);
+})();
+eq(planGrid(8000, 6000, "fast"), { cols: 1, rows: 1 }, "[14] fast quality never sections");
+eq(planGrid(1200, 900, "balanced"), { cols: 1, rows: 1 }, "[14] small map under balanced → no sectioning");
+eq(planGrid(3000, 2000, "balanced"), { cols: 2, rows: 2 }, "[14] large map under balanced → 2×2");
+eq(planGrid(1000, 800, "thorough"), { cols: 1, rows: 1 }, "[14] tiny map under thorough → no sectioning");
+eq(planGrid(2000, 1700, "thorough"), { cols: 2, rows: 2 }, "[14] mid map under thorough → 2×2");
+eq(planGrid(5000, 4200, "thorough"), { cols: 3, rows: 3 }, "[14] very large map under thorough → 3×3");
+eq(planGrid(0, 0, "thorough"), { cols: 1, rows: 1 }, "[14] zero dimensions → no sectioning (graceful)");
+
+/* --------------------------------------------------------------------- *
+ * [15] MapVision._gridRegions() — padded, in-bounds crop rectangles.
+ * --------------------------------------------------------------------- */
+const gridRegions = (() => {
+  const b = bodyOf("_gridRegions(width, height, cols, rows) {");
+  // eslint-disable-next-line no-new-func
+  const fn = new Function("width", "height", "cols", "rows", `return (function(width, height, cols, rows) ${b}).call(null, width, height, cols, rows);`);
+  return (w, h, c, r) => fn(w, h, c, r);
+})();
+{
+  const regs = gridRegions(1000, 800, 2, 2);
+  eq(regs.length, 4, "[15] 2×2 grid yields four regions");
+  for (const r of regs) {
+    ok(r.sx >= 0 && r.sy >= 0, "[15] region origin within bounds");
+    ok(r.sx + r.sw <= 1000 && r.sy + r.sh <= 800, "[15] region stays inside the image");
+    ok(r.sw > 500 && r.sh > 400, "[15] regions overlap (padded beyond exact cell size)");
+    ok(typeof r.label === "string" && r.label.length > 0, "[15] region carries a human label");
+  }
+  const labels = regs.map(r => r.label);
+  ok(labels.includes("north-west") && labels.includes("south-east"), "[15] corner sections get compass labels");
+  eq(gridRegions(0, 0, 2, 2).length, 0, "[15] zero dimensions → no regions (graceful)");
+  eq(gridRegions(1000, 800, 3, 3).length, 9, "[15] 3×3 grid yields nine regions");
+}
+
+/* --------------------------------------------------------------------- *
+ * [16] MapVision._mergeAnalyses() — overview + sections, deduped.
+ * --------------------------------------------------------------------- */
+const mergeAnalyses = (() => {
+  const b = bodyOf("_mergeAnalyses(overview, sections) {");
+  // eslint-disable-next-line no-new-func
+  const fn = new Function("overview", "sections", `return (function(overview, sections) ${b}).call(null, overview, sections);`);
+  return (o, s) => fn(o, s);
+})();
+{
+  const overview = {
+    summary: "A kingdom map.", terrain: "Hills and rivers.",
+    labels: ["Eldoria"],
+    pois: [{ name: "Eldoria", type: "settlement", description: "Capital.", location: "centre", confidence: "high" }]
+  };
+  const sections = [
+    { summary: "", terrain: "", labels: ["Eldoria", "Greywatch"],
+      pois: [
+        { name: "eldoria", type: "settlement", description: "The great capital city with walls.", location: "centre", confidence: "medium" },
+        { name: "Greywatch", type: "structure", description: "A watchtower.", location: "north-west", confidence: "low" }
+      ] },
+    { summary: "", terrain: "", labels: ["Mistford"],
+      pois: [{ name: "Mistford", type: "settlement", description: "A river town.", location: "south-east", confidence: "high" }] }
+  ];
+  const merged = mergeAnalyses(overview, sections);
+  eq(merged.summary, "A kingdom map.", "[16] keeps the overview summary");
+  eq(merged.pois.length, 3, "[16] de-dupes Eldoria across overview + section (3 unique POIs)");
+  const eldoria = merged.pois.find(p => p.name.toLowerCase() === "eldoria");
+  ok(eldoria.description.includes("great capital"), "[16] keeps the richer (longer) description on merge");
+  eq(eldoria.confidence, "high", "[16] keeps the higher confidence on merge");
+  ok(merged.labels.includes("Eldoria") && merged.labels.includes("Greywatch") && merged.labels.includes("Mistford"),
+     "[16] labels combined and de-duplicated");
+  // Empty/garbage inputs never throw.
+  const safe = mergeAnalyses(null, null);
+  ok(Array.isArray(safe.pois) && Array.isArray(safe.labels), "[16] null inputs → empty arrays (no throw)");
+}
+
+/* --------------------------------------------------------------------- *
+ * [17] _parseAnalysis() — v0.10.24 labels, confidence, section default, cap.
+ * --------------------------------------------------------------------- */
+{
+  const payload = JSON.stringify({
+    summary: "S", terrain: "T",
+    labels: ["Northreach", "northreach", "  Stonehaven  ", ""],
+    pois: [
+      { name: "Stonehaven", type: "settlement", description: "A fort.", location: "north", confidence: "HIGH" },
+      { name: "Faint Trail", type: "path", description: "A dotted track.", confidence: "low" },
+      { name: "Bad Conf", type: "other", description: "x", confidence: "definitely" }
+    ]
+  });
+  const a = parseAnalysis(payload, { sectionLabel: "west", cap: 20 });
+  eq(a.labels, ["Northreach", "Stonehaven"], "[17] labels deduped + trimmed + empties dropped");
+  eq(a.pois[0].confidence, "high", "[17] confidence normalised to lowercase");
+  eq(a.pois[1].location, "west", "[17] missing POI location defaults to the section label");
+  eq(a.pois[2].confidence, "", "[17] invalid confidence → empty string");
+
+  // Cap option raises the limit above the default 12.
+  const many = [];
+  for (let i = 1; i <= 25; i++) many.push({ name: `P${i}` });
+  const big = parseAnalysis(JSON.stringify({ pois: many }), { cap: 20 });
+  eq(big.pois.length, 20, "[17] cap option raises the POI limit");
+  const def = parseAnalysis(JSON.stringify({ pois: many }));
+  eq(def.pois.length, 12, "[17] default cap remains 12 when no option given");
+}
+
+/* --------------------------------------------------------------------- *
+ * [18] VISION_PROMPT — specialised fantasy-cartography instruction.
+ * --------------------------------------------------------------------- */
+{
+  const promptIdx = SRC.indexOf("VISION_PROMPT: [");
+  const prompt = SRC.slice(promptIdx, SRC.indexOf("].join(\"\\n\")", promptIdx));
+  ok(/TEXT LABELS/.test(prompt), "[18] prompt explicitly instructs reading text labels");
+  ok(/SMALL SYMBOLS|ICONS/.test(prompt), "[18] prompt asks for small symbols / icons");
+  ok(/PATHS|ROADS/.test(prompt) && /FAINT|faint/.test(prompt), "[18] prompt asks for faint paths / roads");
+  ok(/SETTLEMENTS|STRUCTURES/.test(prompt), "[18] prompt asks for all settlements / structures");
+  ok(/confidence/.test(prompt), "[18] prompt requests a confidence level per POI");
+  ok(/"labels"/.test(prompt), "[18] prompt requests a transcribed labels array");
+  ok(/STRICT JSON/.test(prompt), "[18] prompt still mandates strict JSON output");
 }
 
 /* --------------------------------------------------------------------- */

@@ -675,6 +675,21 @@
   font-size: 0.85em;
   font-style: italic;
 }
+/* (v0.10.24) Low-confidence map sightings + transcribed map text labels. */
+.eternal-skald-card .es-poi-conf {
+  color: var(--es-warn, #b9893f);
+  font-size: 0.78em;
+  font-style: italic;
+}
+.eternal-skald-card .es-map-label {
+  display: inline-block;
+  margin: 0.1em 0.2em 0.1em 0;
+  padding: 0.05em 0.45em;
+  border: 1px solid var(--es-rule, rgba(154, 145, 127, 0.35));
+  border-radius: 0.8em;
+  font-size: 0.82em;
+  white-space: nowrap;
+}
 
 .es-journal-stamp {
   color: var(--es-muted, #9a917f);

@@ -4,9 +4,11 @@ An AI-powered storyteller, oracle interpreter, and tactical enemy controller for
 
 Powered by the **Abacus AI ChatLLM** platform (Gemini 3.0 Flash by default).
 
-> ⚠️ **Alpha / Development Version (v0.10.23)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
+> ⚠️ **Alpha / Development Version (v0.10.24)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
 
 As of **v0.3.0**, the Skald integrates directly with the official [**foundry-ironsworn**](https://foundryvtt.com/packages/foundry-ironsworn) system: it reads your character's stats and meters, *suggests* the right Ironsworn move, triggers the system's own dice mechanics on one click, narrates the official strong-hit / weak-hit / miss outcome, and can optionally apply mechanical effects. See [Ironsworn Integration](#ironsworn-integration) below. The module still works standalone in any system — Ironsworn features simply activate when the system is present.
+
+**New in v0.10.24 — sharper eyes for the Skald (better map reading).** Map vision now reads maps far more reliably, especially the **text labels, place names, and small symbols** that weaker models used to miss on compressed images. Three things changed: (1) the captured map is now sent at **higher resolution (up to 4096&nbsp;px)** and as a **lossless PNG** by default — no more JPEG smear over tiny lettering; (2) a new **Map Analysis Quality** setting can split a large map into a **grid of overlapping sections** and read each one closely (*Thorough*), or do a single quick pass (*Fast*), with a sensible **Balanced** middle ground; and (3) the cartographer prompt was rewritten to explicitly hunt for **labels, route lines, faint paths, structures, and terrain**, and to report a **confidence** for each find (low-confidence points are flagged rather than dropped). The model picker now **★-marks the strongest map readers** and **warns when a weak model** (e.g. `gpt-4o-mini`) is chosen for on-demand scouting. Two more new settings — **Max Map Resolution** and **Image Format** — let you trade detail against token cost. See [Map Vision (Image Analysis)](#map-vision-image-analysis).
 
 **New in v0.10.23 — the Skald *sees* your map (true image vision).** Where v0.10.22 read the scene's *metadata* (names, pins, tokens), the Skald can now **look at the actual background map image** and describe what's on it. On loading a scene it quietly **captures the background image** (downscaled and JPEG-compressed for efficiency), sends it to a **vision-capable AI model**, and turns the reply into a short **scouting report** plus a set of **points of interest** that are auto-scribed into your journal as **location** entries (linked to the scene and de-duplicated). Run **`!scout`** (aliases **`!survey`**, **`!analyze-map`**) to force a fresh look at the current map. Two new world settings govern it — **Auto-Analyze Scenes** (on by default) and **Vision Model** (which model does the looking; see [Map Vision (Image Analysis)](#map-vision-image-analysis) for the supported models and their token costs). It analyses **only the base map image** — never tokens, fog of war, drawings, or hidden GM content — caches each result per-scene so you're never billed twice, and degrades gracefully (no scene, no image, a non-vision model, or a network hiccup all simply do nothing).
 
@@ -352,14 +354,14 @@ Auto-journaling is **on by default** and degrades gracefully — if a write ever
 
 ## Map Vision (Image Analysis)
 
-**New in v0.10.23.** Beyond *reading* your scene's metadata (see [scene awareness](#ironsworn-integration), v0.10.22), the Skald can now **look at the actual background map image** with a vision-capable AI model and tell you what's on it — terrain, structures, routes, and notable features — then record those discoveries as journal locations.
+**New in v0.10.23** (sharpened in **v0.10.24**). Beyond *reading* your scene's metadata (see [scene awareness](#ironsworn-integration), v0.10.22), the Skald can now **look at the actual background map image** with a vision-capable AI model and tell you what's on it — terrain, structures, routes, **text labels & place names**, and notable features — then record those discoveries as journal locations. As of **v0.10.24** the capture is higher-resolution and lossless by default, the prompt explicitly hunts for labels and faint paths, and a **Map Analysis Quality** setting can read a large map in **overlapping grid sections** for far better small-detail and OCR coverage.
 
 ### How it works
 
-1. **Capture (read-only, base map only).** When a scene loads, the Skald reads **only** the scene's background image (`scene.background.src`, or the legacy `scene.img`). It draws that image onto an off-screen canvas, **downscales** it so the longest edge is at most **2048&nbsp;px**, and re-encodes it as a **JPEG at quality 0.85**. Tokens, fog of war, drawings, walls, and hidden GM content are **never** captured or sent.
-2. **Analyse.** The image is sent to a **vision-capable model** as a standard multimodal message (a text instruction plus the image). The Skald asks for a short scene description and a list of **points of interest (POIs)** in a strict JSON shape.
-3. **Scribe.** Each POI becomes a **location** entry in the [Living Chronicle](#the-living-chronicle-auto-journaling), linked to the scene and de-duplicated against existing entries. The GM gets a whispered summary; a public *Skald* scouting card sets the scene for the table.
-4. **Cache.** The full result (timestamp, model used, POI list) is stored on the scene's flags, so the same map is **never analysed (or billed) twice** — until you force a fresh look.
+1. **Capture (read-only, base map only).** When a scene loads, the Skald reads **only** the scene's background image (`scene.background.src`, or the legacy `scene.img`). It draws that image onto an off-screen canvas, **downscales** it so the longest edge is at most the **Max Map Resolution** (default **4096&nbsp;px**, up from 2048 in v0.10.23), and re-encodes it according to **Image Format** — **lossless PNG by default** (v0.10.24) so small text and thin lines survive, with JPEG available if you prefer smaller payloads. Tokens, fog of war, drawings, walls, and hidden GM content are **never** captured or sent.
+2. **Analyse.** The image is sent to a **vision-capable model** as a standard multimodal message (a fantasy-cartographer instruction plus the image). The Skald asks for a short scene description and a list of **points of interest (POIs)** — each with a **confidence** rating and any **text labels** it can read — in a strict JSON shape. Under *Balanced* / *Thorough* **Map Analysis Quality**, a large map is also split into **overlapping grid sections** (2×2 or 3×3) that are each read closely, then **merged** with the whole-map overview (de-duplicating by name, keeping the richest description and highest confidence).
+3. **Scribe.** Each POI becomes a **location** entry in the [Living Chronicle](#the-living-chronicle-auto-journaling), linked to the scene and de-duplicated against existing entries. Low-confidence finds are kept but flagged. The GM gets a whispered summary; a public *Skald* scouting card sets the scene for the table.
+4. **Cache.** The full result (timestamp, model used, quality, section count, POI list with labels & confidence) is stored on the scene's flags, so the same map is **never analysed (or billed) twice** — until you force a fresh look.
 
 ### Using it
 
@@ -371,23 +373,33 @@ Auto-journaling is **on by default** and degrades gracefully — if a write ever
 | Setting | Default | What it does |
 | --- | --- | --- |
 | **Auto-Analyze Scenes** | On | Toggles the automatic scouting when a scene with a background image loads. Turn off to only ever scout on demand with `!scout`. |
-| **Vision Model** | Inherit | Which model performs the image analysis. *Inherit* reuses your main **Model Name**; or pick a specific vision-capable model. |
+| **Vision Model** | Inherit | Which model performs the image analysis. *Inherit* reuses your main **Model Name**; or pick a specific vision-capable model. ★-marked models are the strongest map/OCR readers; choosing a weak model whispers a heads-up. |
+| **Map Analysis Quality** *(v0.10.24)* | Balanced | How hard the Skald looks. **Fast** = one whole-map pass (cheapest, 1 call). **Balanced** = overview + a 2×2 grid of overlapping sections on larger maps. **Thorough** = overview + up to a 3×3 grid (best small-text/OCR coverage, most calls). |
+| **Max Map Resolution** *(v0.10.24)* | 4096 px | Longest edge the captured image is downscaled to before sending: **2048 / 3072 / 4096 / Original**. Higher = sharper labels but more tokens. |
+| **Image Format** *(v0.10.24)* | Auto (PNG) | Encoding of the captured image: **Auto** (lossless PNG), **PNG**, or **JPEG**. PNG preserves tiny text and thin lines; JPEG is smaller but can smear fine detail. |
 
 ### Supported vision models & token costs
 
 Map vision needs a **multimodal (vision) model** — a text-only model can't see the image. The Skald auto-detects whether the configured model supports vision and, if it doesn't, quietly whispers the GM and does nothing (no broken calls, no wasted tokens). Choose the model under the **Vision Model** setting:
 
-| Model | Vision | Relative cost | Notes |
-| --- | --- | --- | --- |
-| **Inherit (main model)** | depends | — | Uses your **Model Name** setting. Vision works only if that model is multimodal (the default *Gemini 3 Flash* is). |
-| **gemini-3-flash-preview** | ✅ | 💲 low | Fast and inexpensive; the recommended default for map vision. |
-| **gemini-2.5-flash** | ✅ | 💲 low | Cheap, quick, good for routine scouting. |
-| **gemini-2.5-pro** | ✅ | 💲💲💲 high | Most detailed reads of complex maps; higher per-call cost. |
-| **gpt-4o** | ✅ | 💲💲 medium | Strong general vision; balanced cost. |
-| **gpt-4o-mini** | ✅ | 💲 low | Budget OpenAI vision; great for frequent auto-scouting. |
-| **claude-3-5-sonnet** | ✅ | 💲💲 medium | Excellent descriptive detail. |
+**Pick a strong reader for maps.** Reading a fantasy map well — especially the **small text labels, place names, and tiny symbols** — is much harder than describing a photo. Stronger multimodal models are dramatically better at this OCR-like task; weaker/"mini" models often miss labels or invent them, particularly on compressed images. The **★** models below are the recommended map readers. If you pick a weak model, the Skald still runs but whispers the GM a heads-up (and, for on-demand `!scout`, asks you to confirm).
 
-**Why cost matters.** Images cost far more tokens than text — a single map can run from a few hundred to a couple thousand input tokens depending on its resolution, *on top of* the reply. The Skald keeps this minimal in three ways: it **downscales** every image to ≤ 2048&nbsp;px and JPEG-compresses it before sending, it **caches** each scene's analysis so you pay **once per map** (not once per load), and **auto-analysis is one-shot per scene**. For the cheapest running cost, pair **Auto-Analyze Scenes: On** with a low-cost model like *gemini-2.5-flash* or *gpt-4o-mini*, and reserve *gemini-2.5-pro* for the occasional `!scout` of an especially intricate map.
+| Model | Vision | Map/OCR strength | Relative cost | Notes |
+| --- | --- | --- | --- | --- |
+| **Inherit (main model)** | depends | depends | — | Uses your **Model Name** setting. Vision works only if that model is multimodal (the default *Gemini 3 Flash* is). |
+| **gemini-3-flash-preview** | ✅ | ★ strong | 💲 low | Fast, inexpensive, and a solid label reader; the recommended default. |
+| **gemini-2.5-pro** ★ | ✅ | ★ strongest | 💲💲💲 high | Best reads of complex maps and dense labels; reserve for intricate maps / `!scout`. |
+| **gpt-4o** ★ | ✅ | ★ strong | 💲💲 medium | Excellent general vision and reliable text reading; balanced cost. |
+| **claude-3-5-sonnet** ★ | ✅ | ★ strong | 💲💲 medium | Excellent descriptive detail and label legibility. |
+| **gemini-2.5-flash** ★ | ✅ | ★ strong | 💲 low | Cheap, quick, and a capable label reader for routine scouting. |
+| **gemini-2.0-flash** | ✅ | good | 💲 low | Budget Gemini vision; fine for terrain, weaker on tiny text. |
+| **gpt-4o-mini** | ✅ | ⚠ weak | 💲 low | Budget OpenAI vision; frequently misses small labels — okay for terrain, not recommended for label-heavy maps. |
+
+**Why cost matters — and the v0.10.24 trade-offs.** Images cost far more tokens than text — a single map can run from a few hundred to a few thousand input tokens depending on its resolution, *on top of* the reply. v0.10.24 deliberately spends a little more for accuracy, so it's worth understanding the knobs:
+
+- **Resolution & format.** Raising **Max Map Resolution** (now 4096&nbsp;px by default) and using **lossless PNG** make small labels readable but increase the per-image token/byte cost. Drop to 2048&nbsp;px or switch **Image Format** to JPEG if you want the lighter v0.10.23-style payload.
+- **Grid sectioning.** **Map Analysis Quality** trades calls for coverage: *Fast* = **1** call (whole map); *Balanced* = overview **+ 4** section calls on larger maps; *Thorough* = overview **+ up to 9** section calls. More sections = better small-text/OCR coverage but proportionally more tokens.
+- **What keeps it cheap.** The Skald still **caches** each scene's analysis so you pay **once per map** (not once per load), and **auto-analysis is one-shot per scene**. For the cheapest running cost, pair **Auto-Analyze Scenes: On** with **Fast** quality and a low-cost ★ model like *gemini-2.5-flash* or *gemini-3-flash-preview*, and reserve **Thorough** + *gemini-2.5-pro* for the occasional `!scout` of an especially intricate, label-heavy map.
 
 > **Read-only & graceful.** Map vision never modifies the scene. Every step degrades quietly — no active scene, no background image, a non-vision model, a tainted (CORS-blocked) remote image, or a network failure all simply result in no analysis, never a broken turn. When a remote image can't be drawn to the canvas for downscaling, the Skald falls back to sending the image **URL** so models that fetch URLs still work.
 
@@ -492,7 +504,10 @@ All in **Configure Settings → The Eternal Skald** (world-scoped, GM-only):
 | Memory Relevance Threshold | 0.3 | **(v0.5.0)** Minimum cosine similarity (0–1) an entry must reach to be recalled. Higher = stricter/more precise, fewer results. Range 0–1, step 0.05. |
 | Memory Debug Logging | Off | **(v0.5.0)** Verbose RAG diagnostics (embedding, scoring, retrieval) in the browser console. |
 | Auto-Analyze Scenes | **On** | **(v0.10.23)** Automatically run a vision analysis of a scene's background map the first time it's viewed (GM-side, cached per-scene). Off means you only scout on demand with `!scout`. See [Map Vision](#map-vision-image-analysis). |
-| Vision Model | Inherit | **(v0.10.23)** Which model performs map image analysis: *Inherit* (reuse your main AI Model) or a specific vision-capable model (e.g. `gemini-2.5-flash`, `gpt-4o-mini`, `gemini-2.5-pro`). See [supported models & token costs](#supported-vision-models--token-costs). |
+| Vision Model | Inherit | **(v0.10.23)** Which model performs map image analysis: *Inherit* (reuse your main AI Model) or a specific vision-capable model (e.g. `gemini-2.5-flash`, `gpt-4o-mini`, `gemini-2.5-pro`). ★-marked choices are the strongest map/OCR readers; a weak choice whispers the GM a heads-up. See [supported models & token costs](#supported-vision-models--token-costs). |
+| Map Analysis Quality | Balanced | **(v0.10.24)** How hard map vision looks: *Fast* (one whole-map pass), *Balanced* (overview + 2×2 overlapping sections on larger maps), or *Thorough* (overview + up to 3×3 sections, best small-text/OCR coverage). See [Map Vision](#map-vision-image-analysis). |
+| Max Map Resolution | 4096 px | **(v0.10.24)** Longest edge the captured map is downscaled to before sending (2048 / 3072 / 4096 / Original). Higher = sharper labels, more tokens. See [Map Vision](#map-vision-image-analysis). |
+| Image Format | Auto (PNG) | **(v0.10.24)** Encoding of the captured map: *Auto* (lossless PNG), *PNG*, or *JPEG*. PNG preserves tiny text; JPEG is smaller but smears fine detail. See [Map Vision](#map-vision-image-analysis). |
 | Link Entities in Narration | **On** | Turn names the Skald narrates into clickable links — chronicled NPCs/locations/discoveries open their Journal Entry, and known Ironsworn moves open the system's own official move dialog directly (resolved by the move's Datasworn ID). Purely additive; unmatched names stay plain text. |
 | Debug Logging | Off | Verbose Ironsworn integration diagnostics in the browser console. |
 
