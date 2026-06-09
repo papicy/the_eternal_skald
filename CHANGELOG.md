@@ -13,6 +13,44 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.22] — 2026-06-09
+
+### Added
+- **Map / scene awareness (read-only).** A new
+  `Integration._gatherSceneContext()` reads the **active scene**
+  (`game.scenes.active`, falling back to the viewed `canvas.scene`) and
+  builds a concise context block:
+  - **CURRENT SCENE** — the scene's `navName` (or `name`).
+  - **Visible Locations** — names taken from the scene's **map notes /
+    journal pins** (`scene.notes`), each resolved to its linked
+    `JournalEntry` name (a note's own `text` label overrides the entry
+    name). De-duplicated and capped at 12 with a `+N more` suffix.
+  - **Notable Tokens** — names of placed tokens, **excluding hidden
+    (GM-only) tokens** (`token.hidden`) so secrets never leak into the
+    prompt. De-duplicated and capped the same way.
+  `gatherContext()` folds this block into the live game state sent to the
+  AI (available both in and out of combat).
+- **Prompt guidance.** The system prompt now tells the Skald it can *see
+  the map* and may reference the listed `CURRENT SCENE` / `Visible
+  Locations` / `Notable Tokens` by name — especially when suggesting a
+  destination for a journey or vow — while keeping it natural: never force
+  a location, and never invent a pin that wasn't listed.
+
+### Notes
+- **Read-only by design** — the scene is never modified. The reader is
+  fully defensive: it returns nothing when no scene is active (graceful
+  degradation) and is token-efficient (short lines, hard caps).
+
+### Verified
+- New `test/scene-context.test.mjs` extracts the real
+  `_gatherSceneContext()` body and runs it against mock Foundry globals:
+  graceful no-scene degradation, `navName` precedence, journal-pin →
+  linked-entry resolution, custom-label override, **hidden-token
+  exclusion**, de-duplication, the 12-item cap, the exact 3-line layout,
+  the `canvas.scene` fallback, plus structural guards over
+  `gatherContext()` and the system prompt. All 24 assertions pass; the
+  full suite (218 assertions across 9 files) is green.
+
 ## [0.10.21] — 2026-06-09
 
 ### Fixed
@@ -1079,6 +1117,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.22]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.22
 [0.10.21]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.21
 [0.10.20]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.20
 [0.10.19]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.19
