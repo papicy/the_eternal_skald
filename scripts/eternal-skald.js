@@ -256,6 +256,33 @@ const Settings = {
       default: DEFAULT_ENDPOINT
     });
 
+    // (v0.10.12) Connection mode — how the client reaches the LLM.
+    //
+    //   auto    (default) Try the same-origin server hook (/skald-api/*)
+    //           first; if it isn't loaded (network error or Foundry's own
+    //           404 page) transparently fall back to a direct browser→LLM
+    //           fetch. This is what makes the Skald work on *hosted/managed*
+    //           Foundry where users cannot add the `node --import` flag that
+    //           the server hook requires.
+    //   server  Force the server hook only. If the hook isn't loaded, surface
+    //           the helpful "--import" setup error (no direct fallback).
+    //   direct  Skip the hook entirely and always call the LLM endpoint
+    //           directly from the browser (works wherever the endpoint allows
+    //           cross-origin requests — the default Abacus AI endpoint does).
+    game.settings.register(MODULE_ID, "connectionMode", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.connectionMode.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.connectionMode.hint"),
+      scope: "world",
+      config: true,
+      type: String,
+      choices: {
+        auto:   game.i18n.localize("ETERNAL_SKALD.settings.connectionMode.choices.auto"),
+        server: game.i18n.localize("ETERNAL_SKALD.settings.connectionMode.choices.server"),
+        direct: game.i18n.localize("ETERNAL_SKALD.settings.connectionMode.choices.direct")
+      },
+      default: "auto"
+    });
+
     game.settings.register(MODULE_ID, "intensity", {
       name: game.i18n.localize("ETERNAL_SKALD.settings.intensity.name"),
       hint: game.i18n.localize("ETERNAL_SKALD.settings.intensity.hint"),
@@ -1385,6 +1412,264 @@ const Client = {
   },
 
   /**
+   * (v0.10.12) Has the one-time "falling back to direct mode" notice
+   * already been shown this session? Prevents notification spam when the
+   * server hook is missing and every call falls back to direct mode.
+   */
+  _directFallbackNoticed: false,
+
+  /**
+   * (v0.10.12) Post a single, friendly heads-up (console + GM toast) the
+   * first time an `auto`-mode call falls back to the direct browser→AI
+   * path because the server hook wasn't found. Subsequent fallbacks are
+   * silent. Never throws.
+   */
+  _noticeDirectFallback() {
+    if (this._directFallbackNoticed) return;
+    this._directFallbackNoticed = true;
+    console.warn(
+      LOG_PREFIX,
+      "Server hook not detected (/skald-api/* returned 404 or was unreachable). " +
+      "Falling back to direct browser→AI mode. This is normal on hosted/managed " +
+      "Foundry. To use the server hook instead, start Foundry with --import (see README)."
+    );
+    try {
+      if (game?.user?.isGM) {
+        ui?.notifications?.info?.(
+          game.i18n.localize("ETERNAL_SKALD.notifications.directFallback")
+        );
+      }
+    } catch (_) { /* notifications optional */ }
+  },
+
+  /**
+   * (v0.10.12) Decide whether a server-hook response means "the hook isn't
+   * loaded" — i.e. Foundry served its own 404 page for `/skald-api/*`. A
+   * network error is signalled by passing a null `response`.
+   * @param {Response|null} response
+   * @returns {boolean}
+   */
+  _hookMissing(response) {
+    return !response || response.status === 404;
+  },
+
+  /**
+   * (v0.10.12) Call the AI endpoint DIRECTLY from the browser, bypassing
+   * the server hook. Sends the raw OpenAI-style chat-completions body with
+   * an `Authorization: Bearer <apiKey>` header straight to `endpoint`.
+   *
+   * This works wherever the endpoint permits cross-origin browser requests.
+   * The default Abacus AI endpoint (https://routellm.abacus.ai/v1/chat/...)
+   * returns permissive CORS headers, so it works out of the box — which is
+   * what makes the Skald usable on hosted Foundry without the server hook.
+   *
+   * @param {object} payload - the OpenAI chat-completions request body
+   * @param {string} endpoint
+   * @param {string} apiKey
+   * @returns {Promise<string>} the assistant's reply text
+   */
+  async _directChat(payload, endpoint, apiKey) {
+    let response;
+    try {
+      response = await fetch(endpoint, {
+        method:  "POST",
+        headers: {
+          "Content-Type":  "application/json",
+          "Authorization": `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({ ...payload, stream: false })
+      });
+    } catch (netErr) {
+      console.error(LOG_PREFIX, "direct fetch failed:", netErr);
+      throw new Error(
+        `Could not reach the AI endpoint directly (${endpoint}).\n` +
+        "Check the API Endpoint setting and your network. If the endpoint " +
+        "doesn't allow cross-origin (CORS) browser requests, you'll need to " +
+        "run the server hook instead (see README → Setup)."
+      );
+    }
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      let detail = text;
+      try {
+        const j = JSON.parse(text);
+        detail = j?.error?.message || j?.error || j?.message || j?.detail || text;
+      } catch (_) { /* not JSON */ }
+      throw new Error(`AI endpoint error ${response.status}: ${String(detail).slice(0, 300)}`);
+    }
+
+    let data;
+    try { data = await response.json(); }
+    catch (_) { throw new Error("The Skald returned a malformed response."); }
+
+    const content = this._extractContent(data);
+    if (!content || typeof content !== "string") {
+      console.error(LOG_PREFIX, "Unexpected direct response shape:", data);
+      throw new Error("The Skald received an empty or malformed reply from the AI.");
+    }
+    return content.trim();
+  },
+
+  /**
+   * (v0.10.12) Consume a chat-completions HTTP response as a token stream,
+   * invoking the supplied callbacks as text arrives. Extracted so both the
+   * server-hook (`chatStream`) and direct (`_directChatStream`) paths share
+   * one battle-tested SSE reader.
+   *
+   * If the response is buffered JSON rather than an SSE event-stream, it
+   * transparently degrades to a single-shot result so callers always get a
+   * usable reply.
+   *
+   * @param {Response} response - an OK (2xx) fetch Response
+   * @param {object} [handlers]
+   * @param {(delta: string, full: string) => void} [handlers.onChunk]
+   * @param {(full: string) => void} [handlers.onDone]
+   * @param {(err: Error) => void} [handlers.onError]
+   * @returns {Promise<string>} the full assistant reply text
+   */
+  async _consumeStreamingResponse(response, handlers = {}) {
+    const { onChunk, onDone, onError } = handlers;
+    const contentType = (response.headers.get("content-type") || "").toLowerCase();
+
+    // Graceful degrade: buffered JSON, not an SSE stream.
+    if (!contentType.includes("text/event-stream") || !response.body || typeof response.body.getReader !== "function") {
+      let data;
+      try { data = await response.json(); }
+      catch (_) { throw new Error("The Skald returned a malformed response."); }
+      const content = this._extractContent(data);
+      if (!content || typeof content !== "string") {
+        throw new Error("The Skald received an empty or malformed reply from the AI.");
+      }
+      const full = content.trim();
+      try { onChunk?.(full, full); } catch (_) {}
+      try { onDone?.(full); } catch (_) {}
+      return full;
+    }
+
+    // Consume the SSE stream.
+    const reader  = response.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    let full   = "";
+
+    const handleEvent = (block) => {
+      let isError = false;
+      const dataLines = [];
+      for (const rawLine of block.split("\n")) {
+        const line = rawLine.replace(/\r$/, "");
+        if (!line || line.startsWith(":")) continue;        // comment / keep-alive
+        if (line.startsWith("event:")) {
+          if (line.slice(6).trim() === "error") isError = true;
+          continue;
+        }
+        if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+      }
+      if (dataLines.length === 0) return;
+      const dataStr = dataLines.join("\n");
+      if (dataStr === "[DONE]") return;
+
+      let json;
+      try { json = JSON.parse(dataStr); }
+      catch (_) { return; }   // ignore unparseable frames
+
+      if (isError || json?.error) {
+        const msg = json?.error?.message || json?.error || "The Skald's stream failed.";
+        throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+      }
+
+      const delta =
+        json?.choices?.[0]?.delta?.content ??
+        json?.choices?.[0]?.message?.content ??
+        json?.delta ??
+        "";
+      if (delta) {
+        full += delta;
+        try { onChunk?.(delta, full); } catch (_) {}
+      }
+    };
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // Events are separated by a blank line (\n\n).
+        let sep;
+        while ((sep = buffer.indexOf("\n\n")) !== -1) {
+          const block = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + 2);
+          if (block.trim()) handleEvent(block);
+        }
+      }
+      // Flush any trailing buffered event (no terminating blank line).
+      buffer += decoder.decode();
+      if (buffer.trim()) handleEvent(buffer);
+    } catch (streamErr) {
+      console.error(LOG_PREFIX, "stream read error:", streamErr);
+      try { reader.cancel(); } catch (_) {}
+      if (full.trim()) {
+        try { onError?.(streamErr); } catch (_) {}
+      } else {
+        throw streamErr;
+      }
+    }
+
+    const result = full.trim();
+    if (!result) {
+      throw new Error("The Skald received an empty reply from the AI.");
+    }
+    try { onDone?.(result); } catch (_) {}
+    return result;
+  },
+
+  /**
+   * (v0.10.12) Streaming sibling of {@link _directChat}: calls the AI
+   * endpoint directly from the browser with `stream: true` and pipes the
+   * response through {@link _consumeStreamingResponse}.
+   *
+   * @param {object} payload
+   * @param {string} endpoint
+   * @param {string} apiKey
+   * @param {object} [handlers]
+   * @returns {Promise<string>}
+   */
+  async _directChatStream(payload, endpoint, apiKey, handlers = {}) {
+    let response;
+    try {
+      response = await fetch(endpoint, {
+        method:  "POST",
+        headers: {
+          "Content-Type":  "application/json",
+          "Authorization": `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({ ...payload, stream: true })
+      });
+    } catch (netErr) {
+      console.error(LOG_PREFIX, "direct stream fetch failed:", netErr);
+      throw new Error(
+        `Could not reach the AI endpoint directly (${endpoint}).\n` +
+        "Check the API Endpoint setting and your network. If the endpoint " +
+        "doesn't allow cross-origin (CORS) browser requests, you'll need to " +
+        "run the server hook instead (see README → Setup)."
+      );
+    }
+
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      let detail = text;
+      try {
+        const j = JSON.parse(text);
+        detail = j?.error?.message || j?.error || j?.message || j?.detail || text;
+      } catch (_) { /* not JSON */ }
+      throw new Error(`AI endpoint error ${response.status}: ${String(detail).slice(0, 300)}`);
+    }
+
+    return this._consumeStreamingResponse(response, handlers);
+  },
+
+  /**
    * Call the AI via the server-side hook. Dead simple:
    *   POST /skald-api/chat  (same origin — no CORS, no proxy)
    *
@@ -1416,9 +1701,19 @@ const Client = {
       stream: false
     };
 
-    console.log(LOG_PREFIX, "Calling AI:", { endpoint, model, msgCount: messages.length });
+    // (v0.10.12) Connection mode decides how we reach the AI:
+    //   direct → straight browser→AI fetch (skip the hook entirely)
+    //   server → server hook only (helpful error if it isn't loaded)
+    //   auto   → try the hook; on 404/network-error fall back to direct
+    const mode = Settings.get("connectionMode") || "auto";
 
-    let response;
+    console.log(LOG_PREFIX, "Calling AI:", { endpoint, model, mode, msgCount: messages.length });
+
+    if (mode === "direct") {
+      return this._directChat(payload, endpoint, apiKey);
+    }
+
+    let response = null;
     try {
       response = await fetch(API_PATH, {
         method:  "POST",
@@ -1427,6 +1722,10 @@ const Client = {
       });
     } catch (netErr) {
       console.error(LOG_PREFIX, "fetch failed:", netErr);
+      if (mode === "auto") {
+        this._noticeDirectFallback();
+        return this._directChat(payload, endpoint, apiKey);
+      }
       throw new Error(
         "Cannot reach the Skald's server hook.\n" +
         "Make sure Foundry was started with:\n" +
@@ -1436,10 +1735,15 @@ const Client = {
     }
 
     // 404 = hook not loaded (Foundry's own 404 page)
-    if (response.status === 404) {
+    if (this._hookMissing(response)) {
+      if (mode === "auto") {
+        this._noticeDirectFallback();
+        return this._directChat(payload, endpoint, apiKey);
+      }
       throw new Error(
         "The Eternal Skald server hook is not loaded (404).\n" +
-        "Add --import to your Foundry startup command. See README → Setup."
+        "Add --import to your Foundry startup command, or set Connection Mode to " +
+        "'Direct (browser → AI)' in the module settings. See README → Setup."
       );
     }
 
@@ -1507,9 +1811,17 @@ const Client = {
       stream: true
     };
 
-    console.log(LOG_PREFIX, "Streaming AI:", { endpoint, model, msgCount: messages.length });
+    // (v0.10.12) Same connection-mode logic as {@link chat}: direct skips the
+    // hook, server forces it, auto tries the hook then falls back to direct.
+    const mode = Settings.get("connectionMode") || "auto";
 
-    let response;
+    console.log(LOG_PREFIX, "Streaming AI:", { endpoint, model, mode, msgCount: messages.length });
+
+    if (mode === "direct") {
+      return this._directChatStream(payload, endpoint, apiKey, handlers);
+    }
+
+    let response = null;
     try {
       response = await fetch(STREAM_PATH, {
         method:  "POST",
@@ -1518,6 +1830,10 @@ const Client = {
       });
     } catch (netErr) {
       console.error(LOG_PREFIX, "stream fetch failed:", netErr);
+      if (mode === "auto") {
+        this._noticeDirectFallback();
+        return this._directChatStream(payload, endpoint, apiKey, handlers);
+      }
       throw new Error(
         "Cannot reach the Skald's server hook.\n" +
         "Make sure Foundry was started with:\n" +
@@ -1527,10 +1843,15 @@ const Client = {
     }
 
     // 404 = hook not loaded, or an older hook without the streaming route.
-    if (response.status === 404) {
+    if (this._hookMissing(response)) {
+      if (mode === "auto") {
+        this._noticeDirectFallback();
+        return this._directChatStream(payload, endpoint, apiKey, handlers);
+      }
       throw new Error(
         "The Eternal Skald streaming endpoint is not available (404).\n" +
-        "Update the server hook and add --import to your Foundry startup command. See README → Setup."
+        "Update the server hook and add --import to your Foundry startup command, or set " +
+        "Connection Mode to 'Direct (browser → AI)' in the module settings. See README → Setup."
       );
     }
 
@@ -1544,101 +1865,7 @@ const Client = {
       throw new Error(`Skald API error ${response.status}: ${String(detail).slice(0, 300)}`);
     }
 
-    const contentType = (response.headers.get("content-type") || "").toLowerCase();
-
-    // Graceful degrade: server returned buffered JSON, not an SSE stream.
-    if (!contentType.includes("text/event-stream") || !response.body || typeof response.body.getReader !== "function") {
-      let data;
-      try { data = await response.json(); }
-      catch (_) { throw new Error("The Skald returned a malformed response."); }
-      const content = this._extractContent(data);
-      if (!content || typeof content !== "string") {
-        throw new Error("The Skald received an empty or malformed reply from the AI.");
-      }
-      const full = content.trim();
-      try { onChunk?.(full, full); } catch (_) {}
-      try { onDone?.(full); } catch (_) {}
-      return full;
-    }
-
-    // Consume the SSE stream.
-    const reader  = response.body.getReader();
-    const decoder = new TextDecoder("utf-8");
-    let buffer = "";
-    let full   = "";
-
-    const handleEvent = (block) => {
-      // An SSE event block is one or more lines; collect the data payload
-      // and detect a terminal `event: error` frame.
-      let isError = false;
-      const dataLines = [];
-      for (const rawLine of block.split("\n")) {
-        const line = rawLine.replace(/\r$/, "");
-        if (!line || line.startsWith(":")) continue;        // comment / keep-alive
-        if (line.startsWith("event:")) {
-          if (line.slice(6).trim() === "error") isError = true;
-          continue;
-        }
-        if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
-      }
-      if (dataLines.length === 0) return;
-      const dataStr = dataLines.join("\n");
-      if (dataStr === "[DONE]") return;
-
-      let json;
-      try { json = JSON.parse(dataStr); }
-      catch (_) { return; }   // ignore unparseable frames
-
-      if (isError || json?.error) {
-        const msg = json?.error?.message || json?.error || "The Skald's stream failed.";
-        throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
-      }
-
-      const delta =
-        json?.choices?.[0]?.delta?.content ??
-        json?.choices?.[0]?.message?.content ??
-        json?.delta ??
-        "";
-      if (delta) {
-        full += delta;
-        try { onChunk?.(delta, full); } catch (_) {}
-      }
-    };
-
-    try {
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        // Events are separated by a blank line (\n\n).
-        let sep;
-        while ((sep = buffer.indexOf("\n\n")) !== -1) {
-          const block = buffer.slice(0, sep);
-          buffer = buffer.slice(sep + 2);
-          if (block.trim()) handleEvent(block);
-        }
-      }
-      // Flush any trailing buffered event (no terminating blank line).
-      buffer += decoder.decode();
-      if (buffer.trim()) handleEvent(buffer);
-    } catch (streamErr) {
-      console.error(LOG_PREFIX, "stream read error:", streamErr);
-      try { reader.cancel(); } catch (_) {}
-      // If we already have partial text, surface it; otherwise rethrow.
-      if (full.trim()) {
-        try { onError?.(streamErr); } catch (_) {}
-      } else {
-        throw streamErr;
-      }
-    }
-
-    const result = full.trim();
-    if (!result) {
-      throw new Error("The Skald received an empty reply from the AI.");
-    }
-    try { onDone?.(result); } catch (_) {}
-    return result;
+    return this._consumeStreamingResponse(response, handlers);
   }
 };
 

@@ -34,6 +34,15 @@
         "name": "API Endpoint",
         "hint": "Chat-completions endpoint URL. Auto-filled when you pick a provider above; defaults to the Abacus AI endpoint https://routellm.abacus.ai/v1/chat/completions. Edit directly only when using a 'Custom' provider or backend."
       },
+      "connectionMode": {
+        "name": "Connection Mode",
+        "hint": "How the Skald reaches the AI. 'Auto' (recommended) tries the same-origin server hook first and automatically falls back to a direct browser→AI request if the hook isn't loaded — this is what makes the Skald work on hosted/managed Foundry where you can't add the server-side launch flag. 'Server hook only' forces the hook (shows a setup error if it's missing). 'Direct (browser→AI)' always calls the AI endpoint straight from the browser. World-scoped, GM-only. Default: Auto.",
+        "choices": {
+          "auto": "Auto (server hook, then direct fallback) — recommended",
+          "server": "Server hook only",
+          "direct": "Direct (browser → AI)"
+        }
+      },
       "intensity": {
         "name": "Skald Intensity",
         "hint": "How dramatic and verbose the Skald speaks (1 = terse, 10 = full saga-singer operatic)."
@@ -178,7 +187,8 @@
 
     "notifications": {
       "providerPresetApplied": "The Eternal Skald: AI Provider set to {provider}. API Endpoint → {endpoint}",
-      "abacusEndpointMigrated": "The Eternal Skald: corrected your Abacus AI endpoint to the working https://routellm.abacus.ai/v1/chat/completions."
+      "abacusEndpointMigrated": "The Eternal Skald: corrected your Abacus AI endpoint to the working https://routellm.abacus.ai/v1/chat/completions.",
+      "directFallback": "The Eternal Skald: server hook not found — using direct browser→AI mode. This is normal on hosted Foundry. (Configure via Connection Mode in module settings.)"
     },
 
     "ui": {

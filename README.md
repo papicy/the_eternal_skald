@@ -4,9 +4,11 @@ An AI-powered storyteller, oracle interpreter, and tactical enemy controller for
 
 Powered by the **Abacus AI ChatLLM** platform (Gemini 3.0 Flash by default).
 
-> ⚠️ **Alpha / Development Version (v0.10.11)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
+> ⚠️ **Alpha / Development Version (v0.10.12)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
 
 As of **v0.3.0**, the Skald integrates directly with the official [**foundry-ironsworn**](https://foundryvtt.com/packages/foundry-ironsworn) system: it reads your character's stats and meters, *suggests* the right Ironsworn move, triggers the system's own dice mechanics on one click, narrates the official strong-hit / weak-hit / miss outcome, and can optionally apply mechanical effects. See [Ironsworn Integration](#ironsworn-integration) below. The module still works standalone in any system — Ironsworn features simply activate when the system is present.
+
+**New in v0.10.12 — Works on hosted Foundry (direct browser→AI fallback).** The Skald used to reach the AI *only* through its same-origin server hook (`/skald-api/chat`), which requires starting Foundry with the `node --import …` flag. On hosted/managed Foundry (e.g. *Foundry VTT on Abacus*) you usually can't add that flag, so the hook never loaded and every AI call hit Foundry's own **404 (Not Found)** page — visible in the browser console as `…/skald-api/chat … 404`. The Skald now **automatically falls back to calling the AI directly from your browser** when the hook isn't present, so it works out of the box on hosted platforms. A new **Connection Mode** setting (*Auto* — default, *Server hook only*, *Direct browser→AI*) lets you control this. The default Abacus AI endpoint allows the cross-origin (CORS) request, so no extra setup is needed; the server hook remains supported and optional for self-hosters who prefer to keep the API key off the client.
 
 **New in v0.10.11 — Vow & journey completion fix.** Fulfilling a vow or reaching a destination now closes the **correct track**. Previously, completing a quest right after a *Fulfill Your Vow* / *Reach Your Destination* roll could fail with «Track "Reach Your Destination" not found», because the completion logic searched for a track named after the **move** rather than your real, player-named vow or journey. The Skald now remembers which track a progress move actually rolled against and closes *that* one. If the AI is unsure of the exact name (or omits it), completion falls back to the most recent open vow/journey of the matching kind — so a fulfilled vow always closes the track you meant.
 
@@ -36,9 +38,11 @@ https://raw.githubusercontent.com/papicy/eternal_skald/main/module.json
 
 Click **Install**, then activate the module in your world.
 
-### 2. Add `--import` to your Foundry startup
+### 2. (Optional) Add `--import` to your Foundry startup
 
-The Skald makes AI calls **server-side** so there are no CORS or proxy issues. This requires one change to how you start Foundry — add the `--import` flag:
+> **As of v0.10.12 this step is optional.** By default (**Connection Mode → Auto**) the Skald automatically calls the AI directly from your browser when the server hook isn't loaded, so it works on hosted/managed Foundry with **no startup changes**. Use the server hook below only if you self-host and prefer to keep your API key off the client / route AI traffic through the server.
+
+The server hook makes AI calls **server-side** so the API key never reaches the browser and there are no CORS considerations. To enable it, add the `--import` flag to how you start Foundry:
 
 **Linux / macOS:**
 ```bash
@@ -507,7 +511,7 @@ await skald.rag.clear();                       // wipe the whole vector store
 ## Troubleshooting
 
 **"The Eternal Skald server hook is not loaded (404)"**
-The `--import` flag isn't in your Foundry startup command, or the path is wrong. See [Setup step 2](#2-add---import-to-your-foundry-startup).
+This only appears if **Connection Mode** is set to **Server hook only** and the `--import` flag isn't in your Foundry startup command (or the path is wrong). On **Auto** (the default) the Skald silently falls back to direct browser→AI mode instead, so you won't see this error. To use the hook, see [Setup step 2](#2-optional-add---import-to-your-foundry-startup); otherwise switch Connection Mode to **Auto** or **Direct (browser → AI)**.
 
 **No `⚔️ Skald | v0.6.0` line in Foundry's console output**
 The hook file isn't being loaded. Check the path is absolute and correct. Run it in a terminal to see Node.js errors.
@@ -518,8 +522,8 @@ Go to Module Settings → The Eternal Skald and enter your key.
 **`/skald-help` says "not a valid chat command"**
 Use `!skald-help` (exclamation mark, not slash).
 
-**Hosted Foundry (The Forge, etc.)**
-If you can't modify the startup command, this module won't work on hosted platforms that don't support `--import`. Contact your hosting provider to ask about custom Node flags.
+**Hosted Foundry (The Forge, Foundry VTT on Abacus, etc.)**
+You can't add the `--import` flag, so the server hook won't load — **that's fine as of v0.10.12.** Leave **Connection Mode** on **Auto** (the default) and the Skald will automatically call the AI directly from your browser. If you ever see the old `/skald-api/chat … 404 (Not Found)` console error and the Skald still doesn't reply, open Module Settings → The Eternal Skald and set **Connection Mode** to **Direct (browser → AI)** explicitly, then confirm your **API Key** is set. (Direct mode needs an endpoint that allows cross-origin browser requests; the default Abacus AI endpoint does.)
 
 **Auto-narration doesn't fire after an Ironsworn roll**
 Enable **Debug Logging** in Module Settings and check the browser console. As of **v0.3.0**, roll detection reads the `foundry-ironsworn` roll card HTML (the system no longer attaches module flags), logs every detection step, and waits for the configurable **Narration Delay** (default 2000ms) before narrating so dice animations can finish. Make sure **Auto-Narrate Moves** is enabled and you're logged in as the GM. If you still see no `Detected Ironsworn roll` log line, copy the console output and open an issue.

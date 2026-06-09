@@ -13,6 +13,41 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.12] — 2026-06-09
+
+### Fixed
+- **The Skald now works on hosted/managed Foundry where the server hook cannot
+  be loaded.** Previously, every AI call went *only* through the same-origin
+  server hook (`POST /skald-api/chat` and `/skald-api/chat-stream`), which is
+  installed by starting Foundry with `node --import …/eternal-skald-server.mjs`.
+  On hosted platforms (e.g. *Foundry VTT on Abacus*) users can't add that launch
+  flag, so the hook never loads and every request hit Foundry's own **404 (Not
+  Found)** page — surfacing in the browser console as
+  `…/skald-api/chat … 404 (Not Found)` and leaving the Skald unable to reach the
+  AI. The client now **automatically falls back to calling the AI endpoint
+  directly from the browser** when the hook isn't present.
+
+### Added
+- **Direct browser→AI path.** `Client._directChat()` and
+  `Client._directChatStream()` send the raw OpenAI-style chat-completions body
+  straight to the configured `apiEndpoint` with an `Authorization: Bearer
+  <apiKey>` header. The default Abacus AI endpoint
+  (`https://routellm.abacus.ai/v1/chat/completions`) returns permissive CORS
+  headers, so this works from the browser with no setup.
+- **`connectionMode` world setting** (GM-only): `auto` (default — try the
+  server hook, fall back to direct on a 404/network error), `server` (hook
+  only; shows the `--import` setup error if missing), and `direct` (always call
+  the AI directly from the browser). A one-time GM notice is posted the first
+  time `auto` falls back to direct mode.
+
+### Changed
+- The streaming SSE reader was extracted into a shared
+  `Client._consumeStreamingResponse()` helper so the server-hook and direct
+  streaming paths use one implementation.
+- `chat()` and `chatStream()` now branch on `connectionMode`; their
+  hook-missing errors additionally point users at the new *Direct* mode. No
+  behavioural change for installs that already run the server hook.
+
 ## [0.10.11] — 2026-06-09
 
 ### Fixed
@@ -816,6 +851,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.12]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.12
 [0.10.11]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.11
 [0.10.10]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.10
 [0.10.9]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.9
