@@ -1249,8 +1249,15 @@ INITIATIVE state telling who is in control. You drive these with:
         Mark a vow COMPLETE when it is fulfilled in the fiction — i.e. after
         a successful "Fulfill Your Vow" move, or whenever the goal of the vow
         is achieved. Use the vow's EXACT name. This is the ONLY way a vow gets
-        closed, so always emit it when a vow is fulfilled. (You may also use
-        complete_journey <Name> to close a finished journey track.)
+        closed, so always emit it when a vow is fulfilled.
+   [[EFFECT: create_journey <Name> <rank> <description>]]
+        Begin a journey progress track when the character undertakes a journey
+        toward a destination (the journey counterpart of create_vow).
+   [[EFFECT: complete_journey <Journey Name>]]
+        Mark a journey COMPLETE when the destination is reached in the fiction —
+        i.e. after a successful "Reach Your Destination" move, or whenever the
+        journey's goal is achieved. Use the journey's EXACT name. This is the
+        ONLY way a journey gets closed, so always emit it when a journey ends.
    [[EFFECT: initiative <gain|lose>]]
         Record whether the character now has initiative ("in control",
         gain) or has lost it ("in a bad spot", lose).
@@ -3553,7 +3560,7 @@ const Integration = {
 
     // ---- Combat / quest track directives (v0.3.0) ----
     // Accept underscores or spaces: "create_combat" or "create combat".
-    const m = body.match(/^(create[_\s]combat|create[_\s]vow|initiative|end[_\s]combat|complete[_\s]vow|fulfill[_\s]vow|end[_\s]vow|complete[_\s]track|complete[_\s]journey|end[_\s]journey)\b\s*(.*)$/i);
+    const m = body.match(/^(create[_\s]combat|create[_\s]vow|create[_\s]journey|begin[_\s]journey|start[_\s]journey|undertake[_\s]journey|initiative|end[_\s]combat|complete[_\s]vow|fulfill[_\s]vow|end[_\s]vow|complete[_\s]track|complete[_\s]journey|end[_\s]journey)\b\s*(.*)$/i);
     if (m) {
       const verb = m[1].toLowerCase().replace(/\s+/g, "_");
       const rest = (m[2] || "").trim();
@@ -3573,6 +3580,12 @@ const Integration = {
       if (verb === "create_vow") {
         const { name, rank, desc } = this._splitNameRank(rest);
         return name ? { kind: "create_vow", name, rank, description: desc } : null;
+      }
+
+      // Begin a journey progress track (the journey counterpart of create_vow).
+      if (/^(create_journey|begin_journey|start_journey|undertake_journey)$/.test(verb)) {
+        const { name, rank, desc } = this._splitNameRank(rest);
+        return name ? { kind: "create_journey", name, rank, description: desc } : null;
       }
 
       if (verb === "end_combat") {
@@ -3873,15 +3886,23 @@ const Integration = {
       const boxes = typeof track.boxes === "number" ? track.boxes : Math.floor((track.current ?? 0) / 4);
       const rank = track.rank ? `<span class="es-track-rank">${escapeHtml(String(track.rank))}</span>` : "";
       const done = track.completed ? " ✓" : "";
-      // A "vow"-subtype track (or legacy type "vow") gets vow-flavoured labels.
-      const isVow = String(track.subtype || track.type || "").toLowerCase() === "vow";
-      const completeLabel = isVow ? "Fulfill Vow (mark complete)" : "Mark Complete";
+      // Classify the track so we can flavour the labels. A track is a vow or a
+      // journey if EITHER the system subtype/type says so OR our own trackKind
+      // flag (set when the Skald created it) says so — the latter catches
+      // journeys the system stores as a generic "progress" track.
+      const klass   = String(track.kind || track.subtype || track.type || "").toLowerCase();
+      const isVow     = klass === "vow";
+      const isJourney = klass === "journey";
+      const noun = isVow ? "vow" : isJourney ? "journey" : "track";
+      const completeLabel = isVow     ? "Fulfill Vow (mark complete)"
+                          : isJourney ? "Reach Destination (mark complete)"
+                          :             "Mark Complete";
 
       // Action buttons: marking progress is always available; "Mark Complete"
       // is offered only while the track is still open. A completed track shows
       // a static note instead so the player has clear feedback.
       const buttons = track.completed
-        ? `<p class="es-track-complete-note"><em>✓ This ${isVow ? "vow" : "track"} is complete.</em></p>`
+        ? `<p class="es-track-complete-note"><em>✓ This ${noun} is complete.</em></p>`
         : `
           <div class="es-move-buttons">
             <button type="button" class="es-btn es-btn-roll"
@@ -3899,7 +3920,8 @@ const Integration = {
              <span class="es-track-ticks">(${track.current ?? 0}/40 ticks)</span></p>
           ${buttons}
         </div>`;
-      await Chat.postSkald(body, { variant: "suggest", title: "Progress Track" });
+      const cardTitle = isVow ? "Vow" : isJourney ? "Journey" : "Progress Track";
+      await Chat.postSkald(body, { variant: "suggest", title: cardTitle });
     } catch (e) {
       console.error(LOG_PREFIX, "progress-track link failed", e);
       ui.notifications?.error(`${SKALD_NAME}: ${e?.message ?? e}`);
@@ -4573,6 +4595,20 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
             if (r?.ok) {
               applied.push(`vow “${eff.name}” sworn [${rank}]`);
               this._notifyCombat(`📜 Vow sworn: ${eff.name} (${rank})`);
+            }
+            break;
+          }
+          case "create_journey": {
+            const rank = IronswornController.normalizeRank(eff.rank || "formidable");
+            const existing = IronswornController.getProgressTrack(actor, eff.name);
+            if (existing && !foundry.utils.getProperty(existing, "system.completed")) {
+              applied.push(`journey “${eff.name}” already under way`);
+              break;
+            }
+            r = await IronswornController.createProgressTrack(actor, eff.name, "journey", rank, eff.description);
+            if (r?.ok) {
+              applied.push(`journey “${eff.name}” begun [${rank}]`);
+              this._notifyCombat(`🧭 Journey begun: ${eff.name} (${rank})`);
             }
             break;
           }

@@ -311,6 +311,12 @@ export const IronswornController = {
           // Items distinguished by `system.subtype` ("vow", "journey", …),
           // so surface it — callers can no longer rely on `type` alone.
           subtype: foundry.utils.getProperty(item, "system.subtype") ?? null,
+          // Our own classification flag (set when the Skald created the track):
+          // "vow" | "journey" | "combat" | "bond" | …. Lets callers identify a
+          // journey even when the system stored it as a generic progress track.
+          kind: item.getFlag?.(ES_SCOPE, "trackKind")
+             ?? foundry.utils.getProperty(item, `flags.${ES_SCOPE}.trackKind`)
+             ?? null,
           rank: rank ?? null,
           current: typeof current === "number" ? current : 0,
           boxes: typeof current === "number" ? Math.floor(current / 4) : 0,
@@ -697,10 +703,14 @@ export const IronswornController = {
     // Ironsworn stores vows/bonds/foes/journeys as embedded Items. The
     // concrete `type` and `subtype` vary by data-model revision, so probe
     // the registered types and tag what the system actually expects.
-    //   combat/journey → progress-style track (subtype "progress")
-    //   vow            → subtype "vow"
-    //   bond           → subtype "bond"
-    const subtypeMap = { combat: "progress", journey: "progress", vow: "vow", bond: "bond" };
+    //   combat  → progress-style track (subtype "progress")
+    //   vow     → subtype "vow"     (special-cased by the system's Fulfill move)
+    //   journey → subtype "journey" (a free-form subtype string; the data model
+    //             accepts any value and only special-cases "vow", so tagging
+    //             journeys lets us identify and flavour them without breaking
+    //             the system)
+    //   bond    → subtype "bond"
+    const subtypeMap = { combat: "progress", journey: "journey", vow: "vow", bond: "bond" };
     const subtype = subtypeMap[kind] ?? "progress";
     const itemType = this._pickItemType(
       kind === "vow"  ? ["vow", "progress"]
