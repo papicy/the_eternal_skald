@@ -339,6 +339,35 @@
   opacity: 0.8;
 }
 
+/* --- Inline move suggestion line (v0.10.8) ---
+ * Reverts the separate "A Move Beckons" / "What Comes Next" button-cards back
+ * to a subtle, inline clickable link woven into the narration prose. */
+.es-inline-suggest {
+  margin: 6px 0 2px;
+  font-style: italic;
+  opacity: 0.92;
+  line-height: 1.5;
+}
+.es-inline-suggest .es-move-reason {
+  font-style: italic;
+  opacity: 0.8;
+}
+.es-entity-link.es-move-choose-link {
+  color: var(--es-gold-2, #e8c178);
+  cursor: pointer;
+  text-decoration: none;
+  border-bottom: 1px dotted rgba(214, 168, 90, 0.45);
+}
+.es-entity-link.es-move-choose-link:hover {
+  color: var(--es-gold, #d6a85a);
+  border-bottom-color: var(--es-gold, #d6a85a);
+}
+.es-entity-link.es-move-choose-link > i {
+  font-size: 0.82em;
+  margin-right: 3px;
+  opacity: 0.8;
+}
+
 /* --- Inline entity links: oracles / progress tracks / assets (v0.7.0) ---
  * Same affordance as move links (dotted underline + leading icon), tinted
  * per kind so the player can tell at a glance what a link will do. */

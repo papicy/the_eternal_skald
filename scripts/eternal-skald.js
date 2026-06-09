@@ -3747,88 +3747,94 @@ const Integration = {
     return suggestion;
   },
 
-  /** Post the interactive "Roll this move / Choose different" card. */
-  async postSuggestionCard(suggestion) {
+  /**
+   * Build the inline clickable-link markup for one suggested move (v0.10.8).
+   *
+   * This is the "old way" the Skald offered moves: a subtle, inline clickable
+   * link woven into the narration text — NOT a separate, button-laden
+   * "A Move Beckons" card. Clicking the link rolls the move through the same
+   * progress-aware {@link IronswornController.triggerMove} path the card used
+   * (so progress moves like "Reach Your Destination" / "Fulfill Your Vow"
+   * roll against their track rather than dead-ending). The move's Datasworn ID
+   * is carried so the system's own dialog can be opened for ordinary moves.
+   *
+   * @param {{name:string, stat?:string, reason?:string}} suggestion
+   * @returns {string} HTML fragment (empty string when the move can't resolve).
+   */
+  _inlineMoveLink(suggestion) {
+    if (!suggestion?.name) return "";
     const move = IronswornController._resolveMove(suggestion.name);
     const label = move?.name ?? suggestion.name;
-    const stat = suggestion.stat || (move?.stats?.find(s => s !== "progress" && s !== "supply")) || "";
-    const statLabel = stat ? ` <span class="es-move-stat">+${escapeHtml(stat)}</span>` : "";
-    const reason = suggestion.reason ? `<p class="es-move-reason"><em>${escapeHtml(suggestion.reason)}</em></p>` : "";
+    const dsid = move?.id ?? "";
+    // Progress moves take no stat; otherwise prefer the suggested/first stat.
+    const stat = suggestion.stat && suggestion.stat !== "—"
+      ? suggestion.stat
+      : (move?.stats?.find(s => s !== "progress" && s !== "supply") || "");
+    const icon = escapeHtml(EntityLinker?._styleFor?.("move")?.icon ?? "fa-dice-d20");
+    return `<a class="es-entity-link es-move-link es-move-suggest-link" ` +
+      `data-skald-action="roll-move" data-es-kind="move" ` +
+      `data-move="${escapeHtml(label)}" data-stat="${escapeHtml(stat)}" ` +
+      `data-move-dsid="${escapeHtml(dsid)}" ` +
+      `data-tooltip="Ironsworn move: ${escapeHtml(label)} — click to roll">` +
+      `<i class="fa-solid ${icon}"></i>${escapeHtml(label)}</a>`;
+  },
 
-    const body = `
-      <div class="es-move-suggest">
-        <p>The Skald counsels a move:</p>
-        <p class="es-move-name"><strong>${escapeHtml(label)}</strong>${statLabel}</p>
-        ${reason}
-        <div class="es-move-buttons">
-          <button type="button" class="es-btn es-btn-roll"
-                  data-skald-action="roll-move"
-                  data-move="${escapeHtml(label)}"
-                  data-stat="${escapeHtml(stat)}">⚔ Roll ${escapeHtml(label)}</button>
-          <button type="button" class="es-btn es-btn-choose"
-                  data-skald-action="choose-move"
-                  data-stat="${escapeHtml(stat)}">🎲 Choose Different Move</button>
-        </div>
-      </div>`;
-
+  /**
+   * Render the Skald's move suggestion as an INLINE clickable link line
+   * appended to the narration (v0.10.8 — reverts the separate "A Move Beckons"
+   * card). The suggested move reads as part of the narrative prose and is
+   * clickable to roll, matching the inline entity-link style used throughout
+   * the chronicle. Degrades to nothing when the move can't be resolved.
+   */
+  async postSuggestionCard(suggestion) {
+    const link = this._inlineMoveLink(suggestion);
+    if (!link) return null;
+    const reason = suggestion?.reason
+      ? ` <span class="es-move-reason"><em>— ${escapeHtml(suggestion.reason)}</em></span>`
+      : "";
+    const body = `<p class="es-inline-suggest">The path forward: ${link}${reason}</p>`;
     return Chat.postSkald(body, {
       variant: "suggest",
-      title: "A Move Beckons",
-      flags: { suggestion: { name: label, stat } }
+      flags: { suggestion: { name: suggestion?.name, stat: suggestion?.stat } }
     });
   },
 
   /**
-   * Post the post-roll "follow-up moves" card (v1.x).
+   * Render the post-roll follow-up move suggestions as INLINE clickable links
+   * (v0.10.8 — reverts the separate "What Comes Next" button-card).
    *
-   * Mirrors {@link postSuggestionCard} but for AFTER a move resolves: it
-   * offers a Roll button for each of the (already validated, real) follow-up
-   * moves the Skald suggested, and ALWAYS appends the same "roll any other
-   * move" option used in pre-roll narration (the `choose-move` action that
-   * opens {@link showMoveSelector}). The card is shown even when no follow-up
-   * moves were suggested, so the player can always reach the move selector.
+   * After a move resolves, the Skald offers the (already validated, real)
+   * follow-up moves it suggested as subtle inline links woven into a single
+   * "the saga calls you onward" line, plus a final inline "any other move"
+   * link that opens the move selector. Each move link rolls through the
+   * progress-aware {@link IronswornController.triggerMove} path. The line is
+   * shown even when no follow-up moves were suggested, so the player can
+   * always reach the move selector.
    *
    * @param {Array<{name,stat,reason}>} suggestions
    */
   async postFollowupSuggestionCard(suggestions) {
     const list = (Array.isArray(suggestions) ? suggestions : []).filter(Boolean);
 
-    const moveButtons = list.map(s => {
-      const move = IronswornController._resolveMove(s.name);
-      const label = move?.name ?? s.name;
-      const stat = s.stat || (move?.stats?.find(st => st !== "progress" && st !== "supply")) || "";
-      const statLabel = stat ? ` <span class="es-move-stat">+${escapeHtml(stat)}</span>` : "";
-      const reason = s.reason
-        ? `<p class="es-move-reason"><em>${escapeHtml(s.reason)}</em></p>`
-        : "";
-      return `
-        <div class="es-followup-move">
-          <button type="button" class="es-btn es-btn-roll"
-                  data-skald-action="roll-move"
-                  data-move="${escapeHtml(label)}"
-                  data-stat="${escapeHtml(stat)}">⚔ Roll ${escapeHtml(label)}${statLabel}</button>
-          ${reason}
-        </div>`;
-    }).join("");
+    const links = list.map(s => this._inlineMoveLink(s)).filter(Boolean);
+    const chooseLink = `<a class="es-entity-link es-move-link es-move-choose-link" ` +
+      `data-skald-action="choose-move" data-stat="" ` +
+      `data-tooltip="Roll any other Ironsworn move">` +
+      `<i class="fa-solid fa-dice"></i>any other move</a>`;
 
-    const intro = list.length
-      ? `<p>The saga calls you onward — you might:</p>`
-      : `<p>The saga calls you onward.</p>`;
-
-    const body = `
-      <div class="es-move-suggest es-followup-suggest">
-        ${intro}
-        <div class="es-move-buttons es-followup-buttons">
-          ${moveButtons}
-          <button type="button" class="es-btn es-btn-choose"
-                  data-skald-action="choose-move"
-                  data-stat="">🎲 Roll Any Other Move</button>
-        </div>
-      </div>`;
+    let body;
+    if (links.length) {
+      const joined = links.length === 2
+        ? `${links[0]} or ${links[1]}`
+        : links.join(", ");
+      body = `<p class="es-inline-suggest">The saga calls you onward — you might ${joined} ` +
+        `(or ${chooseLink}).</p>`;
+    } else {
+      body = `<p class="es-inline-suggest">The saga calls you onward — ${chooseLink}.</p>`;
+    }
 
     return Chat.postSkald(body, {
       variant: "suggest",
-      title: "What Comes Next",
       flags: { suggestion: { followups: list.map(s => ({ name: s.name, stat: s.stat })) } }
     });
   },
@@ -3878,17 +3884,26 @@ const Integration = {
             // An inline asset link — open the asset's card from the compendium.
             await this.showAssetLink(assetUuid || asset);
           } else if (action === "link-move") {
-            // An inline move link in narration — open the *system's* own
-            // official move dialog directly (the exact pre-roll dialog the
-            // foundry-ironsworn system shows for that move), resolved via its
-            // Datasworn ID. Degrade gracefully: fall back to the interactive
-            // suggestion card if the system/dialog can't be reached.
+            // An inline move link in narration — roll it through the
+            // progress-aware triggerMove path (v0.10.8). For ordinary moves
+            // this opens the system's own official pre-roll dialog (resolved
+            // via the Datasworn ID), exactly as before; for PROGRESS moves
+            // ("Reach Your Destination" / "Fulfill Your Vow") it rolls the
+            // matching track's progress score instead of dead-ending in the
+            // generic dialog (which has no stat and no track context). Degrade
+            // gracefully with a GM-visible note when the roll can't be made.
             if (!this.active()) {
               ui.notifications?.info(`${SKALD_NAME}: ${move} — Ironsworn system not active.`);
             } else {
               const ref = moveDsId || move;
-              const res = await IronswornController.openMoveDialog(ref);
-              if (!res?.ok) await this.postSuggestionCard({ name: move });
+              const actor = IronswornController.getActiveCharacter();
+              const res = await IronswornController.triggerMove(ref, { actor, stat });
+              if (!res?.ok) {
+                await Chat.postSystem(
+                  `<strong>The dice would not answer:</strong> ${escapeHtml(res?.error ?? "unknown error")}`,
+                  { gmWhisper: true }
+                );
+              }
             }
           }
         } catch (e) {
@@ -4624,6 +4639,36 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
     }
   },
 
+  /**
+   * (v0.10.8) GM-only advisory when a track-lifecycle effect can't run because
+   * there is no active character. Previously these directives failed silently,
+   * so a sworn vow / begun journey simply never appeared with no explanation.
+   */
+  async _warnNoActor(action, name) {
+    try {
+      await Chat.postSystem(
+        `<strong>Could not ${escapeHtml(action)}${name ? ` “${escapeHtml(name)}”` : ""}:</strong> ` +
+        `no active character. Select your character's token (or assign a character to your user) and try again.`,
+        { gmWhisper: true }
+      );
+    } catch (_) { /* advisory only */ }
+  },
+
+  /**
+   * (v0.10.8) GM-only advisory when a progress-track create actually failed
+   * (e.g. a data-model validation error). Surfacing the reason makes a
+   * "vows aren't being created" report diagnosable instead of silent.
+   */
+  async _warnTrackCreateFailed(kind, name, error) {
+    try {
+      await Chat.postSystem(
+        `<strong>Could not create the ${escapeHtml(kind)} “${escapeHtml(name ?? "")}”:</strong> ` +
+        `${escapeHtml(error ?? "unknown error")}`,
+        { gmWhisper: true }
+      );
+    } catch (_) { /* advisory only */ }
+  },
+
   /** Apply parsed [[EFFECT:…]] directives via the Ironsworn controller. */
   async applyEffects(effects, actor) {
     const applied = [];
@@ -4724,10 +4769,13 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
               const tag = source === "compendium" ? " [from compendium]" : source === "custom" ? " [custom]" : "";
               applied.push(`⚔ began combat “${eff.name}” [${rank}]${tag}`);
               this._notifyCombat(`⚔ Combat track created: ${eff.name} (${rank}${source === "compendium" ? ", official" : ""})`);
+            } else {
+              await this._warnTrackCreateFailed("combat", eff.name, r?.error);
             }
             break;
           }
           case "create_vow": {
+            if (!actor) { await this._warnNoActor("swear the vow", eff.name); break; }
             const rank = IronswornController.normalizeRank(eff.rank || "formidable");
             const existing = IronswornController.getProgressTrack(actor, eff.name);
             if (existing && !foundry.utils.getProperty(existing, "system.completed")) {
@@ -4738,10 +4786,13 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
             if (r?.ok) {
               applied.push(`vow “${eff.name}” sworn [${rank}]`);
               this._notifyCombat(`📜 Vow sworn: ${eff.name} (${rank})`);
+            } else {
+              await this._warnTrackCreateFailed("vow", eff.name, r?.error);
             }
             break;
           }
           case "create_journey": {
+            if (!actor) { await this._warnNoActor("begin the journey", eff.name); break; }
             const rank = IronswornController.normalizeRank(eff.rank || "formidable");
             const existing = IronswornController.getProgressTrack(actor, eff.name);
             if (existing && !foundry.utils.getProperty(existing, "system.completed")) {
@@ -4752,6 +4803,8 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
             if (r?.ok) {
               applied.push(`journey “${eff.name}” begun [${rank}]`);
               this._notifyCombat(`🧭 Journey begun: ${eff.name} (${rank})`);
+            } else {
+              await this._warnTrackCreateFailed("journey", eff.name, r?.error);
             }
             break;
           }

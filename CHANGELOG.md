@@ -13,6 +13,41 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.8] — 2026-06-09
+
+### Changed
+- **Move suggestions are once again inline clickable links inside the
+  narration.** The separate *A Move Beckons* (pre-roll) and *What Comes Next*
+  (follow-up) button-cards have been reverted in favour of the original style:
+  the suggested move(s) are woven directly into the chat text as one-click
+  entity links (e.g. *"The path forward: Face Danger."*). This restores the
+  cleaner, less intrusive presentation while keeping every suggestion validated
+  against the real Ironsworn / Starforged move catalogue.
+- **Progress-track ranks are now stored as proper numeric challenge ranks.**
+  `createProgressTrack` writes `system.rank` as the numeric value the
+  `foundry-ironsworn` `ChallengeRank` field expects (e.g. *formidable* → `3`)
+  rather than relying on string coercion, making vow / journey / combat track
+  creation more robust.
+
+### Fixed
+- **Inline move links now roll progress moves correctly.** Clicking an inline
+  move suggestion previously routed through the official move dialog, which
+  dead-ended progress moves — so *Reach Your Destination* (and other progress
+  moves) failed with *"Could not trigger … (no dialog and no rollable stat)."*
+  Inline links now route through the same progress-aware trigger the cards used,
+  so progress moves roll the active track's progress score against the challenge
+  dice as intended.
+- **Journey-track lookup now finds legacy and hand-made journeys.** The "newest
+  open journey" resolver only matched tracks carrying the Skald's own journey
+  flag, missing journeys created before that flag existed (or made by hand).
+  It now falls back to any open `progress`-subtype track that is not a vow,
+  bond or combat track, so older journeys resolve for *Reach Your Destination*.
+- **Vow / journey creation no longer fails silently.** When the Skald is asked
+  to create a vow or journey but there is no active character — or the
+  `foundry-ironsworn` data model rejects the item — it now whispers a GM-only
+  advisory explaining exactly why (e.g. *"no active character — select a token
+  or assign a character"*) instead of doing nothing with no feedback.
+
 ## [0.10.7] — 2026-06-09
 
 ### Fixed
@@ -683,6 +718,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.8]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.8
 [0.10.7]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.7
 [0.10.6]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.6
 [0.10.5]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.5

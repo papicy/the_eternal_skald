@@ -46,6 +46,14 @@ const RANK_NUM = Object.freeze({
   1: "troublesome", 2: "dangerous", 3: "formidable", 4: "extreme", 5: "epic"
 });
 
+/* Inverse of RANK_NUM: canonical rank word → the NUMBER 1–5 the
+ * foundry-ironsworn ChallengeRank field stores. Used when creating progress
+ * tracks so we write the numeric value the data model expects directly,
+ * rather than relying on the system's string-coercion (_cast) path. */
+const RANK_TO_NUM = Object.freeze({
+  troublesome: 1, dangerous: 2, formidable: 3, extreme: 4, epic: 5
+});
+
 /* Debug logging is toggled by eternal-skald.js via setDebug(). */
 let DEBUG = false;
 
@@ -736,10 +744,15 @@ export const IronswornController = {
     :                   ["progress", "foe", "vow"]
     );
 
+    // foundry-ironsworn's ChallengeRank is a NumberField (1–5). Write the
+    // numeric value directly so document creation never depends on the
+    // system's string coercion (which could differ across revisions); keep the
+    // canonical rank WORD around for our own logging / return value.
+    const rankNum = RANK_TO_NUM[rank] ?? RANK_TO_NUM.formidable;
     const data = {
       name,
       type: itemType,
-      system: { rank, current: 0, completed: false, subtype },
+      system: { rank: rankNum, current: 0, completed: false, subtype },
       flags: { [ES_SCOPE]: { trackKind: kind, createdBy: "eternal-skald" } }
     };
     if (description) {
@@ -824,23 +837,38 @@ export const IronswornController = {
   _newestOpenTrackItem(actor, kind) {
     if (!actor?.items) return null;
     const want = String(kind ?? "").toLowerCase();
-    const matches = [];
+    const strong = [];   // exact, confident matches (our flag / system subtype)
+    const fallback = []; // best-effort matches (legacy / hand-made tracks)
     for (const item of actor.items) {
       if (foundry.utils.getProperty(item, "system.completed")) continue;
+      // Only real progress-track items can carry a progress score to roll.
+      if (item.type !== "progress") continue;
       const flagKind = (item.getFlag?.(ES_SCOPE, "trackKind")
                      ?? foundry.utils.getProperty(item, `flags.${ES_SCOPE}.trackKind`)
                      ?? "").toLowerCase();
       const subtype = String(foundry.utils.getProperty(item, "system.subtype") ?? "").toLowerCase();
-      // For vows, the system's own "vow" subtype also counts. Journeys are
-      // stored as plain "progress" tracks, so they are identified ONLY by our
-      // trackKind flag.
-      const isMatch = flagKind === want || (want === "vow" && subtype === "vow");
-      if (isMatch) matches.push(item);
+
+      if (flagKind === want) { strong.push(item); continue; }
+      // Vows: the system's own "vow" subtype is an equally strong signal.
+      if (want === "vow" && subtype === "vow") { strong.push(item); continue; }
+
+      // FALLBACK — find tracks the Skald didn't create (or created before the
+      // trackKind flag existed). Journeys are stored as plain "progress"
+      // subtype tracks, so a legacy / hand-made journey carries no journey
+      // flag. Treat any open, unclassified "progress" track (one that is NOT a
+      // vow, bond, or an active combat foe) as a candidate journey so that
+      // "Reach Your Destination" can still roll against it.
+      if (want === "journey"
+          && subtype !== "vow" && subtype !== "bond"
+          && flagKind !== "vow" && flagKind !== "bond" && flagKind !== "combat") {
+        fallback.push(item);
+      }
     }
-    if (!matches.length) return null;
+    const pool = strong.length ? strong : fallback;
+    if (!pool.length) return null;
     // "Newest" by creation timestamp when available, else last in iteration.
-    matches.sort((a, b) => (b._stats?.createdTime ?? 0) - (a._stats?.createdTime ?? 0));
-    return matches[0];
+    pool.sort((a, b) => (b._stats?.createdTime ?? 0) - (a._stats?.createdTime ?? 0));
+    return pool[0];
   },
 
   /**
