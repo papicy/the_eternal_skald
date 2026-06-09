@@ -13,6 +13,32 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.2] — 2026-06-09
+
+### Added
+- **Journeys are now first-class progress tracks, just like vows.** The vow
+  completion machinery from 0.10.1 has been extended to journeys end-to-end:
+  - **`create_journey` AI effect.** The Skald can now begin a journey track
+    when the character undertakes a journey —
+    `[[EFFECT: create_journey <Name> <rank> <description>]]` (synonyms:
+    `begin_journey`, `start_journey`, `undertake_journey`) — mirroring
+    `create_vow`.
+  - **`complete_journey` AI effect** (already accepted, now documented as a
+    first-class directive alongside `end_journey`). Marks a journey complete
+    when its destination is reached in the fiction.
+  - **Manual "Reach Destination (mark complete)" button.** Progress-track
+    cards now detect journeys and show a journey-flavoured completion button
+    (the journey counterpart of the vow's "Fulfill Vow" button). Works even
+    when AI-applied effects are disabled, and the card title and completion
+    note read "Journey" instead of the generic "Progress Track".
+
+### Changed
+- **Robust journey identification.** Journeys created by the Skald are now
+  tagged with `system.subtype === "journey"`, and `getProgressTracks` also
+  surfaces the module's own `trackKind` flag — so a journey is recognised even
+  when the system stored it as a generic `progress` track. Vow-specific logic
+  (e.g. the "Fulfill Your Vow" move source) remains vow-only and is unaffected.
+
 ## [0.10.1] — 2026-06-09
 
 ### Fixed
@@ -556,6 +582,9 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.2]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.2
+[0.10.1]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.1
+[0.10.0]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.0
 [0.9.3]: https://github.com/papicy/eternal_skald/releases/tag/v0.9.3
 [0.9.2]: https://github.com/papicy/eternal_skald/releases/tag/v0.9.2
 [0.9.1]: https://github.com/papicy/eternal_skald/releases/tag/v0.9.1
