@@ -13,6 +13,19 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.17] — 2026-06-09
+
+### Fixed
+- **Module failed to load — `missing ) after argument list` syntax error.** Three
+  un-escaped backtick characters (around the word `unique`) inside the
+  Ironsworn effect-prompt template literal — introduced with the v0.10.14 foe
+  catalogue — prematurely terminated the template string. The file is loaded by
+  Foundry as an ES module (always strict mode), where this is a hard parse error
+  that broke the entire module. (It went unnoticed because `node --check` parses
+  `.js` in non-strict *script* mode, which happened to tolerate the stray
+  backticks.) The backticks are now escaped (`` \`unique\` ``), and all scripts
+  are validated in strict **module** mode.
+
 ## [0.10.16] — 2026-06-09
 
 ### Added
@@ -984,6 +997,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.17]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.17
 [0.10.16]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.16
 [0.10.15]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.15
 [0.10.14]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.14
