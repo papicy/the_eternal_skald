@@ -1212,29 +1212,35 @@ PROGRESS MOVES — how a journey or vow is COMPLETED (read carefully):
 
   if (allowMoves) {
     parts.push(`\
-WHEN A MOVE IS WARRANTED:
-End your reply with EXACTLY ONE suggestion directive on its own line:
-  [[MOVE: <Move Name> | <Stat> | <one short reason>]]
-The <Move Name> MUST be copied verbatim from the VALID MOVES list above —
-never invent one. Use a Stat from {Edge, Heart, Iron, Shadow, Wits} — or "—"
-for moves that take no stat (e.g. progress moves). Suggest a move only when
-the fiction demands a roll; for pure conversation or rules questions, omit it.`);
+WHEN A MOVE IS WARRANTED — WEAVE IT INTO YOUR PROSE (never a separate card):
+When the fiction calls for a roll, name the fitting move NATURALLY inside your
+narration sentence, written EXACTLY as it appears in the VALID MOVES list
+above (keep its capitalization). The client automatically turns that move name
+into a clickable link the player can roll, so it must read as part of the
+story — e.g. "…the only way through is to Face Danger." 
+• Mention at most ONE move, and only when the fiction truly demands a roll;
+  for pure conversation or rules questions, mention none.
+• Copy the move name VERBATIM (same capitalization) from the list — never
+  invent, rename, or rephrase it, or the clickable link will not form.
+• Do NOT append any directive, bracketed tag (e.g. [[MOVE:…]]), bullet list,
+  or "suggested move" footer — the move must live inside a narrative sentence.`);
   }
 
   if (allowFollowups) {
     parts.push(`\
-AFTER YOU NARRATE THE OUTCOME — SUGGEST FOLLOW-UP MOVES:
-Once your narration of the result is complete, close your reply with EXACTLY
-TWO follow-up move directives, each on its own line:
-  [[MOVE: <Move Name> | <Stat> | <one short reason>]]
-  [[MOVE: <Move Name> | <Stat> | <one short reason>]]
-Choose the two moves from the VALID MOVES list above that most naturally
-follow from what just happened and the party's current situation. Both MUST
-be real moves copied verbatim from that list — never invent a move or
-describe a plain action as a move when it is not one. Use a Stat from
-{Edge, Heart, Iron, Shadow, Wits}, or "—" for moves that take no stat. The
-player is ALWAYS separately offered the option to roll any other move, so do
-not mention that yourself.`);
+AFTER YOU NARRATE THE OUTCOME — WEAVE FOLLOW-UP MOVES INTO YOUR CLOSING PROSE:
+Once you have narrated the result, end with a short forward-looking line that
+names ONE or TWO fitting next moves NATURALLY inside the sentence, written
+EXACTLY as they appear in the VALID MOVES list above (keep their
+capitalization). The client turns each move name into a clickable link the
+player can roll, so they must read as part of the story — e.g. "…now you might
+Compel the guard to talk, or Face Danger and slip past in the dark." 
+• Choose moves from the VALID MOVES list that most naturally follow from what
+  just happened and the party's current situation.
+• Copy each move name VERBATIM (same capitalization) — never invent, rename, or
+  rephrase one, or describe a plain action as a move; otherwise no link forms.
+• Do NOT append any directive, bracketed tag (e.g. [[MOVE:…]]), bullet list, or
+  "What comes next" footer — the moves must live inside a narrative sentence.`);
   }
 
   if (allowEffects) {
@@ -2711,7 +2717,7 @@ const Commands = {
       return Chat.postSystem(game.i18n.localize("ETERNAL_SKALD.errors.emptySkald"));
     }
     return runConversation("general", args, {
-      task: "Respond to the user as the Skald. If they ask a rules question, answer clearly; if they invite narration, narrate. If the fiction calls for a dice roll, suggest the appropriate Ironsworn move and stat using the [[MOVE:…]] directive.",
+      task: "Respond to the user as the Skald. If they ask a rules question, answer clearly; if they invite narration, narrate. If the fiction calls for a dice roll, name the appropriate Ironsworn move naturally inside your narration prose (written exactly as it appears in the move list) so it reads as part of the story — do NOT use a [[MOVE:…]] directive or a separate suggestion line.",
       allowMoves: true,
       includeContext: true
     });
@@ -3442,8 +3448,9 @@ async function runConversation(channel, userText, { task, label, variant = "defa
     const reply = await Client.chat(messages);
     Memory.push(channel, "assistant", reply);
 
-    // When moves are allowed, route through the integration so any
-    // [[MOVE:…]] directive becomes an interactive suggestion card.
+    // When moves are allowed, route through the integration so the narration
+    // is posted with directives stripped and any suggested move (woven into
+    // the prose) is auto-linked inline by EntityLinker (v0.10.10).
     if (allowMoves && Integration.active()) {
       await Integration.postReplyWithSuggestion(reply, { variant, title: label });
     } else {
@@ -3715,129 +3722,50 @@ const Integration = {
   /* ---------------- AI reply posting (with suggestion card) ---------------- */
 
   /**
-   * Post the Skald's reply, stripping any [[MOVE:…]] directive into a
-   * separate interactive suggestion card (when move-suggestion is on and
-   * the system is active).
+   * Post the Skald's reply for the buffered (non-streaming) path. The
+   * narration is displayed with any stray [[MOVE:…]] / metadata directive
+   * stripped; suggested moves are NOT surfaced as a separate card — they are
+   * woven into the prose itself and auto-linked inline by {@link EntityLinker}
+   * (v0.10.10). We still parse the reply to capture the move's reason for the
+   * next outcome narration's intent line.
    */
   async postReplyWithSuggestion(reply, { variant = "default", title } = {}) {
     const { suggestion, clean } = this.parseMoveSuggestion(reply);
-    // Also strip any chronicle metadata block (v0.4.0) from the display copy.
+    // (v0.10.10) Suggested moves are woven into the narration prose and
+    // auto-linked inline by EntityLinker (clicking rolls them through the
+    // progress-aware triggerMove path) — we no longer post a separate
+    // "A Move Beckons" suggestion card. Any stray [[MOVE:…]] directive the
+    // model still emits is stripped from the display by stripDirectivesForDisplay.
     await Chat.postSkald(formatMarkdown(stripDirectivesForDisplay(clean || reply)), { variant, title });
-
-    if (suggestion && this.active() && (Settings.get("suggestMoves") ?? true)) {
-      this._lastIntent = suggestion.reason || this._lastIntent;
-      await this.postSuggestionCard(suggestion);
-    }
+    // Capture the move's reason (if any) so the next outcome narration can
+    // reference the player's intent, without surfacing a card.
+    if (suggestion?.reason) this._lastIntent = suggestion.reason;
     return { suggestion, clean };
   },
 
   /**
-   * Post ONLY the interactive move-suggestion card for a reply (v0.3.3).
-   *
-   * Used by the streaming path: the narration has already been rendered live
-   * in its own card, so here we just parse the full raw reply for a
-   * [[MOVE:…]] directive and, if present, append the Roll/Choose card.
+   * Streaming-path counterpart of {@link postReplyWithSuggestion}. The
+   * narration has already been rendered live (with directives stripped), and
+   * any suggested move is woven into that prose and auto-linked inline by
+   * {@link EntityLinker} — so there is NO separate suggestion card to post
+   * (v0.10.10). We only parse the full raw reply to capture the move's reason
+   * for the next outcome narration's intent line.
    */
   async postSuggestionFromReply(reply) {
     const { suggestion } = this.parseMoveSuggestion(reply);
-    if (suggestion && this.active() && (Settings.get("suggestMoves") ?? true)) {
-      this._lastIntent = suggestion.reason || this._lastIntent;
-      await this.postSuggestionCard(suggestion);
-    }
+    if (suggestion?.reason) this._lastIntent = suggestion.reason;
     return suggestion;
   },
 
-  /**
-   * Build the inline clickable-link markup for one suggested move (v0.10.8).
-   *
-   * This is the "old way" the Skald offered moves: a subtle, inline clickable
-   * link woven into the narration text — NOT a separate, button-laden
-   * "A Move Beckons" card. Clicking the link rolls the move through the same
-   * progress-aware {@link IronswornController.triggerMove} path the card used
-   * (so progress moves like "Reach Your Destination" / "Fulfill Your Vow"
-   * roll against their track rather than dead-ending). The move's Datasworn ID
-   * is carried so the system's own dialog can be opened for ordinary moves.
-   *
-   * @param {{name:string, stat?:string, reason?:string}} suggestion
-   * @returns {string} HTML fragment (empty string when the move can't resolve).
-   */
-  _inlineMoveLink(suggestion) {
-    if (!suggestion?.name) return "";
-    const move = IronswornController._resolveMove(suggestion.name);
-    const label = move?.name ?? suggestion.name;
-    const dsid = move?.id ?? "";
-    // Progress moves take no stat; otherwise prefer the suggested/first stat.
-    const stat = suggestion.stat && suggestion.stat !== "—"
-      ? suggestion.stat
-      : (move?.stats?.find(s => s !== "progress" && s !== "supply") || "");
-    const icon = escapeHtml(EntityLinker?._styleFor?.("move")?.icon ?? "fa-dice-d20");
-    return `<a class="es-entity-link es-move-link es-move-suggest-link" ` +
-      `data-skald-action="roll-move" data-es-kind="move" ` +
-      `data-move="${escapeHtml(label)}" data-stat="${escapeHtml(stat)}" ` +
-      `data-move-dsid="${escapeHtml(dsid)}" ` +
-      `data-tooltip="Ironsworn move: ${escapeHtml(label)} — click to roll">` +
-      `<i class="fa-solid ${icon}"></i>${escapeHtml(label)}</a>`;
-  },
-
-  /**
-   * Render the Skald's move suggestion as an INLINE clickable link line
-   * appended to the narration (v0.10.8 — reverts the separate "A Move Beckons"
-   * card). The suggested move reads as part of the narrative prose and is
-   * clickable to roll, matching the inline entity-link style used throughout
-   * the chronicle. Degrades to nothing when the move can't be resolved.
-   */
-  async postSuggestionCard(suggestion) {
-    const link = this._inlineMoveLink(suggestion);
-    if (!link) return null;
-    const reason = suggestion?.reason
-      ? ` <span class="es-move-reason"><em>— ${escapeHtml(suggestion.reason)}</em></span>`
-      : "";
-    const body = `<p class="es-inline-suggest">The path forward: ${link}${reason}</p>`;
-    return Chat.postSkald(body, {
-      variant: "suggest",
-      flags: { suggestion: { name: suggestion?.name, stat: suggestion?.stat } }
-    });
-  },
-
-  /**
-   * Render the post-roll follow-up move suggestions as INLINE clickable links
-   * (v0.10.8 — reverts the separate "What Comes Next" button-card).
-   *
-   * After a move resolves, the Skald offers the (already validated, real)
-   * follow-up moves it suggested as subtle inline links woven into a single
-   * "the saga calls you onward" line, plus a final inline "any other move"
-   * link that opens the move selector. Each move link rolls through the
-   * progress-aware {@link IronswornController.triggerMove} path. The line is
-   * shown even when no follow-up moves were suggested, so the player can
-   * always reach the move selector.
-   *
-   * @param {Array<{name,stat,reason}>} suggestions
-   */
-  async postFollowupSuggestionCard(suggestions) {
-    const list = (Array.isArray(suggestions) ? suggestions : []).filter(Boolean);
-
-    const links = list.map(s => this._inlineMoveLink(s)).filter(Boolean);
-    const chooseLink = `<a class="es-entity-link es-move-link es-move-choose-link" ` +
-      `data-skald-action="choose-move" data-stat="" ` +
-      `data-tooltip="Roll any other Ironsworn move">` +
-      `<i class="fa-solid fa-dice"></i>any other move</a>`;
-
-    let body;
-    if (links.length) {
-      const joined = links.length === 2
-        ? `${links[0]} or ${links[1]}`
-        : links.join(", ");
-      body = `<p class="es-inline-suggest">The saga calls you onward — you might ${joined} ` +
-        `(or ${chooseLink}).</p>`;
-    } else {
-      body = `<p class="es-inline-suggest">The saga calls you onward — ${chooseLink}.</p>`;
-    }
-
-    return Chat.postSkald(body, {
-      variant: "suggest",
-      flags: { suggestion: { followups: list.map(s => ({ name: s.name, stat: s.stat })) } }
-    });
-  },
+  // (v0.10.10) The separate move-suggestion cards — the old pre-roll and
+  // post-roll standalone suggestion-card lines that used to be posted as
+  // their own chat messages — have been removed entirely. Move suggestions
+  // are now woven directly into the
+  // Skald's narration prose (see the prompt blocks in
+  // buildIronswornPromptBlock) and auto-linked inline by EntityLinker, which
+  // renders each move name as a clickable link that rolls through the
+  // progress-aware IronswornController.triggerMove path (see the "link-move"
+  // case in wireSuggestionCard). No standalone suggestion card is posted.
 
   /**
    * Wire up the buttons on a rendered suggestion card. Called from the
@@ -4475,7 +4403,7 @@ const Integration = {
 Move: ${parsed.moveName}
 Outcome: ${parsed.outcome}${parsed.match ? " (MATCH — add a twist)" : ""}
 Action score: ${parsed.score ?? "?"} vs challenge dice ${(parsed.challenge ?? []).join(" / ") || "?"}.${intent}${autoLine}
-Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " Then append any warranted [[EFFECT:…]] directives that were NOT already applied above." : " Do not emit effect directives; simply narrate."} Finally, suggest TWO follow-up moves (real moves only) with [[MOVE:…]] directives as instructed.`;
+Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " Then append any warranted [[EFFECT:…]] directives that were NOT already applied above." : " Do not emit effect directives; simply narrate."} Finally, close with a brief forward-looking line that weaves one or two fitting follow-up moves (real moves only, named exactly) directly into the prose as instructed — do NOT use [[MOVE:…]] directives or a separate list for them.`;
 
     // Whether the Skald may offer follow-up move suggestions after the
     // narration. Reuses the same "suggestMoves" setting that gates the
@@ -4519,19 +4447,12 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
         await this.applyEffects(safeEffects, actor);
       }
 
-      // Offer follow-up moves + the "roll any other move" option, mirroring
-      // the pre-roll narration suggestion card. parseMoveSuggestions drops
-      // any invented/unknown moves, so only real moves are ever proposed; the
-      // card is still posted (with just the "roll any other move" button) when
-      // the Skald suggested none, so the player can always continue the saga.
-      if (allowFollowups) {
-        try {
-          const { suggestions } = this.parseMoveSuggestions(reply, { max: 2 });
-          await this.postFollowupSuggestionCard(suggestions);
-        } catch (e) {
-          console.warn(LOG_PREFIX, "follow-up suggestion card failed", e);
-        }
-      }
+      // (v0.10.10) Follow-up moves are now woven into the Skald's closing
+      // prose and auto-linked inline by EntityLinker (each rolls through the
+      // progress-aware triggerMove path when clicked). We no longer post a
+      // separate "What Comes Next" suggestion card — any stray [[MOVE:…]]
+      // directive is stripped from the displayed narration instead. The
+      // `allowFollowups` flag still gates whether the prompt invites them.
     } catch (e) {
       console.warn(LOG_PREFIX, "_narrateOutcome failed", e);
     }
@@ -6989,7 +6910,8 @@ Hooks.on("createChatMessage", (message) => {
     // move cards (posted by IronswornController.manualMoveRoll when the
     // system's pre-roll dialog is unavailable) carry our module flag with
     // manualMove:true. Those are exactly the rolls the player triggers from
-    // the "What Comes Next" buttons, so they must reach onIronswornRoll.
+    // the inline move links woven into the narration, so they must reach
+    // onIronswornRoll.
     // onIronswornRoll has its own guards (it skips our own NON-roll cards
     // like narration/suggestions, dedupes, and is GM-only), so calling it
     // unconditionally here is safe.

@@ -13,6 +13,36 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.10] — 2026-06-09
+
+### Changed
+- **Move suggestions are now woven directly into the Skald's narration prose
+  instead of being posted as separate cards.** Previously, suggested moves
+  arrived as standalone chat bubbles — a pre-roll *A Move Beckons* / "The path
+  forward:" line and a post-roll *What Comes Next* / "The saga calls you
+  onward —" line. The Skald now names the fitting move **inside** its narration
+  sentence, where the existing entity-linker renders it as a subtle, clickable
+  inline link. This applies to **both** ordinary narration (`!skald`, `!scene`,
+  `!combat`) and the **post-roll outcome narration** after a move resolves.
+- The system prompt and the per-command tasks were rewritten to instruct the
+  AI to mention moves verbatim within the prose (so the link forms) and to
+  **never** emit `[[MOVE:…]]` directives, bracketed tags, bullet lists, or a
+  "suggested move" footer.
+
+### Removed
+- The separate move-suggestion card UI — `postSuggestionCard`,
+  `postFollowupSuggestionCard`, and the `_inlineMoveLink` helper — has been
+  removed entirely, along with their call sites in the streaming, buffered,
+  and post-roll (`_narrateOutcome`) paths.
+
+### Fixed
+- Clicking an inline move link in **any** narration (including post-roll
+  outcome narration) rolls through the progress-aware
+  `IronswornController.triggerMove` path, so progress moves like *Reach Your
+  Destination* / *Fulfill Your Vow* roll against their track rather than
+  dead-ending. Any stray `[[MOVE:…]]` directive the model still emits is
+  stripped from the displayed narration so it never leaks into chat.
+
 ## [0.10.9] — 2026-06-09
 
 ### Fixed
@@ -752,6 +782,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.10]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.10
 [0.10.9]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.9
 [0.10.8]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.8
 [0.10.7]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.7
