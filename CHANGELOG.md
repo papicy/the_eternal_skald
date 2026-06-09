@@ -13,6 +13,29 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.1] — 2026-06-09
+
+### Fixed
+- **Vows (and other progress tracks) can now actually be completed.** Previously
+  there was no way to mark a vow as fulfilled — neither the AI nor the player
+  had any control that would set a track to *complete*, so vows stayed open
+  forever even when the story had clearly resolved them. This release adds two
+  complementary fixes:
+  - **New `complete_vow` AI effect directive.** The Skald can now close out a
+    vow when the narrative fulfils it. The effect parser accepts
+    `[[EFFECT: complete_vow <Vow Name>]]` and its synonyms (`fulfill_vow`,
+    `end_vow`, `complete_track`, `complete_journey`, `end_journey`), all of
+    which mark the named track complete.
+  - **Manual "Mark Complete / Fulfill Vow" button.** Progress-track cards now
+    include a one-click green **Mark Complete / Fulfill Vow** control so you can
+    fulfil a vow yourself at any time (Ironsworn lets you fulfil a vow at any
+    progress level). Once complete, the card shows a fulfilled note instead.
+    This manual path works even when AI-applied effects are disabled.
+- **Correct vow identification.** Vow lookup now matches the modern
+  foundry-ironsworn data model, where vows are stored as `progress` items with
+  `system.subtype === "vow"` (rather than a top-level `vow` type), so the
+  active-vow detection and completion targeting find vows reliably.
+
 ## [0.10.0] — 2026-06-09
 
 ### Added
