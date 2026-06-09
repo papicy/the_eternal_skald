@@ -13,6 +13,40 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.11] — 2026-06-09
+
+### Fixed
+- **Fulfilling a vow / reaching a destination now closes the CORRECT track.**
+  After a *Fulfill Your Vow* or *Reach Your Destination* progress roll, the
+  post-roll narration's `complete_vow` / `complete_journey` directive could
+  fail with «Track "Reach Your Destination" not found» — because the completion
+  logic searched for a track named after the **move** instead of the player's
+  real, named vow/journey. The controller now records which track a progress
+  move actually rolled against (`_lastProgressTrack`) and the completion path
+  resolves the correct track from that context.
+
+### Changed
+- `IronswornController.rollProgressMove()` now records the resolved track as
+  `_lastProgressTrack` ({ id, name, kind, actorId, ts }) before rolling.
+- New `IronswornController.resolveCompletionTrack(actor, ref, hintKind)` layered
+  resolution: an exact id/name match wins (but a progress-MOVE name is never
+  treated as a track); otherwise the last-rolled track (still open, right kind);
+  otherwise the newest open track of the implied kind (vow / journey).
+- New `IronswornController.completeTrackSmart(actor, ref, hintKind)` completes
+  the resolved track and clears the last-progress pointer when it closes it.
+  The `complete_track` effect now routes through this instead of the literal
+  `completeTrack(name)` lookup.
+- `complete_*` directives now carry the implied `trackKind` (vow / journey) and
+  the track name is **optional** — an empty name (e.g. `[[EFFECT: complete_vow]]`)
+  falls back to the active track instead of dropping the directive.
+- Prompt directive docs updated: use the track's EXACT name when known, you MAY
+  omit it when unsure, and NEVER put the move name in a `complete_*` directive.
+
+### Tests
+- Added `test/vow-completion.test.mjs` (15 assertions) covering move-name
+  directives, empty-name fallback, last-rolled preference, kind preference,
+  exact-name priority, and the recording in `rollProgressMove`.
+
 ## [0.10.10] — 2026-06-09
 
 ### Changed
@@ -782,6 +816,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.11]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.11
 [0.10.10]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.10
 [0.10.9]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.9
 [0.10.8]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.8

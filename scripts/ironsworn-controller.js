@@ -174,6 +174,16 @@ export const IronswornController = {
 
   setDebug(on) { DEBUG = !!on; },
 
+  /**
+   * The progress track that the most recent progress move ("Fulfill Your Vow"
+   * / "Reach Your Destination") actually rolled against, recorded by
+   * rollProgressMove(). Shape: { id, name, kind, actorId, ts } or null. Used by
+   * resolveCompletionTrack() so a post-roll completion directive closes the
+   * CORRECT track even when the AI names it after the move rather than the
+   * player's real track name.
+   */
+  _lastProgressTrack: null,
+
   /** Expose the catalog (read-only) for the UI / system prompt. */
   get moves() { return MOVE_CATALOG; },
 
@@ -822,6 +832,107 @@ export const IronswornController = {
   },
 
   /**
+   * True iff `name` is the name of a PROGRESS MOVE rather than a track. The AI
+   * frequently emits the move name ("Fulfill Your Vow" / "Reach Your
+   * Destination") in a completion directive instead of the track's real,
+   * player-chosen name — such a string must never be treated as a track name.
+   */
+  _isProgressMoveName(name) {
+    const n = String(name ?? "").toLowerCase().trim().replace(/[.!?,;:]+$/, "");
+    return n === "fulfill your vow"
+        || n === "reach your destination"
+        || n === "swear an iron vow"
+        || n === "undertake a journey";
+  },
+
+  /**
+   * Resolve the progress track a completion directive refers to. Because the
+   * narrating AI does not reliably know a track's exact name (it often writes
+   * the MOVE name, a paraphrase, or nothing at all), resolution is layered:
+   *   1. A direct id / exact-name / substring-name match wins — UNLESS the ref
+   *      is itself a progress-MOVE name, which is never a real track.
+   *   2. Otherwise the track the last progress move actually rolled against
+   *      (recorded by rollProgressMove), if it is still open and belongs to
+   *      this actor and matches the implied kind.
+   *   3. Otherwise the newest open track of the implied kind (vow / journey),
+   *      then any newest open vow, then any newest open journey.
+   *
+   * @param {Actor}  actor
+   * @param {string} trackRef        name/id from the directive (may be empty).
+   * @param {string|null} [hintKind] "vow" | "journey" inferred from the verb.
+   * @returns {Item|null}
+   */
+  resolveCompletionTrack(actor, trackRef, hintKind = null) {
+    if (!actor) return null;
+    const ref   = String(trackRef ?? "").trim();
+    const refLc = ref.toLowerCase();
+    const refIsMove = this._isProgressMoveName(ref);
+
+    // 1. Direct match — but never trust a progress-move name as a track name.
+    if (ref && !refIsMove) {
+      const direct = this.findTrack(actor, ref);
+      if (direct) return direct;
+    }
+
+    // Infer the track kind from an explicit hint, else from the move name.
+    let kind = hintKind;
+    if (!kind) {
+      if (/reach your destination/.test(refLc)) kind = "journey";
+      else if (/fulfill your vow/.test(refLc))  kind = "vow";
+    }
+
+    // 2. The track the last progress move rolled against (still open & ours).
+    const last = this._lastProgressTrack;
+    if (last && last.actorId === actor.id && (!kind || !last.kind || last.kind === kind)) {
+      const item = actor.items?.get?.(last.id);
+      if (item && !foundry.utils.getProperty(item, "system.completed")) return item;
+    }
+
+    // 3. Newest open track of the implied kind; else any open vow, then journey.
+    if (kind) {
+      const ofKind = this._newestOpenTrackItem(actor, kind);
+      if (ofKind) return ofKind;
+    }
+    return this._newestOpenTrackItem(actor, "vow")
+        ?? this._newestOpenTrackItem(actor, "journey");
+  },
+
+  /**
+   * Complete a vow/journey track, resolving the CORRECT track even when the
+   * directive carries a move name, a paraphrase, or no name at all (see
+   * resolveCompletionTrack). This is the completion path used for fulfilled
+   * vows and reached destinations; combat tracks keep using completeTrack().
+   *
+   * @param {Actor}  actor
+   * @param {string} trackRef
+   * @param {string|null} [hintKind] "vow" | "journey".
+   * @returns {Promise<{ok:boolean, name?:string, error?:string}>}
+   */
+  async completeTrackSmart(actor, trackRef, hintKind = null) {
+    if (!actor) return { ok: false, error: "No actor." };
+    const track = this.resolveCompletionTrack(actor, trackRef, hintKind);
+    if (!track) {
+      const noun = hintKind ? `${hintKind} track` : "vow or journey";
+      const named = String(trackRef ?? "").trim();
+      return {
+        ok: false,
+        error: named && !this._isProgressMoveName(named)
+          ? `Track "${named}" not found, and no open ${noun} to complete.`
+          : `No open ${noun} to complete.`
+      };
+    }
+    try {
+      await track.update({ "system.completed": true });
+      // Clear the last-progress pointer if we just closed the track it named.
+      if (this._lastProgressTrack?.id === track.id) this._lastProgressTrack = null;
+      dbg(`completeTrackSmart: "${track.name}" marked completed (ref="${trackRef ?? ""}", kind=${hintKind ?? "?"})`);
+      return { ok: true, name: track.name };
+    } catch (e) {
+      return { ok: false, error: e?.message ?? String(e) };
+    }
+  },
+
+  /**
    * True iff a move is a PROGRESS move that rolls a track's progress score
    * (rather than an action roll against a stat). Currently the two the Skald
    * drives: "Fulfill Your Vow" (vows) and "Reach Your Destination" (journeys).
@@ -922,6 +1033,18 @@ export const IronswornController = {
                `Begin the ${noun} first (or open its track card and roll from there).`
       };
     }
+
+    // Remember WHICH track this progress move actually rolled against, so the
+    // post-roll completion directive can close the CORRECT track even when the
+    // AI names it after the move ("Fulfill Your Vow") rather than the track's
+    // real, player-chosen name. See resolveCompletionTrack()/completeTrackSmart().
+    this._lastProgressTrack = {
+      id: track.id,
+      name: track.name,
+      kind: kind ?? null,
+      actorId: actor.id,
+      ts: Date.now()
+    };
 
     // Progress SCORE = filled boxes (0–10) = floor(ticks / 4), capped at 10.
     const current = Number(foundry.utils.getProperty(track, "system.current") ?? 0);

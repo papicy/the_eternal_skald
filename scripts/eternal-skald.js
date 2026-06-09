@@ -1288,16 +1288,23 @@ INITIATIVE state telling who is in control. You drive these with:
    [[EFFECT: complete_vow <Vow Name>]]
         Mark a vow COMPLETE when it is fulfilled in the fiction — i.e. after
         a successful "Fulfill Your Vow" move, or whenever the goal of the vow
-        is achieved. Use the vow's EXACT name. This is the ONLY way a vow gets
-        closed, so always emit it when a vow is fulfilled.
+        is achieved. Use the vow's EXACT name when you know it. If you are not
+        certain of the exact name, you MAY omit it ([[EFFECT: complete_vow]]) —
+        the system will close the vow that was just rolled / the active vow.
+        Do NOT put the MOVE name ("Fulfill Your Vow") here. This is the ONLY
+        way a vow gets closed, so always emit it when a vow is fulfilled.
    [[EFFECT: create_journey <Name> <rank> <description>]]
         Begin a journey progress track when the character undertakes a journey
         toward a destination (the journey counterpart of create_vow).
    [[EFFECT: complete_journey <Journey Name>]]
         Mark a journey COMPLETE when the destination is reached in the fiction —
         i.e. after a successful "Reach Your Destination" move, or whenever the
-        journey's goal is achieved. Use the journey's EXACT name. This is the
-        ONLY way a journey gets closed, so always emit it when a journey ends.
+        journey's goal is achieved. Use the journey's EXACT name when you know
+        it. If unsure of the exact name, you MAY omit it
+        ([[EFFECT: complete_journey]]) — the system will close the journey that
+        was just rolled / the active journey. Do NOT put the MOVE name ("Reach
+        Your Destination") here. This is the ONLY way a journey gets closed, so
+        always emit it when a journey ends.
    [[EFFECT: initiative <gain|lose>]]
         Record whether the character now has initiative ("in control",
         gain) or has lost it ("in a bad spot", lose).
@@ -1341,7 +1348,10 @@ directive on its OWN line so the track appears on the character's sheet:
    [[EFFECT: complete_vow <Name>]]     — when a vow is fulfilled.
    [[EFFECT: end_combat <Foe Name>]]   — when a foe is defeated/flees/yields.
 <rank> scale: troublesome, dangerous, formidable, extreme, epic (default
-formidable). Use the track's EXACT name when closing it.
+formidable). Use the track's EXACT name when closing it; if unsure, you MAY
+omit the name (e.g. [[EFFECT: complete_vow]]) and the system will close the
+active vow/journey. Never put the MOVE name ("Fulfill Your Vow" / "Reach Your
+Destination") in a complete_* directive.
 Only emit these when the fiction clearly BEGINS or ENDS such an undertaking —
 never for momentary actions. Do NOT emit momentum/harm/stress/supply/progress
 directives here; those are applied automatically after dice rolls.`);
@@ -3686,10 +3696,19 @@ const Integration = {
       // Mark a vow / journey / progress track COMPLETE. All of these verbs
       // (complete_vow, fulfill_vow, end_vow, complete_track, complete_journey,
       // end_journey) collapse to one "complete_track" effect — completion is
-      // the same operation regardless of the track's kind.
+      // the same operation regardless of the track's kind. We DO preserve the
+      // implied kind (vow / journey) as `trackKind` so the completion path can
+      // pick the right open track when the AI names it after the move (e.g.
+      // "Fulfill Your Vow") or omits the name entirely. The name is optional:
+      // an empty name lets the completion path fall back to the track the last
+      // progress move actually rolled against (or the newest open track of the
+      // implied kind), rather than dropping the directive.
       if (/^(complete_vow|fulfill_vow|end_vow|complete_track|complete_journey|end_journey)$/.test(verb)) {
         const { name } = this._splitNameRank(rest);
-        return name ? { kind: "complete_track", name } : null;
+        const trackKind = /vow/.test(verb) ? "vow"
+                        : /journey/.test(verb) ? "journey"
+                        : null;
+        return { kind: "complete_track", name: name || "", trackKind };
       }
     }
     return null;
@@ -4747,14 +4766,20 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
             break;
           }
           case "complete_track": {
-            r = await IronswornController.completeTrack(actor, eff.name);
+            // Resolve the ACTUAL track being fulfilled rather than trusting the
+            // literal name the AI emitted (it often writes the move name —
+            // "Fulfill Your Vow" / "Reach Your Destination" — or omits the name
+            // entirely). completeTrackSmart() falls back to the track the last
+            // progress move rolled against, then the newest open track of the
+            // implied kind (vow / journey). See IronswornController.
+            r = await IronswornController.completeTrackSmart(actor, eff.name, eff.trackKind);
             if (r?.ok) {
               applied.push(`completed “${r.name}”`);
               this._notifyCombat(`🏆 Completed: ${r.name}`);
             } else if (r?.error) {
-              // Surface a clear GM-only note when the track can't be found,
-              // so a fulfilled vow that the AI named slightly differently
-              // doesn't silently fail to close.
+              // Surface a clear GM-only note only when there is genuinely no
+              // open track to close (the fallback already covers slightly-off
+              // or move-named directives).
               await Chat.postSystem(
                 `<strong>Could not mark complete:</strong> ${escapeHtml(r.error)}`,
                 { gmWhisper: true }
