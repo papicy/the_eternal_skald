@@ -819,6 +819,45 @@ export const IronswornController = {
   },
 
   /**
+   * Close (mark completed) every active combat track on the actor, optionally
+   * excluding one by id. Ironsworn is fought one foe at a time, so when a new
+   * combat begins we tidy up any foe tracks that were left open — the AI does
+   * not always emit an explicit `end_combat` when a previous fight fizzles
+   * out, which otherwise leaves orphaned, untracked combat tracks behind
+   * (progress marking only ever targets the newest active track).
+   *
+   * @param {Actor}  actor
+   * @param {object} [opts]
+   * @param {string[]|Set<string>} [opts.onlyIds=null]  if given, restrict
+   *                 closing to these track ids (e.g. combats that existed
+   *                 BEFORE the current effect batch, so multiple foes
+   *                 introduced in the same reply don't close each other).
+   * @param {string} [opts.exceptId=null]  combat-track id to leave open.
+   * @returns {Promise<{ok:boolean, closed:string[], error?:string}>}
+   */
+  async closeStaleCombatTracks(actor, { onlyIds = null, exceptId = null } = {}) {
+    if (!actor) return { ok: false, closed: [], error: "No actor." };
+    const allow = onlyIds ? new Set(onlyIds) : null;
+    const stale = this.getCombatTracks(actor)
+      .filter(t => !t.completed && t.id !== exceptId && (!allow || allow.has(t.id)));
+    const closed = [];
+    for (const t of stale) {
+      const item = actor.items?.get(t.id);
+      if (!item) continue;
+      try {
+        await item.update({ "system.completed": true });
+        closed.push(t.name);
+      } catch (e) {
+        warn("closeStaleCombatTracks: failed to close", t.name, e?.message ?? e);
+      }
+    }
+    if (closed.length) {
+      dbg(`closeStaleCombatTracks: closed ${closed.length} stale combat track(s): ${closed.join(", ")}`);
+    }
+    return { ok: true, closed };
+  },
+
+  /**
    * Whether the character currently has initiative ("in control" in
    * Ironsworn terms). Stored as a Skald flag on the actor so it persists
    * across sessions. Also honours the system's own field if present.

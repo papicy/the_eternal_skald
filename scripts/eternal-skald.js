@@ -353,6 +353,15 @@ const Settings = {
       default: true
     });
 
+    game.settings.register(MODULE_ID, "autoCloseStaleCombatTracks", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.autoCloseStaleCombatTracks.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.autoCloseStaleCombatTracks.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true
+    });
+
     game.settings.register(MODULE_ID, "defaultEnemyRank", {
       name: game.i18n.localize("ETERNAL_SKALD.settings.defaultEnemyRank.name"),
       hint: game.i18n.localize("ETERNAL_SKALD.settings.defaultEnemyRank.hint"),
@@ -4508,6 +4517,14 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
   /** Apply parsed [[EFFECT:…]] directives via the Ironsworn controller. */
   async applyEffects(effects, actor) {
     const applied = [];
+    // Snapshot combat tracks that were already open BEFORE this batch. When a
+    // new fight starts we auto-close these (one fight at a time in Ironsworn),
+    // but NOT any foe tracks created within this same reply — a single
+    // narration can introduce several foes in one fight.
+    const preBatchCombatIds = actor
+      ? IronswornController.getCombatTracks(actor).filter(t => !t.completed).map(t => t.id)
+      : [];
+    let staleCombatClosed = false;
     for (const eff of effects) {
       try {
         let r = null;
@@ -4574,6 +4591,22 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
                 source = "default";
                 const hint = lookup?.suggestion ? ` (did you mean "${lookup.suggestion}"?)` : "";
                 this._dbg(`→ create_combat "${eff.name}": not in compendium${hint}, using default rank "${rank}"`);
+              }
+            }
+            // Ironsworn is fought one foe at a time. The first time a new
+            // fight starts in this reply, tidy up any combat tracks left open
+            // from a PREVIOUS fight (the AI doesn't always emit end_combat
+            // when a fight fizzles out) — otherwise they linger as orphaned,
+            // untracked tracks. We only close tracks open before this batch,
+            // so several foes introduced in the same reply coexist fine.
+            if (!staleCombatClosed && (Settings.get("autoCloseStaleCombatTracks") ?? true)) {
+              staleCombatClosed = true;
+              if (preBatchCombatIds.length) {
+                const tidy = await IronswornController.closeStaleCombatTracks(actor, { onlyIds: preBatchCombatIds });
+                if (tidy?.closed?.length) {
+                  applied.push(`auto-closed prior combat ${tidy.closed.map(n => `“${n}”`).join(", ")}`);
+                  this._notifyCombat(`🏳 Closed stale combat: ${tidy.closed.join(", ")}`);
+                }
               }
             }
             r = await IronswornController.createProgressTrack(actor, eff.name, "combat", rank);

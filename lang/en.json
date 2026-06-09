@@ -74,6 +74,10 @@
         "name": "Auto-Create Combat Tracks",
         "hint": "When the Skald narrates the start of a fight, automatically create a combat progress track for each foe so attacks can be marked against it. Requires AI Applies Mechanical Effects."
       },
+      "autoCloseStaleCombatTracks": {
+        "name": "Auto-Close Old Combat Tracks",
+        "hint": "Ironsworn is fought one foe at a time. When a new fight begins, automatically mark any combat tracks left open from a previous fight as complete, so they don't linger as orphaned, untracked tracks. On by default. Turn OFF to allow multiple simultaneous combat tracks."
+      },
       "defaultEnemyRank": {
         "name": "Default Enemy Rank",
         "hint": "Fallback challenge rank for CUSTOM enemies only — used when the Skald invents a foe that is not in the Ironsworn foe compendium and does not specify a rank. Standard foes (Bear, Wyvern, Bandit, …) automatically use their official compendium rank. Higher ranks take more progress to fill (troublesome = quickest, epic = longest)."
