@@ -1,5 +1,5 @@
 /* =====================================================================
- *  THE ETERNAL SKALD — Ironsworn System Controller (v0.6.0)
+ *  THE ETERNAL SKALD — Ironsworn System Controller (v0.10.21)
  *  ---------------------------------------------------------------------
  *  This module is the bridge between The Eternal Skald (the "GM brain")
  *  and the official `foundry-ironsworn` system (the "rules engine",
@@ -1063,13 +1063,20 @@ export const IronswornController = {
   async _executeMilestone(actor) {
     if (!actor) return { ok: false, error: "No active character." };
     const vow = this._newestOpenTrackItem(actor, "vow");
-    if (!vow) return { ok: false, error: "No open vow to mark progress on." };
+    if (!vow) {
+      dbg("_executeMilestone: no open vow found on", actor?.name);
+      return { ok: false, error: "No open vow to mark progress on." };
+    }
+    dbg(`_executeMilestone: marking "${vow.name}" (rank ${foundry.utils.getProperty(vow, "system.rank")}, current ${foundry.utils.getProperty(vow, "system.current")})`);
     const result = await this.markProgressByRank(actor, vow.id);
     if (result?.ok) {
       const name = vow.name || "vow";
-      try { ui.notifications?.info(`Reach a Milestone: marked progress on "${name}" (now ${result.boxes ?? "?"}/10 boxes).`); } catch (_) {}
-      return { ok: true, method: "milestone", track: name, boxes: result.boxes, ticks: result.ticks };
+      const boxes = result.boxes ?? Math.floor((result.current ?? 0) / 4);
+      dbg(`_executeMilestone: "${name}" now ${result.current} ticks (${boxes}/10 boxes)`);
+      try { ui.notifications?.info(`Reach a Milestone: marked progress on "${name}" (now ${boxes}/10 boxes).`); } catch (_) {}
+      return { ok: true, method: "milestone", track: name, boxes, ticks: result.current };
     }
+    warn("_executeMilestone: markProgressByRank failed:", result?.error);
     return { ok: false, error: result?.error ?? "Could not mark progress." };
   },
 

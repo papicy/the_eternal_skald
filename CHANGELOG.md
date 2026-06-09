@@ -13,6 +13,48 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.21] — 2026-06-09
+
+### Fixed
+- **"Reach a Milestone" no longer marks the vow twice.** Triggering the
+  milestone move (by clicking its inline link in the narration, or from the
+  move list) ran the deterministic mechanics **once in `triggerMove()`** — which
+  marks progress on the newest open vow by its rank — and then scheduled an
+  outcome narration that ran `_autoMilestoneFlow()` → `_executeMilestone()`
+  **a second time**, advancing the same vow by another full rank's worth of
+  ticks. The track therefore jumped by *2× rank* (or appeared inconsistent with
+  the narrated result). The narration step is now told the mechanics were
+  already applied (`_narrateOutcome(…, { mechanicsApplied: true, autoSummary })`),
+  so it reuses the single, already-computed result instead of re-marking.
+
+### Changed
+- `_narrateOutcome()` accepts an `opts` argument (`mechanicsApplied`,
+  `autoSummary`) so callers that have already applied a move's mechanics can
+  hand the summary straight to the narration prompt and skip the auto-flows.
+- `IronswornController._executeMilestone()` now logs the resolved vow, its rank
+  and resulting tick/box totals (debug channel) and derives `boxes`/`ticks`
+  defensively from the update result, making future "0 progress" reports easy
+  to diagnose.
+
+### Verified
+- New `test/milestone.test.mjs` exercises the full chain
+  `triggerMove → _isMilestoneMove → _executeMilestone → markProgressByRank →
+  markProgress` against a faithful replica of the foundry-ironsworn
+  `ProgressModel` schema: recognises the move by name **and** by classic/
+  Starforged Datasworn id, marks the newest open vow by its rank, works on
+  hand-sworn (sheet-made) vows, and returns a clear error when no vow is open.
+  All 18 assertions pass; the full suite (192 assertions across 8 files) is green.
+
+## [0.10.20] — 2026-06-09
+
+### Added
+- **"Reach a Milestone" now marks progress automatically.** The milestone move
+  has no dice — it simply marks progress on your active vow by its rank. The
+  controller gained `_isMilestoneMove()` / `_executeMilestone()`, `triggerMove()`
+  intercepts the move before the "no rollable stat" fallback, and a matching
+  `_autoMilestoneFlow()` lets the AI enact it from narration. (Superseded by the
+  double-mark fix in 0.10.21.)
+
 ## [0.10.19] — 2026-06-09
 
 ### Changed
@@ -1037,6 +1079,8 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.21]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.21
+[0.10.20]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.20
 [0.10.19]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.19
 [0.10.18]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.18
 [0.10.17]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.17

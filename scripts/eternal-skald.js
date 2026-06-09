@@ -1,5 +1,5 @@
 /* =====================================================================
- *  THE ETERNAL SKALD v0.10.19 — Foundry VTT v14 Module (Client)
+ *  THE ETERNAL SKALD v0.10.21 — Foundry VTT v14 Module (Client)
  *  ---------------------------------------------------------------------
  *  An AI-powered storytelling and combat-control assistant for Ironsworn
  *  and Ironsworn: Delve campaigns. Powered by Abacus AI ChatLLM.
@@ -4389,10 +4389,14 @@ const Integration = {
               const actor = IronswornController.getActiveCharacter();
               const res = await IronswornController.triggerMove(ref, { actor, stat });
               if (res?.ok && res.method === "milestone") {
-                // Milestone has no roll card — narrate it directly.
+                // Milestone has no roll card — narrate it directly. triggerMove
+                // ALREADY marked progress on the vow, so pass mechanicsApplied
+                // to stop _narrateOutcome from marking it a SECOND time.
                 try {
                   const fp = { moveName: "Reach a Milestone", outcome: "Progress Marked", score: null, challenge: [], match: false, resolved: true };
-                  setTimeout(() => this._narrateOutcome(null, fp).catch(e => console.warn(LOG_PREFIX, "milestone narration failed", e)), this._narrationDelayMs());
+                  const summary = res.track ? `marked progress on vow "${res.track}" (now ${res.boxes ?? "?"}/10 boxes)` : "";
+                  setTimeout(() => this._narrateOutcome(null, fp, { mechanicsApplied: true, autoSummary: summary })
+                    .catch(e => console.warn(LOG_PREFIX, "milestone narration failed", e)), this._narrationDelayMs());
                 } catch (_) {}
               } else if (!res?.ok) {
                 await Chat.postSystem(
@@ -4430,10 +4434,13 @@ const Integration = {
     // "Reach a Milestone" produces no roll card, so onIronswornRoll won't
     // fire. Narrate it directly here so the Skald acknowledges the milestone.
     if (res?.ok && res.method === "milestone") {
+      // triggerMove already marked progress; tell _narrateOutcome the
+      // mechanics are applied so it does NOT mark the vow a second time.
+      const summary = res.track ? `marked progress on vow "${res.track}" (now ${res.boxes ?? "?"}/10 boxes)` : "";
       const milestoneDelayed = async () => {
         try {
           const fakeParsed = { moveName: "Reach a Milestone", outcome: "Progress Marked", score: null, challenge: [], match: false, resolved: true };
-          await this._narrateOutcome(null, fakeParsed);
+          await this._narrateOutcome(null, fakeParsed, { mechanicsApplied: true, autoSummary: summary });
         } catch (e) { console.warn(LOG_PREFIX, "milestone narration failed", e); }
       };
       setTimeout(milestoneDelayed, this._narrationDelayMs());
@@ -4969,8 +4976,21 @@ const Integration = {
     return raw;
   },
 
-  /** Ask the AI to narrate an outcome and (optionally) apply effects. */
-  async _narrateOutcome(message, parsed) {
+  /**
+   * Ask the AI to narrate an outcome and (optionally) apply effects.
+   *
+   * @param {ChatMessage|null} message  the originating roll card, if any.
+   * @param {object} parsed             parsed roll/move facts.
+   * @param {object} [opts]
+   * @param {boolean} [opts.mechanicsApplied=false] when true, the deterministic
+   *        mechanics for this move were ALREADY applied by the caller (e.g.
+   *        triggerMove() executed "Reach a Milestone" and marked progress), so
+   *        the auto-flows here MUST be skipped to avoid double-applying them.
+   * @param {string}  [opts.autoSummary]  a ready-made summary line describing
+   *        the mechanics the caller already applied, fed to the narration
+   *        prompt so the AI knows what happened (and is told not to re-emit it).
+   */
+  async _narrateOutcome(message, parsed, opts = {}) {
     const actor = message?.speakerActor ?? IronswornController.getActiveCharacter();
     const allowEffects = Settings.get("aiAppliesEffects") ?? true;
 
@@ -4978,8 +4998,16 @@ const Integration = {
     //    Enter the Fray; harm/progress + initiative on Strike/Clash). This
     //    keeps the rules correct regardless of what the AI narrates, and
     //    gives us a factual summary to feed into the narration prompt.
+    //
+    //    When the caller already applied the mechanics (opts.mechanicsApplied
+    //    — e.g. triggerMove() ran "Reach a Milestone" and marked the vow), we
+    //    do NOT re-run the auto-flows here: doing so would mark progress a
+    //    SECOND time (advancing the track by 2× rank). We reuse the caller's
+    //    summary so the AI still narrates the correct, single effect.
     let autoSummary = "";
-    if (allowEffects) {
+    if (opts.mechanicsApplied) {
+      autoSummary = String(opts.autoSummary ?? "");
+    } else if (allowEffects) {
       const autoParts = [];
       try { const c = await this._autoCombatFlow(parsed, actor);  if (c) autoParts.push(c); }
       catch (e) { console.warn(LOG_PREFIX, "_autoCombatFlow failed", e); }
