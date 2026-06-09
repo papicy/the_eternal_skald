@@ -422,6 +422,31 @@
 }
 
 /* ------------------------------------------------------------------ */
+/*  FOLLOW-UP (POST-ROLL) SUGGESTION CARD                             */
+/* ------------------------------------------------------------------ */
+/* Stack each follow-up move (its Roll button + reason) vertically so the
+   two suggestions and the "roll any other move" option read as a list. */
+.es-followup-buttons {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.es-followup-move {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.es-followup-move .es-btn-roll {
+  width: 100%;
+  text-align: left;
+}
+
+.es-followup-move .es-move-reason {
+  margin: 0 0 2px;
+}
+
+/* ------------------------------------------------------------------ */
 /*  MOVE SELECTOR DIALOG                                               */
 /* ------------------------------------------------------------------ */
 
