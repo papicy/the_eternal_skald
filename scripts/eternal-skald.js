@@ -1,5 +1,5 @@
 /* =====================================================================
- *  THE ETERNAL SKALD v0.10.21 — Foundry VTT v14 Module (Client)
+ *  THE ETERNAL SKALD v0.10.22 — Foundry VTT v14 Module (Client)
  *  ---------------------------------------------------------------------
  *  An AI-powered storytelling and combat-control assistant for Ironsworn
  *  and Ironsworn: Delve campaigns. Powered by Abacus AI ChatLLM.
@@ -821,6 +821,12 @@ GUIDELINES:
 • ${intensityNote}
 • Never invent dice results. If a roll is needed, say so and stop.
 • Never break the fiction with meta-commentary unless directly asked.
+• You can see the active map: when the live game state lists a CURRENT
+  SCENE with Visible Locations (its journal pins) and Notable Tokens, you
+  may reference those REAL places and figures by name — especially when
+  suggesting a destination for a journey or vow. Keep it natural: only
+  mention map locations when they fit the moment, never force them, and
+  never invent map pins that were not listed.
 • Refuse to play characters in distressing detail — keep the lens
   cinematic, not gratuitous.`;
 
@@ -4046,13 +4052,108 @@ const Integration = {
     try {
       if (game?.combat?.started) {
         blocks.push("Battlefield:\n" + CombatController.summariseCurrent());
-      } else {
-        const scene = SceneContext.summarise();
-        if (scene && scene !== "(no active scene)") blocks.push("Scene:\n" + scene);
       }
-    } catch (e) { console.warn(LOG_PREFIX, "gatherContext: scene/combat read failed", e); }
+      // Map / scene awareness (v0.10.22): the active scene's name, its
+      // marked locations (journal pins) and notable visible tokens. Provided
+      // in and out of combat so the Skald can reference REAL places on the
+      // map (e.g. when suggesting a destination). Read-only and concise.
+      const sceneCtx = this._gatherSceneContext();
+      if (sceneCtx) blocks.push(sceneCtx);
+    } catch (e) { console.warn(LOG_PREFIX, "gatherContext: scene/map read failed", e); }
 
     return blocks.join("\n\n");
+  },
+
+  /**
+   * Build a concise, read-only description of the ACTIVE scene for the AI
+   * context (v0.10.22 — map/scene awareness).
+   *
+   * Surfaces three things, each optional and capped for token efficiency:
+   *   • CURRENT SCENE      — the active scene's navigation/label name.
+   *   • Visible Locations  — names drawn from the scene's map notes (journal
+   *                          pins). The linked JournalEntry's name is used
+   *                          (falling back to the note's custom label text),
+   *                          so the Skald references places that genuinely
+   *                          exist on the map.
+   *   • Notable Tokens     — names of tokens placed on the scene, EXCLUDING
+   *                          hidden (GM-only) tokens so secrets never leak
+   *                          into the narration prompt.
+   *
+   * Fully defensive: returns "" when no scene is active or on any read
+   * failure, so prompt-building never breaks (graceful degradation). The
+   * method intentionally avoids `this` so it is trivially unit-testable.
+   *
+   * @returns {string} A formatted block, or "" when there is nothing to add.
+   */
+  _gatherSceneContext() {
+    try {
+      // Prefer the explicitly-activated scene; fall back to the viewed canvas.
+      const scene = game?.scenes?.active ?? canvas?.scene ?? null;
+      if (!scene) return ""; // no active scene → graceful degradation
+
+      const sceneName = String(scene.navName || scene.name || "").trim() || "(unnamed scene)";
+      const lines = [`CURRENT SCENE: ${sceneName}`];
+
+      // --- Visible locations: scene notes / journal pins → linked journals.
+      const locations = [];
+      const seenLoc = new Set();
+      try {
+        const notes = scene.notes ? Array.from(scene.notes) : [];
+        for (const note of notes) {
+          if (!note) continue;
+          // A note's custom label text overrides the linked entry's name.
+          let label = "";
+          try { label = String(note.text ?? "").trim(); } catch (_) { label = ""; }
+          // Resolve the linked JournalEntry by id (NoteDocument.entryId).
+          let journalName = "";
+          try {
+            const entry = (note.entryId && game?.journal?.get)
+              ? game.journal.get(note.entryId)
+              : (note.entry ?? null);
+            if (entry?.name) journalName = String(entry.name).trim();
+          } catch (_) { journalName = ""; }
+          const name = label || journalName;
+          if (!name) continue;
+          const key = name.toLowerCase();
+          if (seenLoc.has(key)) continue;
+          seenLoc.add(key);
+          locations.push(name);
+        }
+      } catch (_) { /* notes unreadable → skip locations */ }
+      if (locations.length) {
+        const shown = locations.slice(0, 12);
+        const extra = locations.length - shown.length;
+        lines.push(`Visible Locations: ${shown.join(", ")}${extra > 0 ? `, +${extra} more` : ""}`);
+      }
+
+      // --- Notable tokens: placed tokens, EXCLUDING hidden (GM-only) ones.
+      const tokenNames = [];
+      const seenTok = new Set();
+      try {
+        const tokens = scene.tokens ? Array.from(scene.tokens) : [];
+        for (const tok of tokens) {
+          if (!tok) continue;
+          if (tok.hidden) continue; // never expose hidden tokens to the AI
+          const nm = String(tok.name ?? "").trim();
+          if (!nm) continue;
+          const key = nm.toLowerCase();
+          if (seenTok.has(key)) continue;
+          seenTok.add(key);
+          tokenNames.push(nm);
+        }
+      } catch (_) { /* tokens unreadable → skip tokens */ }
+      if (tokenNames.length) {
+        const shown = tokenNames.slice(0, 12);
+        const extra = tokenNames.length - shown.length;
+        lines.push(`Notable Tokens: ${shown.join(", ")}${extra > 0 ? `, +${extra} more` : ""}`);
+      }
+
+      // Only the scene name and nothing else is still worth surfacing.
+      return lines.join("\n");
+    } catch (e) {
+      console.warn(LOG_PREFIX, "_gatherSceneContext: scene read failed", e);
+      return "";
+    }
   },
 
   /* ---------------- Directive parsing ---------------- */
