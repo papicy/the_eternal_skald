@@ -421,6 +421,23 @@
   box-shadow: 0 0 8px rgba(214, 168, 90, 0.25);
 }
 
+/* "Mark Complete / Fulfill Vow" button on a progress-track card. */
+.es-btn-complete {
+  border-color: #4a7c59;
+  color: #8fd19e;
+  font-weight: 600;
+}
+.es-btn-complete:hover {
+  border-color: #8fd19e;
+  color: #b6e6c2;
+  box-shadow: 0 0 8px rgba(120, 200, 140, 0.3);
+}
+
+.es-track-complete-note {
+  margin: 8px 0 2px;
+  color: #8fd19e;
+}
+
 /* ------------------------------------------------------------------ */
 /*  FOLLOW-UP (POST-ROLL) SUGGESTION CARD                             */
 /* ------------------------------------------------------------------ */

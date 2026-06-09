@@ -307,6 +307,10 @@ export const IronswornController = {
           id: item.id,
           name: item.name,
           type: item.type,
+          // Modern foundry-ironsworn stores vows/journeys/bonds as `progress`
+          // Items distinguished by `system.subtype` ("vow", "journey", …),
+          // so surface it — callers can no longer rely on `type` alone.
+          subtype: foundry.utils.getProperty(item, "system.subtype") ?? null,
           rank: rank ?? null,
           current: typeof current === "number" ? current : 0,
           boxes: typeof current === "number" ? Math.floor(current / 4) : 0,

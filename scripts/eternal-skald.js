@@ -1245,6 +1245,12 @@ INITIATIVE state telling who is in control. You drive these with:
         omitting the rank so the official value is used.
    [[EFFECT: create_vow <Name> <rank> <description>]]
         Create a vow/quest progress track when the character swears an iron vow.
+   [[EFFECT: complete_vow <Vow Name>]]
+        Mark a vow COMPLETE when it is fulfilled in the fiction — i.e. after
+        a successful "Fulfill Your Vow" move, or whenever the goal of the vow
+        is achieved. Use the vow's EXACT name. This is the ONLY way a vow gets
+        closed, so always emit it when a vow is fulfilled. (You may also use
+        complete_journey <Name> to close a finished journey track.)
    [[EFFECT: initiative <gain|lose>]]
         Record whether the character now has initiative ("in control",
         gain) or has lost it ("in a bad spot", lose).
@@ -3547,7 +3553,7 @@ const Integration = {
 
     // ---- Combat / quest track directives (v0.3.0) ----
     // Accept underscores or spaces: "create_combat" or "create combat".
-    const m = body.match(/^(create[_\s]combat|create[_\s]vow|initiative|end[_\s]combat)\b\s*(.*)$/i);
+    const m = body.match(/^(create[_\s]combat|create[_\s]vow|initiative|end[_\s]combat|complete[_\s]vow|fulfill[_\s]vow|end[_\s]vow|complete[_\s]track|complete[_\s]journey|end[_\s]journey)\b\s*(.*)$/i);
     if (m) {
       const verb = m[1].toLowerCase().replace(/\s+/g, "_");
       const rest = (m[2] || "").trim();
@@ -3572,6 +3578,15 @@ const Integration = {
       if (verb === "end_combat") {
         const { name } = this._splitNameRank(rest);
         return name ? { kind: "end_combat", name } : null;
+      }
+
+      // Mark a vow / journey / progress track COMPLETE. All of these verbs
+      // (complete_vow, fulfill_vow, end_vow, complete_track, complete_journey,
+      // end_journey) collapse to one "complete_track" effect — completion is
+      // the same operation regardless of the track's kind.
+      if (/^(complete_vow|fulfill_vow|end_vow|complete_track|complete_journey|end_journey)$/.test(verb)) {
+        const { name } = this._splitNameRank(rest);
+        return name ? { kind: "complete_track", name } : null;
       }
     }
     return null;
@@ -3760,6 +3775,9 @@ const Integration = {
           } else if (action === "mark-track") {
             // The "Mark Progress" button on a progress-track card.
             await this.doMarkTrack(track);
+          } else if (action === "complete-track") {
+            // The "Mark Complete / Fulfill Vow" button on a progress-track card.
+            await this.doCompleteTrack(track);
           } else if (action === "link-asset") {
             // An inline asset link — open the asset's card from the compendium.
             await this.showAssetLink(assetUuid || asset);
@@ -3855,16 +3873,31 @@ const Integration = {
       const boxes = typeof track.boxes === "number" ? track.boxes : Math.floor((track.current ?? 0) / 4);
       const rank = track.rank ? `<span class="es-track-rank">${escapeHtml(String(track.rank))}</span>` : "";
       const done = track.completed ? " ✓" : "";
+      // A "vow"-subtype track (or legacy type "vow") gets vow-flavoured labels.
+      const isVow = String(track.subtype || track.type || "").toLowerCase() === "vow";
+      const completeLabel = isVow ? "Fulfill Vow (mark complete)" : "Mark Complete";
+
+      // Action buttons: marking progress is always available; "Mark Complete"
+      // is offered only while the track is still open. A completed track shows
+      // a static note instead so the player has clear feedback.
+      const buttons = track.completed
+        ? `<p class="es-track-complete-note"><em>✓ This ${isVow ? "vow" : "track"} is complete.</em></p>`
+        : `
+          <div class="es-move-buttons">
+            <button type="button" class="es-btn es-btn-roll"
+                    data-skald-action="mark-track"
+                    data-track="${escapeHtml(track.name)}">▰ Mark Progress (by rank)</button>
+            <button type="button" class="es-btn es-btn-complete"
+                    data-skald-action="complete-track"
+                    data-track="${escapeHtml(track.name)}">✓ ${escapeHtml(completeLabel)}</button>
+          </div>`;
+
       const body = `
         <div class="es-track-card">
           <p class="es-track-name"><strong>${escapeHtml(track.name)}</strong>${done} ${rank}</p>
           <p class="es-track-progress">Progress: <strong>${boxes}/10</strong> boxes
              <span class="es-track-ticks">(${track.current ?? 0}/40 ticks)</span></p>
-          <div class="es-move-buttons">
-            <button type="button" class="es-btn es-btn-roll"
-                    data-skald-action="mark-track"
-                    data-track="${escapeHtml(track.name)}">▰ Mark Progress (by rank)</button>
-          </div>
+          ${buttons}
         </div>`;
       await Chat.postSkald(body, { variant: "suggest", title: "Progress Track" });
     } catch (e) {
@@ -3890,6 +3923,44 @@ const Integration = {
       }
     } catch (e) {
       console.error(LOG_PREFIX, "mark-track failed", e);
+      ui.notifications?.error(`${SKALD_NAME}: ${e?.message ?? e}`);
+    }
+  },
+
+  /**
+   * Mark a progress track (vow / journey / bond / etc.) COMPLETE — wired from
+   * the "Mark Complete / Fulfill Vow" button on a progress-track card. This is
+   * the manual counterpart to the [[EFFECT: complete_vow …]] directive; both
+   * funnel through {@link IronswornController.completeTrack}.
+   *
+   * Note: Ironsworn lets you fulfill a vow at ANY progress level (the Fulfill
+   * Your Vow roll simply gets harder when progress is low), so completion is
+   * intentionally NOT gated on a full track — the player decides when the vow
+   * is met in the fiction.
+   */
+  async doCompleteTrack(trackName) {
+    try {
+      if (!this.active()) {
+        ui.notifications?.info(`${SKALD_NAME}: ${trackName} — Ironsworn system not active.`);
+        return;
+      }
+      const actor = IronswornController.getActiveCharacter();
+      if (!actor) {
+        ui.notifications?.warn(`${SKALD_NAME}: no active character to complete "${trackName}".`);
+        return;
+      }
+      const res = await IronswornController.completeTrack(actor, trackName);
+      if (res?.ok) {
+        ui.notifications?.info(`${SKALD_NAME}: “${res.name}” marked complete. 🏆`);
+        await Chat.postSystem(`<em>The Skald enacts: completed “${escapeHtml(res.name)}”.</em>`, { gmWhisper: true });
+        // Re-post the (now-completed) track card so the chat reflects the
+        // new state and the player gets immediate visual confirmation.
+        try { await this.showProgressTrackCard(res.name); } catch (_) {}
+      } else {
+        ui.notifications?.warn(`${SKALD_NAME}: ${res?.error ?? "could not mark complete."}`);
+      }
+    } catch (e) {
+      console.error(LOG_PREFIX, "complete-track failed", e);
       ui.notifications?.error(`${SKALD_NAME}: ${e?.message ?? e}`);
     }
   },
@@ -4519,6 +4590,22 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
             if (r?.ok) {
               applied.push(`ended combat “${r.name}”`);
               this._notifyCombat(`🏆 Combat ended: ${r.name}`);
+            }
+            break;
+          }
+          case "complete_track": {
+            r = await IronswornController.completeTrack(actor, eff.name);
+            if (r?.ok) {
+              applied.push(`completed “${r.name}”`);
+              this._notifyCombat(`🏆 Completed: ${r.name}`);
+            } else if (r?.error) {
+              // Surface a clear GM-only note when the track can't be found,
+              // so a fulfilled vow that the AI named slightly differently
+              // doesn't silently fail to close.
+              await Chat.postSystem(
+                `<strong>Could not mark complete:</strong> ${escapeHtml(r.error)}`,
+                { gmWhisper: true }
+              );
             }
             break;
           }
@@ -5880,7 +5967,11 @@ const JournalSystem = {
       const actor = IronswornController.getActiveCharacter?.();
       if (!actor) return null;
       const tracks = IronswornController.getProgressTracks?.(actor) ?? [];
-      const vow = tracks.find(t => t.type === "vow" && !t.completed) ?? tracks.find(t => t.type === "vow");
+      // Modern foundry-ironsworn stores a vow as a `progress` Item with
+      // system.subtype === "vow" (older revisions used type "vow"), so match
+      // either. Prefer the first still-open vow; fall back to any vow.
+      const isVow = t => String(t.subtype || t.type || "").toLowerCase() === "vow";
+      const vow = tracks.find(t => isVow(t) && !t.completed) ?? tracks.find(isVow);
       return vow?.id ?? null;
     } catch (_) { return null; }
   },
