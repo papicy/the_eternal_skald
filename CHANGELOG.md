@@ -13,6 +13,28 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.0] — 2026-06-09
+
+### Added
+- **Follow-up move suggestions after a result.** When the Skald narrates the
+  outcome of a resolved move (the post-roll narration), it now closes with a
+  **"What Comes Next"** card offering **two follow-up moves** to roll next,
+  mirroring the pre-roll suggestion card. Each is a one-click *Roll* button.
+- **"Roll Any Other Move" everywhere.** The post-roll card always includes the
+  same **Roll Any Other Move** option found in pre-roll narration (it opens the
+  full move selector), so you can pivot to any move after every result — even
+  when no follow-ups were suggested.
+
+### Changed
+- **The Skald may no longer invent moves.** The system prompt now ships an
+  explicit, authoritative whitelist of the **only** moves that exist in the
+  Ironsworn / Starforged system and forbids the model from fabricating moves or
+  phrasing an ordinary action as a move (e.g. "roll to Locate Your Objective"
+  unless that move literally exists). As a safety net, every suggested move —
+  pre-roll and post-roll — is now validated against the real move catalogue,
+  and any invented or unknown move is silently dropped before it can reach a
+  rollable button.
+
 ## [0.9.3] — 2026-06-08
 
 ### Fixed

@@ -1139,7 +1139,7 @@ Rules for the block:
  *
  * Returns "" when integration is unavailable so the prompt stays clean.
  */
-function buildIronswornPromptBlock({ allowMoves = false, allowEffects = false, context = "" } = {}) {
+function buildIronswornPromptBlock({ allowMoves = false, allowEffects = false, allowFollowups = false, context = "" } = {}) {
   if (!Integration.active()) return "";
 
   const moveList = IronswornController.moves
@@ -1159,16 +1159,48 @@ roll dice yourself — the system rolls them. Your role is to decide WHICH
 move fits the fiction, suggest it, and then narrate and apply the
 consequences of whatever the dice say.`);
 
+  // Shared move catalogue + anti-invention rule. Included whenever the Skald
+  // is permitted to suggest a move (pre-roll) OR follow-up moves (post-roll).
+  // This list is the AUTHORITATIVE whitelist — the only moves that exist.
+  if (allowMoves || allowFollowups) {
+    parts.push(`\
+VALID MOVES — THE COMPLETE LIST (this is the ONLY set of moves that exists):
+${moveList}
+
+⛔ NEVER INVENT MOVES. The list above is exhaustive — these are the only
+moves in the Ironsworn / Starforged system. Whenever you suggest a move you
+MUST copy its name EXACTLY from this list. Do NOT fabricate moves, rename
+them, or phrase an ordinary action as if it were a move when it is not one.
+For example, NEVER write something like "roll to Locate Your Objective"
+unless "Locate Your Objective" literally appears in the list above. If no
+listed move fits the fiction, suggest none rather than invent one.`);
+  }
+
   if (allowMoves) {
     parts.push(`\
 WHEN A MOVE IS WARRANTED:
 End your reply with EXACTLY ONE suggestion directive on its own line:
   [[MOVE: <Move Name> | <Stat> | <one short reason>]]
-Use a Stat from {Edge, Heart, Iron, Shadow, Wits} — or "—" for moves that
-take no stat (e.g. progress moves). Suggest a move only when the fiction
-demands a roll; for pure conversation or rules questions, omit it.
-Moves you may suggest:
-${moveList}`);
+The <Move Name> MUST be copied verbatim from the VALID MOVES list above —
+never invent one. Use a Stat from {Edge, Heart, Iron, Shadow, Wits} — or "—"
+for moves that take no stat (e.g. progress moves). Suggest a move only when
+the fiction demands a roll; for pure conversation or rules questions, omit it.`);
+  }
+
+  if (allowFollowups) {
+    parts.push(`\
+AFTER YOU NARRATE THE OUTCOME — SUGGEST FOLLOW-UP MOVES:
+Once your narration of the result is complete, close your reply with EXACTLY
+TWO follow-up move directives, each on its own line:
+  [[MOVE: <Move Name> | <Stat> | <one short reason>]]
+  [[MOVE: <Move Name> | <Stat> | <one short reason>]]
+Choose the two moves from the VALID MOVES list above that most naturally
+follow from what just happened and the party's current situation. Both MUST
+be real moves copied verbatim from that list — never invent a move or
+describe a plain action as a move when it is not one. Use a Stat from
+{Edge, Heart, Iron, Shadow, Wits}, or "—" for moves that take no stat. The
+player is ALWAYS separately offered the option to roll any other move, so do
+not mention that yourself.`);
   }
 
   if (allowEffects) {
@@ -3422,6 +3454,46 @@ const Integration = {
   },
 
   /**
+   * Extract MULTIPLE [[MOVE: Name | Stat | reason]] directives (used for
+   * post-roll follow-up suggestions, where the Skald proposes two moves).
+   *
+   * Every suggestion is validated against the REAL move catalogue via
+   * {@link IronswornController._resolveMove}; any move the AI invented (one
+   * that does not exist in the system) is silently dropped, so a fabricated
+   * "move" can never reach the player as a rollable suggestion. Duplicates
+   * are removed and the canonical move name from the catalogue is used.
+   *
+   * @param {string} text
+   * @param {{max?: number}} [opts]
+   * @returns {{ suggestions: Array<{name,stat,reason}>, clean: string }}
+   */
+  parseMoveSuggestions(text, { max = 2 } = {}) {
+    if (typeof text !== "string") return { suggestions: [], clean: "" };
+    const re = /\[\[\s*MOVE\s*:\s*([^|\]]+?)\s*\|\s*([^|\]]+?)\s*(?:\|\s*([^\]]*?))?\s*\]\]/gi;
+    const suggestions = [];
+    const seen = new Set();
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const rawName = (m[1] || "").trim();
+      let stat = (m[2] || "").trim().toLowerCase();
+      if (stat === "—" || stat === "-" || stat === "none" || stat === "n/a") stat = "";
+      const reason = (m[3] || "").trim();
+      // Validate against the real catalogue — DROP invented/unknown moves.
+      const resolved = IronswornController._resolveMove?.(rawName);
+      if (!resolved?.name) continue;
+      const key = resolved.name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      // Use the canonical catalogue name so buttons/labels are always real.
+      suggestions.push({ name: resolved.name, stat, reason });
+      if (suggestions.length >= max) break;
+    }
+    // Strip ALL move directives from the display copy.
+    const clean = text.replace(/\[\[\s*MOVE\s*:[^\]]*?\]\]/gi, "").trim();
+    return { suggestions, clean };
+  },
+
+  /**
    * Extract all [[EFFECT: …]] directives.
    * @returns {{ effects: Array<object>, clean: string }}
    */
@@ -3592,6 +3664,61 @@ const Integration = {
       variant: "suggest",
       title: "A Move Beckons",
       flags: { suggestion: { name: label, stat } }
+    });
+  },
+
+  /**
+   * Post the post-roll "follow-up moves" card (v1.x).
+   *
+   * Mirrors {@link postSuggestionCard} but for AFTER a move resolves: it
+   * offers a Roll button for each of the (already validated, real) follow-up
+   * moves the Skald suggested, and ALWAYS appends the same "roll any other
+   * move" option used in pre-roll narration (the `choose-move` action that
+   * opens {@link showMoveSelector}). The card is shown even when no follow-up
+   * moves were suggested, so the player can always reach the move selector.
+   *
+   * @param {Array<{name,stat,reason}>} suggestions
+   */
+  async postFollowupSuggestionCard(suggestions) {
+    const list = (Array.isArray(suggestions) ? suggestions : []).filter(Boolean);
+
+    const moveButtons = list.map(s => {
+      const move = IronswornController._resolveMove(s.name);
+      const label = move?.name ?? s.name;
+      const stat = s.stat || (move?.stats?.find(st => st !== "progress" && st !== "supply")) || "";
+      const statLabel = stat ? ` <span class="es-move-stat">+${escapeHtml(stat)}</span>` : "";
+      const reason = s.reason
+        ? `<p class="es-move-reason"><em>${escapeHtml(s.reason)}</em></p>`
+        : "";
+      return `
+        <div class="es-followup-move">
+          <button type="button" class="es-btn es-btn-roll"
+                  data-skald-action="roll-move"
+                  data-move="${escapeHtml(label)}"
+                  data-stat="${escapeHtml(stat)}">⚔ Roll ${escapeHtml(label)}${statLabel}</button>
+          ${reason}
+        </div>`;
+    }).join("");
+
+    const intro = list.length
+      ? `<p>The saga calls you onward — you might:</p>`
+      : `<p>The saga calls you onward.</p>`;
+
+    const body = `
+      <div class="es-move-suggest es-followup-suggest">
+        ${intro}
+        <div class="es-move-buttons es-followup-buttons">
+          ${moveButtons}
+          <button type="button" class="es-btn es-btn-choose"
+                  data-skald-action="choose-move"
+                  data-stat="">🎲 Roll Any Other Move</button>
+        </div>
+      </div>`;
+
+    return Chat.postSkald(body, {
+      variant: "suggest",
+      title: "What Comes Next",
+      flags: { suggestion: { followups: list.map(s => ({ name: s.name, stat: s.stat })) } }
     });
   },
 
@@ -4155,14 +4282,19 @@ const Integration = {
 Move: ${parsed.moveName}
 Outcome: ${parsed.outcome}${parsed.match ? " (MATCH — add a twist)" : ""}
 Action score: ${parsed.score ?? "?"} vs challenge dice ${(parsed.challenge ?? []).join(" / ") || "?"}.${intent}${autoLine}
-Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " Then append any warranted [[EFFECT:…]] directives that were NOT already applied above." : " Do not emit effect directives; simply narrate."}`;
+Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " Then append any warranted [[EFFECT:…]] directives that were NOT already applied above." : " Do not emit effect directives; simply narrate."} Finally, suggest TWO follow-up moves (real moves only) with [[MOVE:…]] directives as instructed.`;
+
+    // Whether the Skald may offer follow-up move suggestions after the
+    // narration. Reuses the same "suggestMoves" setting that gates the
+    // pre-roll suggestion card, so both honour one toggle.
+    const allowFollowups = this.active() && (Settings.get("suggestMoves") ?? true);
 
     try {
       Memory.push("general", "user", `(${parsed.moveName} → ${parsed.outcome})`);
       // Recall relevant world memory using the move + the player's intent.
       const memory = await RagBridge.fetchMemory(`${parsed.moveName} ${this._lastIntent || ""}`.trim());
       const messages = [
-        { role: "system", content: buildSystemPrompt({ task, context: ctx, allowEffects, allowJournal: true, memory }) },
+        { role: "system", content: buildSystemPrompt({ task, context: ctx, allowEffects, allowFollowups, allowJournal: true, memory }) },
         ...Memory.get("general")
       ];
 
@@ -4192,6 +4324,20 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
       const safeEffects = this._filterRedundantCombatEffects(effects, parsed, autoSummary);
       if (allowEffects && safeEffects.length) {
         await this.applyEffects(safeEffects, actor);
+      }
+
+      // Offer follow-up moves + the "roll any other move" option, mirroring
+      // the pre-roll narration suggestion card. parseMoveSuggestions drops
+      // any invented/unknown moves, so only real moves are ever proposed; the
+      // card is still posted (with just the "roll any other move" button) when
+      // the Skald suggested none, so the player can always continue the saga.
+      if (allowFollowups) {
+        try {
+          const { suggestions } = this.parseMoveSuggestions(reply, { max: 2 });
+          await this.postFollowupSuggestionCard(suggestions);
+        } catch (e) {
+          console.warn(LOG_PREFIX, "follow-up suggestion card failed", e);
+        }
       }
     } catch (e) {
       console.warn(LOG_PREFIX, "_narrateOutcome failed", e);
