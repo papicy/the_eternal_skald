@@ -4,7 +4,7 @@ An AI-powered storyteller, oracle interpreter, and tactical enemy controller for
 
 Powered by the **Abacus AI ChatLLM** platform (Gemini 3.0 Flash by default).
 
-> ⚠️ **Alpha / Development Version (v0.10.4)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
+> ⚠️ **Alpha / Development Version (v0.10.5)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
 
 As of **v0.3.0**, the Skald integrates directly with the official [**foundry-ironsworn**](https://foundryvtt.com/packages/foundry-ironsworn) system: it reads your character's stats and meters, *suggests* the right Ironsworn move, triggers the system's own dice mechanics on one click, narrates the official strong-hit / weak-hit / miss outcome, and can optionally apply mechanical effects. See [Ironsworn Integration](#ironsworn-integration) below. The module still works standalone in any system — Ironsworn features simply activate when the system is present.
 
@@ -196,6 +196,7 @@ With **AI Applies Mechanical Effects** enabled (now **on by default**), the Skal
 | Auto-Narrate Move Outcomes | On | Automatically narrate any Ironsworn roll's result. |
 | Narration Delay (ms) | 2000 | How long to wait after a roll before auto-narrating, so dice animations can finish. ~2000ms with Dice So Nice, ~500ms without. Range 0–5000. |
 | AI Applies Mechanical Effects | **On** | Let the Skald apply momentum/harm/stress/supply/progress/oracle effects **and** drive the combat automation. |
+| Show Effect Announcements | On | Post the brief *"The Skald enacts: …"* whisper messages that announce the mechanical effects applied. Turn **off** to hide these technical notices while keeping the narration. Per-client. |
 | Auto-Create Combat Tracks | On | Auto-create a combat progress track per foe when a fight begins. Requires *AI Applies Mechanical Effects*. |
 | Default Enemy Rank | Dangerous | Fallback rank for **custom** foes only — used when the Skald invents a foe that isn't in the Ironsworn foe compendium *and* doesn't specify a rank. Standard foes (Bear, Wolf, Wyvern, …) automatically use their official compendium rank. |
 | Debug Logging | Off | Verbose integration diagnostics in the browser console (F12). |
@@ -398,6 +399,7 @@ All in **Configure Settings → The Eternal Skald** (world-scoped, GM-only):
 | Auto-Narrate Move Outcomes | On | Automatically narrate any Ironsworn roll's result. |
 | Narration Delay (ms) | 2000 | How long to wait after a roll before auto-narrating, so dice animations can finish. ~2000ms with Dice So Nice, ~500ms without. Range 0–5000. |
 | AI Applies Mechanical Effects | **On** | Let the Skald apply momentum/harm/stress/supply/progress/oracle effects and run the combat automation. |
+| Show Effect Announcements | On | Post the brief *"The Skald enacts: …"* whisper messages announcing applied effects. Turn off to hide them. Per-client. |
 | Auto-Create Combat Tracks | On | Auto-create a combat progress track per foe when a fight begins. |
 | Default Enemy Rank | Dangerous | Fallback rank for custom foes only — used when an invented foe isn't in the compendium and no rank is given. Standard foes use their official compendium rank. |
 | Auto-Journaling | **On** | **(v0.4.0)** Let the Skald automatically scribe NPCs, locations, discoveries, world facts and story threads into Journal Entries as they emerge in play. |

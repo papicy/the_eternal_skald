@@ -13,6 +13,16 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.5] — 2026-06-09
+
+### Added
+- **New setting: "Show Effect Announcements" (per-client, on by default).**
+  Controls whether the brief `The Skald enacts: …` whisper messages — which
+  announce the mechanical effects the Skald applies (momentum changes, progress
+  marks, completed tracks, etc.) — are posted to chat. Turn it OFF to hide these
+  technical notices and keep the chat focused on the narration. The effects
+  themselves are still applied; only the announcement whisper is suppressed.
+
 ## [0.10.4] — 2026-06-09
 
 ### Fixed
@@ -622,6 +632,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.5]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.5
 [0.10.4]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.4
 [0.10.3]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.3
 [0.10.2]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.2

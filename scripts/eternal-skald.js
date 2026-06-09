@@ -342,6 +342,15 @@ const Settings = {
       default: true
     });
 
+    game.settings.register(MODULE_ID, "showEffectAnnouncements", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.showEffectAnnouncements.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.showEffectAnnouncements.hint"),
+      scope: "client",
+      config: true,
+      type: Boolean,
+      default: true
+    });
+
     /* ---- Combat automation (v0.3.0) ---- */
 
     game.settings.register(MODULE_ID, "autoCreateCombatTracks", {
@@ -3983,7 +3992,9 @@ const Integration = {
       const res = await IronswornController.completeTrack(actor, trackName);
       if (res?.ok) {
         ui.notifications?.info(`${SKALD_NAME}: “${res.name}” marked complete. 🏆`);
-        await Chat.postSystem(`<em>The Skald enacts: completed “${escapeHtml(res.name)}”.</em>`, { gmWhisper: true });
+        if (Settings.get("showEffectAnnouncements") !== false) {
+          await Chat.postSystem(`<em>The Skald enacts: completed “${escapeHtml(res.name)}”.</em>`, { gmWhisper: true });
+        }
         // Re-post the (now-completed) track card so the chat reflects the
         // new state and the player gets immediate visual confirmation.
         try { await this.showProgressTrackCard(res.name); } catch (_) {}
@@ -4686,7 +4697,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
         console.warn(LOG_PREFIX, "applyEffect failed", eff, e);
       }
     }
-    if (applied.length) {
+    if (applied.length && Settings.get("showEffectAnnouncements") !== false) {
       await Chat.postSystem(`<em>The Skald enacts: ${escapeHtml(applied.join("; "))}.</em>`, { gmWhisper: true });
     }
   }
