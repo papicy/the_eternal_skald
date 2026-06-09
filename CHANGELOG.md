@@ -13,6 +13,40 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.9] — 2026-06-09
+
+### Fixed
+- **Progress-track creation now matches the real `foundry-ironsworn` data
+  model exactly.** The integration was re-derived by studying the live system
+  source (`src/module/item/subtypes/progress.ts` and the system's own creators
+  `progress-controls.vue` / `foe-sheet.vue`). Every track — vow, journey, bond
+  and combat foe — is a single Item **type** `progress`, distinguished only by
+  `system.subtype`. Tracks are now created with:
+  - `type: "progress"` (always — there is no separate `vow`/`bond`/`foe` *type*),
+  - the correct `system.subtype` (`vow`, `progress`, `bond`, or `foe`),
+  - a numeric `system.rank` (ChallengeRank 1–5),
+  - `system.current` ticks (0–40; 4 ticks = 1 box) and `system.hasTrack: true`,
+  - a high `sort` value, mirroring the system's own creators.
+- **Removed a stray, non-schema `notes` field** that was being written into
+  `system` on creation. It is not part of `ProgressModel` (the schema's only
+  notes-like field is `description`, an HTMLField), so it was silently dropped
+  during data-model cleaning — now only the valid `description` is written.
+- **Combat foes now use the system's real `foe` subtype** (exactly what the
+  foe sheet creates) instead of a generic `progress` subtype, so they are
+  labelled and grouped correctly on the character sheet.
+
+### Added
+- **The Skald now recognises tracks you create by hand on the character
+  sheet.** Vows (`subtype: "vow"`), journeys (open `progress`-subtype tracks)
+  and foes (`subtype: "foe"`) made directly in `foundry-ironsworn` — without
+  any Skald flag — are now detected, so marking progress, completing them, and
+  the *Fulfill Your Vow* / *Reach Your Destination* progress rolls work on them
+  too (the "vice versa" direction of the integration).
+- **A faithful integration test** (`test/track-integration.test.mjs`) that
+  replicates the real `ProgressModel` schema (field set, `ChallengeRank` cast,
+  `ProgressTicksField` clamping) and asserts both that created track data is
+  schema-valid and that sheet-made tracks are detected (31 assertions).
+
 ## [0.10.8] — 2026-06-09
 
 ### Changed
@@ -718,6 +752,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.9]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.9
 [0.10.8]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.8
 [0.10.7]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.7
 [0.10.6]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.6

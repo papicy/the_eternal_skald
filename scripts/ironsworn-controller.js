@@ -720,29 +720,31 @@ export const IronswornController = {
     const kind = String(trackType).toLowerCase();
     rank = this.normalizeRank(rank);
 
-    // Ironsworn stores vows/bonds/foes/journeys as embedded Items. The
-    // concrete `type` and `subtype` vary by data-model revision, so probe
-    // the registered types and tag what the system actually expects.
-    //   combat  → progress-style track (subtype "progress")
-    //   vow     → subtype "vow"     (special-cased by the system's Fulfill move)
-    //   journey → subtype "progress" — a journey IS a standard Ironsworn
-    //             progress track. foundry-ironsworn ONLY ships localized labels
-    //             for the subtypes "progress", "vow" and "bond"/"connection"
-    //             (see system lang IRONSWORN.ITEM.Subtype*). A non-standard
-    //             subtype like "journey" renders the raw, unlocalized key
-    //             ("IRONSWORN.ITEM.SUBTYPEJOURNEY") on the sheet and skips the
-    //             stock progress structure. So we store journeys as the plain
-    //             "progress" subtype (correct "PROGRESS" label + standard
-    //             mechanics) and identify them as journeys via our own
-    //             `flags.<scope>.trackKind = "journey"` flag instead.
-    //   bond    → subtype "bond"
-    const subtypeMap = { combat: "progress", journey: "progress", vow: "vow", bond: "bond" };
+    // ── foundry-ironsworn progress-track data model (verified against
+    //    src/module/item/subtypes/progress.ts and the system's own creators:
+    //    progress-controls.vue creates `{ type:'progress', system:{ subtype } }`
+    //    and foe-sheet.vue creates `{ type:'progress', system:{ subtype:'foe' } }`).
+    //
+    //    EVERY track — vow, journey, bond and combat foe — is a single Item
+    //    *type* `"progress"`, distinguished ONLY by `system.subtype`:
+    //      vow     → subtype "vow"   (the system's "Fulfill Your Vow" move keys
+    //                                 off this subtype in ProgressModel.fulfill())
+    //      journey → subtype "progress" — a journey IS a standard progress track.
+    //                The system only localizes the subtypes "vow", "progress" and
+    //                "bond"/"connection" (see IRONSWORN.ITEM.Subtype*), so a
+    //                non-standard "journey" subtype renders the raw key on the
+    //                sheet. We therefore store journeys as "progress" (correct
+    //                PROGRESS label + standard mechanics) and tag them as
+    //                journeys via our own `flags.<scope>.trackKind="journey"`.
+    //      bond    → subtype "bond"
+    //      combat  → subtype "foe"   (exactly what the foe sheet creates)
+    const subtypeMap = { combat: "foe", journey: "progress", vow: "vow", bond: "bond" };
     const subtype = subtypeMap[kind] ?? "progress";
-    const itemType = this._pickItemType(
-      kind === "vow"  ? ["vow", "progress"]
-    : kind === "bond" ? ["bond", "bondset", "progress"]
-    :                   ["progress", "foe", "vow"]
-    );
+    // The Item type is ALWAYS "progress" in foundry-ironsworn (there is no
+    // separate "vow"/"bond"/"foe" *type* — only a subtype). Probe the
+    // registered data models defensively, but the practical result is always
+    // "progress".
+    const itemType = this._pickItemType(["progress"]);
 
     // foundry-ironsworn's ChallengeRank is a NumberField (1–5). Write the
     // numeric value directly so document creation never depends on the
@@ -752,15 +754,20 @@ export const IronswornController = {
     const data = {
       name,
       type: itemType,
-      system: { rank: rankNum, current: 0, completed: false, subtype },
+      // Field names verified against ProgressModel.defineSchema():
+      //   subtype (StringField), rank (ChallengeRank 1–5),
+      //   current (ProgressTicksField, 0–40 ticks; 4 ticks = 1 box),
+      //   completed (BooleanField), hasTrack (BooleanField, default true).
+      system: { subtype, rank: rankNum, current: 0, completed: false, hasTrack: true },
+      // Mirror the system's own creators (progress-controls.vue / foe-sheet.vue),
+      // which set a high sort so a freshly made track lands at the list's end.
+      sort: 9000000,
       flags: { [ES_SCOPE]: { trackKind: kind, createdBy: "eternal-skald" } }
     };
-    if (description) {
-      // Different data models name the notes field differently; set the
-      // common ones harmlessly.
-      data.system.description = description;
-      data.system.notes = description;
-    }
+    // `description` (HTMLField) is the only notes-like field in the schema —
+    // do NOT write a "notes" key (it is not part of ProgressModel and would be
+    // dropped during data-model cleaning).
+    if (description) data.system.description = description;
 
     try {
       const [created] = await actor.createEmbeddedDocuments("Item", [data]);
@@ -859,7 +866,7 @@ export const IronswornController = {
       // vow, bond, or an active combat foe) as a candidate journey so that
       // "Reach Your Destination" can still roll against it.
       if (want === "journey"
-          && subtype !== "vow" && subtype !== "bond"
+          && subtype !== "vow" && subtype !== "bond" && subtype !== "foe"
           && flagKind !== "vow" && flagKind !== "bond" && flagKind !== "combat") {
         fallback.push(item);
       }
@@ -964,9 +971,15 @@ export const IronswornController = {
     if (!actor?.items) return [];
     const out = [];
     for (const item of actor.items) {
+      if (item.type !== "progress") continue;
       const kind = item.getFlag?.(ES_SCOPE, "trackKind")
                 ?? foundry.utils.getProperty(item, `flags.${ES_SCOPE}.trackKind`);
-      if (kind !== "combat") continue;
+      // A combat track is one we tagged trackKind "combat", OR any progress
+      // Item carrying the system's own foe subtype (so foes added directly on
+      // the sheet / via the foe browser are recognised too — the "vice versa"
+      // direction of the integration).
+      const subtype = String(foundry.utils.getProperty(item, "system.subtype") ?? "").toLowerCase();
+      if (kind !== "combat" && subtype !== "foe") continue;
       const current = foundry.utils.getProperty(item, "system.current") ?? 0;
       out.push({
         id: item.id,
