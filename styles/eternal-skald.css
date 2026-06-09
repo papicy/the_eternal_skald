@@ -659,6 +659,23 @@
 }
 .eternal-skald-card .es-journal-list li { margin: 0.12em 0; }
 
+/* Map vision / scouting POI list (v0.10.23) */
+.eternal-skald-card .es-poi-list {
+  margin: 0.2em 0 0.6em;
+  padding-left: 1.2em;
+  list-style: none;
+}
+.eternal-skald-card .es-poi-list li {
+  margin: 0.3em 0;
+  padding-left: 0.4em;
+  border-left: 2px solid var(--es-rule, rgba(154, 145, 127, 0.35));
+}
+.eternal-skald-card .es-poi-loc {
+  color: var(--es-muted, #9a917f);
+  font-size: 0.85em;
+  font-style: italic;
+}
+
 .es-journal-stamp {
   color: var(--es-muted, #9a917f);
   font-size: 0.8rem;

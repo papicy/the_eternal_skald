@@ -135,6 +135,17 @@
         "name": "Custom Entity Link Styles",
         "hint": "Let you recolor and re-icon the in-chat entity links (moves, oracles, tracks, assets) to taste via the !link-style command. When OFF, the built-in saga styling is used. Defaults to OFF."
       },
+      "autoAnalyzeScenes": {
+        "name": "Auto-Analyze Scenes (Map Vision)",
+        "hint": "When you view a new scene, let the Skald SEE its map artwork with a vision-capable AI model — identifying terrain, landmarks, paths, hazards and points of interest, and scribing the locations to the chronicle. Only the base map is read (never tokens or fog), each scene is scouted once, and you can always re-scout on demand with the !scout command. Costs one vision AI call per new map. Defaults to ON."
+      },
+      "visionModel": {
+        "name": "Vision Model",
+        "hint": "Which AI model performs map/image analysis. 'Inherit' reuses your Narration Model (ideal when it is already multimodal, e.g. gemini-3-flash-preview or gpt-4o). Otherwise pin a known vision-capable model just for scouting. If the chosen model cannot see images, the Skald skips analysis with a GM-only notice rather than wasting a call.",
+        "choices": {
+          "inherit": "Inherit from Narration Model"
+        }
+      },
       "ragEnabled": {
         "name": "Semantic Memory (RAG)",
         "hint": "Give the Skald a long-term semantic memory of your saga. Journal entries are embedded into a local in-browser vector store and the most relevant ones are recalled before the Skald answers — improving continuity across sessions. Runs entirely in your browser (no server, no cloud). A small model (~90 MB) downloads once on first use and is cached. Defaults to ON; the AI still works fully when disabled."
