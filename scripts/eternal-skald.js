@@ -1,5 +1,5 @@
 /* =====================================================================
- *  THE ETERNAL SKALD v0.10.22 — Foundry VTT v14 Module (Client)
+ *  THE ETERNAL SKALD v0.10.23 — Foundry VTT v14 Module (Client)
  *  ---------------------------------------------------------------------
  *  An AI-powered storytelling and combat-control assistant for Ironsworn
  *  and Ironsworn: Delve campaigns. Powered by Abacus AI ChatLLM.
@@ -158,7 +158,11 @@ const COMMANDS = Object.freeze({
   LINK_STYLE:    "!link-style",
   // --- Maintenance (v0.10.16) ---
   RESET:         "!skald-reset",
-  WIPE:          "!skald-wipe"
+  WIPE:          "!skald-wipe",
+  // --- Map vision / scouting (v0.10.23) ---
+  SCOUT:        "!scout",
+  SURVEY:       "!survey",
+  ANALYZE_MAP:  "!analyze-map"
 });
 
 /* ===================================================================== */
@@ -659,6 +663,52 @@ const Settings = {
       config: false,
       type: Array,
       default: []
+    });
+
+    /* ---- Map vision: auto-analyse scenes (v0.10.23) ----
+     * When ON, the Skald automatically "scouts" the artwork of a newly
+     * viewed/activated scene using a vision-capable AI model, identifying
+     * terrain, landmarks, paths, hazards and points of interest. Discovered
+     * locations are auto-scribed to the Living Chronicle and pinned to the
+     * scene's flags so it is never re-analysed unless forced via !scout.
+     * GM-only (world-scoped). Costs one vision AI call per new scene, so the
+     * GM can disable it and rely on the on-demand !scout command instead.
+     * Defaults to ON.
+     */
+    game.settings.register(MODULE_ID, "autoAnalyzeScenes", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.autoAnalyzeScenes.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.autoAnalyzeScenes.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true
+    });
+
+    /* ---- Vision model (v0.10.23) ----
+     * Which model performs map/image analysis. "inherit" (default) reuses the
+     * main Narration Model (Model Name above) — sensible when that model is
+     * already multimodal (e.g. gemini-3-flash-preview, gpt-4o). The explicit
+     * choices let the GM pin a known vision-capable model just for scouting
+     * without changing the narration model. If the selected model is NOT
+     * vision-capable, the Skald degrades gracefully (a GM-only notice) rather
+     * than wasting a call.
+     */
+    game.settings.register(MODULE_ID, "visionModel", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.visionModel.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.visionModel.hint"),
+      scope: "world",
+      config: true,
+      type: String,
+      choices: {
+        inherit:                  game.i18n.localize("ETERNAL_SKALD.settings.visionModel.choices.inherit"),
+        "gemini-3-flash-preview": "gemini-3-flash-preview",
+        "gemini-2.5-flash":       "gemini-2.5-flash",
+        "gemini-2.5-pro":         "gemini-2.5-pro",
+        "gpt-4o":                 "gpt-4o",
+        "gpt-4o-mini":            "gpt-4o-mini",
+        "claude-3-5-sonnet":      "claude-3-5-sonnet"
+      },
+      default: "inherit"
     });
   },
 
@@ -1516,6 +1566,45 @@ supply directives here; those are applied automatically after dice rolls.`);
 
 const Client = {
   /**
+   * (v0.10.23) Heuristically decide whether a model name denotes a
+   * vision-capable (multimodal) model that can accept inline images via the
+   * OpenAI-compatible `image_url` content part.
+   *
+   * This is a NAME-based heuristic (there is no portable capability endpoint
+   * across the providers the Skald supports), kept deliberately broad and
+   * forgiving. Unknown models default to NOT vision-capable so the caller can
+   * degrade gracefully instead of wasting a call on a text-only model.
+   *
+   * Recognised families (case-insensitive substring match):
+   *   • OpenAI      gpt-4o / gpt-4o-mini / gpt-4-vision / gpt-4-turbo / o1 / o3 / o4
+   *   • Google      gemini (1.5 / 2.x / 3.x — all modern Gemini models are multimodal)
+   *   • Anthropic   claude-3 / claude-3.5 / claude-3.7 / claude-4 (Sonnet/Opus/Haiku)
+   *   • Meta        llama-3.2 vision, llama-4
+   *   • Misc        pixtral, qwen-vl / qwen2-vl, llava, grok-vision / grok-2-vision
+   *
+   * @param {string} model - the model identifier
+   * @returns {boolean} true iff the model is believed to accept images
+   */
+  _modelSupportsVision(model) {
+    const m = String(model || "").toLowerCase();
+    if (!m) return false;
+    // Explicit "vision"/"-vl"/multimodal markers anywhere in the name.
+    if (/(vision|multimodal|-vl\b|\bvl-|llava)/.test(m)) return true;
+    // OpenAI GPT-4o + GPT-4 Turbo + reasoning o-series (all multimodal).
+    if (/gpt-4o|gpt-4\.1|gpt-4-turbo|gpt-4-1106|gpt-5/.test(m)) return true;
+    if (/\bo1\b|\bo3\b|\bo4\b|o1-|o3-|o4-/.test(m)) return true;
+    // Google Gemini — every modern Gemini model is multimodal.
+    if (/gemini/.test(m)) return true;
+    // Anthropic Claude 3 and newer accept images; Claude 2 / instant do not.
+    if (/claude-3|claude-4|claude-3\.5|claude-3\.7|claude-sonnet-4|claude-opus-4/.test(m)) return true;
+    // Meta Llama 3.2 vision + Llama 4 (natively multimodal).
+    if (/llama-3\.2|llama3\.2|llama-4|llama4/.test(m)) return true;
+    // Other open multimodal families.
+    if (/pixtral|qwen2?-vl|qwen-vl|grok.*vision|grok-2|grok-4/.test(m)) return true;
+    return false;
+  },
+
+  /**
    * Extract the assistant text from the upstream JSON, supporting
    * OpenAI `choices[0].message.content` and Abacus AI variants.
    */
@@ -1802,7 +1891,10 @@ const Client = {
    */
   async chat(messages, opts = {}) {
     const apiKey   = Settings.get("apiKey");
-    const model    = Settings.get("modelName")   || DEFAULT_MODEL;
+    // (v0.10.23) Callers may pin a specific model for one call (e.g. the map
+    // vision scout uses a multimodal model that may differ from the narration
+    // model). Falls back to the configured Model Name, then the default.
+    const model    = opts.model || Settings.get("modelName") || DEFAULT_MODEL;
     const endpoint = Settings.get("apiEndpoint") || DEFAULT_ENDPOINT;
 
     if (!apiKey) {
@@ -2990,6 +3082,10 @@ function dispatchCommand(rawText) {
       // --- Maintenance (v0.10.16) ---
       case COMMANDS.RESET:         return () => Commands.reset(args);
       case COMMANDS.WIPE:          return () => Commands.reset(args);
+      // --- Map vision / scouting (v0.10.23) ---
+      case COMMANDS.SCOUT:         return () => Commands.scout(args);
+      case COMMANDS.SURVEY:        return () => Commands.scout(args);
+      case COMMANDS.ANALYZE_MAP:   return () => Commands.scout(args);
       default:               return null;
     }
   })();
@@ -3058,7 +3154,8 @@ const Commands = {
       [COMMANDS.RELATIONSHIPS, "Show the web of who-knows-whom across the chronicle. (alias <code>!map</code>)"],
       [COMMANDS.TEMPLATE,      "GM-only: scribe a structured entry by hand. e.g. <code>!template npc</code>"],
       [COMMANDS.LINK_STYLE,    "GM-only: customise narration link colours/icons. e.g. <code>!link-style oracle #ff8800 fa-eye</code> (or <code>!link-style reset</code>)"],
-      [COMMANDS.RESET,         "GM-only: wipe the chronicle for a new campaign — deletes unlocked Skald entries, semantic memory, conversation history & timeline (asks to confirm first). Alias <code>!skald-wipe</code>."]
+      [COMMANDS.RESET,         "GM-only: wipe the chronicle for a new campaign — deletes unlocked Skald entries, semantic memory, conversation history & timeline (asks to confirm first). Alias <code>!skald-wipe</code>."],
+      [COMMANDS.SCOUT,         "GM-only: have the Skald SEE & scout the current map — identifies terrain, landmarks & points of interest, and scribes them to the chronicle. Aliases <code>!survey</code>, <code>!analyze-map</code>."]
     ];
 
     const tableRows = rows.map(([c, d]) =>
@@ -3124,6 +3221,22 @@ const Commands = {
     const ctx = CombatController.summariseCurrent();
     const task = `Provide a brief tactical narration AND a concrete suggestion for the current combat moment, grounded in Ironsworn moves (Enter the Fray, Strike, Clash, Secure an Advantage, Endure Harm). Be specific. Situation provided by the GM: ${args || "(unspecified)"}\n\nBattlefield snapshot:\n${ctx}`;
     return runConversation("combat", args || "tactical analysis", { task, label: "Counsel of Iron", variant: "combat" });
+  },
+
+  /* --------------- !scout / !survey / !analyze-map (v0.10.23) ------- */
+  async scout(_args) {
+    // GM-only — scouting writes scene flags and journal entries.
+    if (!game.user?.isGM) {
+      return Chat.postSystem(
+        `<em>Only the GM may send ${SKALD_NAME} to scout the map.</em>`,
+        { gmWhisper: true }
+      );
+    }
+    if (!Settings.get("apiKey")) {
+      return Chat.postSystem(game.i18n.localize("ETERNAL_SKALD.errors.noApiKey"), { gmWhisper: true });
+    }
+    // Force a fresh analysis even if this scene was scouted before.
+    return MapVision.analyzeScene(null, { force: true });
   },
 
   /* ------------------- !journal / !journals (v0.4.0) --------------- */
@@ -7486,6 +7599,402 @@ const SceneContext = {
 };
 
 /* ===================================================================== */
+/*  §12b MAP VISION / SCOUTING (v0.10.23)                                 */
+/* ===================================================================== */
+
+/**
+ * The Eternal Skald can SEE the map. Given the active scene's background
+ * artwork, a vision-capable (multimodal) AI model is asked to scout the
+ * terrain, landmarks, paths, hazards and points of interest, and the result
+ * is:
+ *   • cached on the scene's flags so it is never re-analysed automatically;
+ *   • posted to chat as a styled "Scouting" card;
+ *   • scribed into the Living Chronicle as Location journal entries.
+ *
+ * Everything here is GM-only, read-only on the map itself (we only read the
+ * BASE background image — never tokens, drawings or fog), and degrades
+ * gracefully: missing background, a non-vision model, a tainted canvas or a
+ * failed AI call all resolve to a quiet GM notice rather than an exception.
+ *
+ * Token efficiency: the image is downscaled to a max dimension and exported
+ * as JPEG (quality 0.85) before upload, the prompt requests strict JSON, and
+ * a scene is analysed at most once unless the GM forces a re-scout (!scout).
+ */
+const MapVision = {
+  /** Scene flag key under MODULE_ID that stores the cached analysis. */
+  FLAG_KEY: "mapAnalysis",
+
+  /**
+   * The vision instruction. Strict-JSON output keeps parsing reliable and
+   * bounds token cost. We never ask the model to invent lore — only to
+   * describe what is visibly depicted on the map.
+   */
+  VISION_PROMPT: [
+    "You are scouting a tabletop RPG exploration/battle map image for a Game Master.",
+    "Analyze this map. Identify terrain, landmarks, paths, hazards, and points of interest (POIs).",
+    "Respond with STRICT JSON only — no prose, no markdown fences — in exactly this shape:",
+    "{",
+    '  "summary": "<2-3 sentence overview of the terrain and atmosphere>",',
+    '  "terrain": "<dominant terrain and notable natural features>",',
+    '  "pois": [',
+    '    { "name": "<short name, 2-4 words>", "type": "<landmark|path|hazard|structure|water|settlement|natural|other>", "description": "<one concise sentence>", "location": "<approximate position, e.g. north-west, centre, lower edge>" }',
+    "  ]",
+    "}",
+    "Identify between 3 and 10 of the most notable POIs. Describe ONLY what is visibly depicted; do not invent character names or backstory."
+  ].join("\n"),
+
+  /** True iff automatic scene analysis is enabled (defaults to ON). */
+  enabled() { return Settings.get("autoAnalyzeScenes") !== false; },
+
+  /** Only the GM may scout (it writes scene flags and journal entries). */
+  _canWrite() {
+    try { return !!(game?.user?.isGM); } catch (_) { return false; }
+  },
+
+  /** Resolve which model should perform vision (honouring "inherit"). */
+  _visionModel() {
+    const sel = Settings.get("visionModel") || "inherit";
+    if (sel && sel !== "inherit") return sel;
+    return Settings.get("modelName") || DEFAULT_MODEL;
+  },
+
+  /** Resolve a scene argument to a concrete Scene (active/canvas fallback). */
+  _resolveScene(scene) {
+    if (scene && typeof scene === "object") return scene;
+    try { return game?.scenes?.active ?? canvas?.scene ?? null; }
+    catch (_) { return null; }
+  },
+
+  /**
+   * The BASE background image source for a scene. Foundry v10+ stores it at
+   * `scene.background.src`; very old data used `scene.img`. Tokens, tiles,
+   * drawings and fog are intentionally NOT read — only the base map.
+   */
+  _sceneBackgroundSrc(scene) {
+    try {
+      const s = scene?.background?.src ?? scene?.img ?? null;
+      return (typeof s === "string" && s.trim()) ? s.trim() : null;
+    } catch (_) { return null; }
+  },
+
+  /** Read the cached analysis flag for a scene (or null). */
+  getCached(scene) {
+    try { return scene?.getFlag?.(MODULE_ID, this.FLAG_KEY) ?? null; }
+    catch (_) { return null; }
+  },
+
+  /** Persist the analysis onto the scene's flags (GM-only, non-fatal). */
+  async _storeAnalysis(scene, analysis) {
+    try {
+      if (!scene?.setFlag) return false;
+      await scene.setFlag(MODULE_ID, this.FLAG_KEY, analysis);
+      return true;
+    } catch (e) {
+      console.warn(LOG_PREFIX, "MapVision: could not store analysis flag:", e?.message || e);
+      return false;
+    }
+  },
+
+  /**
+   * Turn a possibly-relative Foundry path (e.g. "worlds/x/maps/forest.webp")
+   * into a same-origin absolute URL. Absolute http(s) and data: URLs are
+   * returned unchanged. Used both for loading the image and for the
+   * remote-URL pass-through fallback when canvas export is blocked by CORS.
+   */
+  _toAbsoluteUrl(src) {
+    const s = String(src || "");
+    if (!s) return "";
+    if (/^(https?:|data:)/i.test(s)) return s;
+    try {
+      const origin = (typeof window !== "undefined" && window.location && window.location.origin)
+        ? window.location.origin : "";
+      if (!origin) return s;
+      return `${origin}/${s.replace(/^\/+/, "")}`;
+    } catch (_) { return s; }
+  },
+
+  /**
+   * Load `src` into an <img>, draw it onto an offscreen <canvas> downscaled to
+   * `maxDim` (preserving aspect ratio) and export as a JPEG data URL.
+   *
+   * Resolves to null (rather than rejecting) on any failure — missing DOM
+   * APIs, a load error, or a CORS-tainted canvas that cannot be exported — so
+   * the caller can fall back to passing a remote URL straight to the model.
+   *
+   * @returns {Promise<string|null>} a `data:image/jpeg;base64,…` URL or null
+   */
+  _downscaleToDataUrl(src, maxDim = 2048, quality = 0.85) {
+    return new Promise((resolve) => {
+      try {
+        if (typeof Image === "undefined" || typeof document === "undefined") { resolve(null); return; }
+        const img = new Image();
+        // crossOrigin only matters for remote http(s); data: URLs are same-origin.
+        if (/^https?:/i.test(src)) img.crossOrigin = "anonymous";
+        img.onload = () => {
+          try {
+            const width = img.naturalWidth || img.width;
+            const height = img.naturalHeight || img.height;
+            if (!width || !height) { resolve(null); return; }
+            let w = width, h = height;
+            const longest = Math.max(w, h);
+            if (longest > maxDim) {
+              const scale = maxDim / longest;
+              w = Math.max(1, Math.round(w * scale));
+              h = Math.max(1, Math.round(h * scale));
+            }
+            const canvas = document.createElement("canvas");
+            canvas.width = w; canvas.height = h;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) { resolve(null); return; }
+            ctx.drawImage(img, 0, 0, w, h);
+            let url = null;
+            try { url = canvas.toDataURL("image/jpeg", quality); }
+            catch (taintErr) {
+              console.warn(LOG_PREFIX, "MapVision: canvas tainted (CORS) — cannot export:", taintErr?.message || taintErr);
+              url = null;
+            }
+            resolve((typeof url === "string" && url.startsWith("data:")) ? url : null);
+          } catch (_) { resolve(null); }
+        };
+        img.onerror = () => resolve(null);
+        img.src = this._toAbsoluteUrl(src);
+      } catch (_) { resolve(null); }
+    });
+  },
+
+  /**
+   * Capture the scene's base map as an image reference suitable for the
+   * OpenAI-compatible `image_url` content part. Prefers a downscaled JPEG
+   * data URL (token-efficient, CORS-safe); falls back to an absolute remote
+   * URL when canvas export is unavailable. Returns null when there is no map.
+   *
+   * @returns {Promise<string|null>}
+   */
+  async _captureSceneImage(scene, opts = {}) {
+    const maxDim = opts.maxDim ?? 2048;
+    const quality = opts.quality ?? 0.85;
+    try {
+      const src = this._sceneBackgroundSrc(scene);
+      if (!src) return null;
+      const dataUrl = await this._downscaleToDataUrl(src, maxDim, quality);
+      if (dataUrl) return dataUrl;
+      // Fallback: a publicly-reachable URL can be sent to the model directly.
+      const abs = this._toAbsoluteUrl(src);
+      return /^https?:/i.test(abs) ? abs : null;
+    } catch (e) {
+      console.warn(LOG_PREFIX, "MapVision._captureSceneImage failed:", e?.message || e);
+      return null;
+    }
+  },
+
+  /** Build the multimodal (text + image) message array for the vision call. */
+  _buildVisionMessages(imageUrl, sceneName) {
+    const intro = sceneName ? `\n\nThis map is for the scene titled "${sceneName}".` : "";
+    return [
+      { role: "system", content: "You are a precise visual cartographer. When asked for JSON you output only valid JSON." },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: `${this.VISION_PROMPT}${intro}` },
+          { type: "image_url", image_url: { url: imageUrl } }
+        ]
+      }
+    ];
+  },
+
+  /**
+   * Parse the model's reply into `{ summary, terrain, pois[] }`. Tolerant of
+   * markdown code fences and surrounding prose; never throws. Falls back to
+   * stashing the raw text as the summary if no JSON can be recovered.
+   */
+  _parseAnalysis(text) {
+    const out = { summary: "", terrain: "", pois: [] };
+    if (typeof text !== "string" || !text.trim()) return out;
+    let raw = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+    let obj = null;
+    try { obj = JSON.parse(raw); }
+    catch (_) {
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (m) { try { obj = JSON.parse(m[0]); } catch (_) { obj = null; } }
+    }
+    if (!obj || typeof obj !== "object") {
+      out.summary = raw.slice(0, 600);
+      return out;
+    }
+    out.summary = typeof obj.summary === "string" ? obj.summary.trim() : "";
+    out.terrain = typeof obj.terrain === "string" ? obj.terrain.trim() : "";
+    const rawPois = Array.isArray(obj.pois) ? obj.pois
+                  : (Array.isArray(obj.POIs) ? obj.POIs
+                  : (Array.isArray(obj.points_of_interest) ? obj.points_of_interest : []));
+    const seen = new Set();
+    for (const p of rawPois) {
+      if (!p || typeof p !== "object") continue;
+      const name = String(p.name ?? "").trim();
+      if (!name) continue;
+      const key = name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.pois.push({
+        name: name.slice(0, 80),
+        type: (String(p.type ?? "other").trim().toLowerCase().slice(0, 30)) || "other",
+        description: String(p.description ?? "").trim().slice(0, 400),
+        location: String(p.location ?? "").trim().slice(0, 80)
+      });
+      if (out.pois.length >= 12) break;
+    }
+    return out;
+  },
+
+  /**
+   * Scribe discovered POIs into the Living Chronicle as Location entries,
+   * reusing the existing journaling pipeline (dedupe, toasts, RAG indexing).
+   * Fully guarded by the journal system's own enabled/permission checks.
+   */
+  _journalPois(pois, scene) {
+    try {
+      if (!Array.isArray(pois) || !pois.length) return 0;
+      if (!JournalSystem.enabled?.() || !JournalSystem.canWrite?.()) return 0;
+      const sceneName = String(scene?.navName || scene?.name || "").trim();
+      const entities = pois.map(p => {
+        const ent = {
+          type: "location",
+          name: p.name,
+          description: p.description || `A ${p.type || "point of interest"} observed on the map.`
+        };
+        if (sceneName) ent.region = sceneName;
+        const feats = [];
+        if (p.type) feats.push(`Type: ${p.type}.`);
+        if (p.location) feats.push(`Located at the ${p.location} of the map.`);
+        if (feats.length) ent.features = feats.join(" ");
+        return ent;
+      });
+      JournalSystem.ingestMetadata({ entities }, { channel: "map-scout" });
+      return entities.length;
+    } catch (e) {
+      console.warn(LOG_PREFIX, "MapVision._journalPois failed:", e?.message || e);
+      return 0;
+    }
+  },
+
+  /** Post the public "Scouting" card and a GM-only chronicle footnote. */
+  async _postScoutCard(analysis, journaledCount = 0) {
+    try {
+      const pois = Array.isArray(analysis.pois) ? analysis.pois : [];
+      const parts = [];
+      if (analysis.summary) parts.push(`<p>${escapeHtml(analysis.summary)}</p>`);
+      if (analysis.terrain) parts.push(`<p><strong>Terrain:</strong> ${escapeHtml(analysis.terrain)}</p>`);
+      if (pois.length) {
+        const items = pois.map(p => {
+          const loc = p.location ? ` <span class="es-poi-loc">(${escapeHtml(p.location)})</span>` : "";
+          const typ = p.type ? `<em>${escapeHtml(p.type)}</em> — ` : "";
+          return `<li><strong>${escapeHtml(p.name)}</strong>${loc}<br/>${typ}${escapeHtml(p.description || "")}</li>`;
+        }).join("");
+        parts.push(`<p><strong>Points of Interest:</strong></p><ul class="es-poi-list">${items}</ul>`);
+      }
+      if (!parts.length) parts.push(`<p><em>The map yields no clear landmarks to my eye.</em></p>`);
+      const title = analysis.scene ? `Scouting: ${analysis.scene}` : "Scouting the Map";
+      await Chat.postSkald(parts.join(""), { variant: "scene", title });
+      if (journaledCount > 0) {
+        await Chat.postSystem(
+          `<em>${journaledCount} location${journaledCount === 1 ? "" : "s"} scribed to the chronicle from the map` +
+          `${analysis.scene ? ` of <strong>${escapeHtml(analysis.scene)}</strong>` : ""}. ` +
+          `Scouted with <code>${escapeHtml(analysis.model)}</code>.</em>`,
+          { gmWhisper: true }
+        );
+      }
+    } catch (e) {
+      console.warn(LOG_PREFIX, "MapVision._postScoutCard failed:", e?.message || e);
+    }
+  },
+
+  /**
+   * Scout a scene's map: capture → vision call → parse → cache → journal →
+   * post. Returns the stored analysis object, or null on any graceful exit.
+   *
+   * @param {Scene} [scene] - target scene (defaults to active/canvas scene)
+   * @param {object} [opts]
+   * @param {boolean} [opts.force]  - re-analyse even if a cached result exists
+   * @param {boolean} [opts.silent] - suppress the "surveys…" start notice (auto mode)
+   */
+  async analyzeScene(scene, opts = {}) {
+    const force = !!opts.force;
+    try {
+      const sc = this._resolveScene(scene);
+      if (!sc) {
+        if (force) await Chat.postSystem(`<em>${SKALD_NAME} finds no active scene to scout.</em>`, { gmWhisper: true });
+        return null;
+      }
+      if (!this._canWrite()) return null;
+
+      // Skip already-scouted scenes unless explicitly forced.
+      const cached = this.getCached(sc);
+      if (cached && !force) {
+        console.log(LOG_PREFIX, "MapVision: scene already scouted — skipping (use !scout to force).");
+        return cached;
+      }
+
+      const src = this._sceneBackgroundSrc(sc);
+      if (!src) {
+        if (force) await Chat.postSystem(`<em>${SKALD_NAME} peers about, but this scene has no map to scout.</em>`, { gmWhisper: true });
+        return null;
+      }
+
+      const model = this._visionModel();
+      if (!Client._modelSupportsVision(model)) {
+        await Chat.postSystem(
+          `<em>${SKALD_NAME} cannot scout the map: <code>${escapeHtml(model)}</code> has no eyes for images. ` +
+          `Choose a vision-capable model under <em>Settings → Vision Model</em>.</em>`,
+          { gmWhisper: true }
+        );
+        return null;
+      }
+
+      const sceneName = String(sc.navName || sc.name || "").trim();
+      if (!opts.silent) {
+        await Chat.postSystem(
+          `<em>${SKALD_NAME} surveys ${sceneName ? `<strong>${escapeHtml(sceneName)}</strong>` : "the map"}…</em>`,
+          { gmWhisper: true }
+        );
+      }
+
+      const imageUrl = await this._captureSceneImage(sc);
+      if (!imageUrl) {
+        await Chat.postSystem(`<em>${SKALD_NAME} could not capture the map image to scout it.</em>`, { gmWhisper: true });
+        return null;
+      }
+
+      const messages = this._buildVisionMessages(imageUrl, sceneName);
+      let reply = "";
+      try {
+        reply = await Client.chat(messages, { model, temperature: 0.3, maxTokens: 900 });
+      } catch (e) {
+        console.warn(LOG_PREFIX, "MapVision: vision call failed:", e?.message || e);
+        await Chat.postSystem(`<em>${SKALD_NAME}'s scrying of the map failed: ${escapeHtml(e?.message || String(e))}</em>`, { gmWhisper: true });
+        return null;
+      }
+
+      const parsed = this._parseAnalysis(reply);
+      const analysis = {
+        timestamp: Date.now(),
+        model,
+        scene: sceneName,
+        summary: parsed.summary,
+        terrain: parsed.terrain,
+        pois: parsed.pois
+      };
+
+      await this._storeAnalysis(sc, analysis);
+      const journaled = this._journalPois(parsed.pois, sc);
+      await this._postScoutCard(analysis, journaled);
+      return analysis;
+    } catch (e) {
+      console.error(LOG_PREFIX, "MapVision.analyzeScene failed:", e);
+      return null;
+    }
+  }
+};
+
+/* ===================================================================== */
 /*  §13 HOOK REGISTRATIONS                                                */
 /* ===================================================================== */
 
@@ -7698,6 +8207,9 @@ Hooks.once("ready", async () => {
     lore: LoreGenerator,
     // --- Auto-journaling chronicle (v0.4.0) ---
     journal: JournalSystem,
+    // --- Map vision / scouting (v0.10.23) ---
+    mapVision: MapVision,
+    scout: (scene) => MapVision.analyzeScene(scene, { force: true }),
     // --- Browser-based RAG / semantic memory (v0.5.0) ---
     rag: BrowserRAG,
     resetMemory: (ch) => Memory.reset(ch),
@@ -7773,6 +8285,50 @@ Hooks.on("updateCombat", (combat, changed, options, userId) => {
   CombatController.onUpdateCombat(combat, changed, options, userId).catch(err => {
     console.error(LOG_PREFIX, "Combat handler failed", err);
   });
+});
+
+/* === canvasReady: auto-scout newly viewed scenes (v0.10.23) ==========
+ * When the GM views/activates a scene, the Skald can automatically "scout"
+ * its base map artwork with a vision model — identifying terrain, landmarks
+ * and points of interest, and scribing the latter to the chronicle.
+ *
+ * Guards (each cheap, fail-safe):
+ *   • GM only             — analysis writes scene flags + journal entries.
+ *   • Setting enabled     — "Auto-Analyze Scenes" (defaults ON).
+ *   • AI Mode ON          — respect the master toggle, like other AI features.
+ *   • Once per scene id   — an in-memory guard prevents re-firing for the same
+ *                           scene on every redraw; MapVision.analyzeScene also
+ *                           skips scenes that already carry a cached analysis.
+ * Fire-and-forget: the scout never blocks canvas rendering and swallows all
+ * errors so a vision hiccup can never break the table.
+ * ==================================================================== */
+const _autoScoutedScenes = new Set();
+Hooks.on("canvasReady", (canvasObj) => {
+  try {
+    if (!game.user?.isGM) return;
+    if (game.users?.activeGM && game.users.activeGM.id !== game.user.id) return;
+    if (!MapVision.enabled()) return;
+    if (Settings.get("aiMode") === false) return;
+
+    const scene = canvasObj?.scene ?? canvas?.scene ?? game?.scenes?.active ?? null;
+    const sceneId = scene?.id ?? null;
+    if (!scene || !sceneId) return;
+
+    // Skip if we already auto-scouted this scene this session, or it carries
+    // a cached analysis already (MapVision double-checks, but this avoids the
+    // async churn entirely on every redraw of the same map).
+    if (_autoScoutedScenes.has(sceneId)) return;
+    if (MapVision.getCached(scene)) { _autoScoutedScenes.add(sceneId); return; }
+    if (!MapVision._sceneBackgroundSrc(scene)) return; // nothing to scout
+
+    _autoScoutedScenes.add(sceneId);
+    // Auto mode is quieter: suppress the "surveys…" start notice.
+    Promise.resolve()
+      .then(() => MapVision.analyzeScene(scene, { force: false, silent: true }))
+      .catch(err => console.warn(LOG_PREFIX, "auto-scout failed:", err?.message || err));
+  } catch (err) {
+    console.warn(LOG_PREFIX, "canvasReady auto-scout hook failed:", err?.message || err);
+  }
 });
 
 /* === HOOK #3: createChatMessage (last-resort fallback) ================

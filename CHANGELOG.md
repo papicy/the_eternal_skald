@@ -13,6 +13,75 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.23] — 2026-06-09
+
+### Added
+- **The Skald *sees* your map (vision / image analysis).** Where v0.10.22
+  read the scene's *metadata* (names, pins, tokens), the Skald can now
+  **look at the actual background map image** and describe what is on it.
+  A new **`MapVision`** subsystem captures the scene's background image,
+  sends it to a **vision-capable LLM**, and turns the reply into a short
+  scouting report plus a set of **points of interest (POIs)**.
+  - **`MapVision._captureSceneImage()`** — reads only the scene's
+    **background image** (`scene.background.src`, or the legacy
+    `scene.img`), loads it onto an off-screen canvas, **downscales** it so
+    the longest edge is at most **2048&nbsp;px**, and re-encodes it as a
+    **JPEG at quality 0.85** as a base64 `data:` URL. Handles `data:`
+    URLs, absolute remote URLs, and site-relative paths (resolved against
+    the page origin). If the image taints the canvas (a remote host with
+    no CORS), it gracefully **falls back to sending the image URL** so a
+    vision model that can fetch URLs still works.
+  - **Vision LLM integration.** `MapVision._buildVisionMessages()` builds
+    a proper **multimodal** chat payload (an OpenAI-style `content` array
+    with a `text` part and an `image_url` part) and sends it through the
+    existing `Client.chat()` path. A new `Client._modelSupportsVision()`
+    heuristic detects whether the configured model can accept images and
+    **degrades gracefully** (whispers the GM and does nothing) when it
+    cannot.
+  - **Automatic scouting on scene load.** A new **`canvasReady`** hook
+    auto-analyses a freshly-viewed scene **once** (per-scene, cached),
+    GM-side only, when **Auto-Analyze Scenes** is enabled and the scene
+    has a background image. Results are cached so the same scene is never
+    re-billed on every load.
+  - **`!scout` command** (aliases **`!survey`**, **`!analyze-map`**) —
+    GM-only; **forces a fresh re-analysis** of the current scene, posts a
+    public *Skald* scouting card, and whispers the GM a summary.
+  - **POIs become journal locations.** Discovered points of interest are
+    auto-scribed as **location** entries in the Living Chronicle (via
+    `JournalSystem.ingestMetadata(...)`), de-duplicated against existing
+    entries, and the GM gets a whispered summary of what was added.
+  - **Caching.** The full analysis (timestamp, model used, and POI list)
+    is stored on `scene.flags["the-eternal-skald"].mapAnalysis`, so it
+    survives reloads and is reused until you force a re-`!scout`.
+
+### Settings
+- **Auto-Analyze Scenes** (`autoAnalyzeScenes`, world-scoped, default
+  **on**) — toggles the automatic `canvasReady` scouting.
+- **Vision Model** (`visionModel`, world-scoped, default **Inherit**) —
+  choose which model handles image analysis. *Inherit* reuses your main
+  model; or pick a specific vision-capable model. See the README for the
+  list of supported models and their relative token costs.
+
+### Notes
+- **Read-only base map only.** Vision analyses **only the scene's
+  background image** — never tokens, fog of war, drawings, walls, or
+  hidden GM content — so player secrets and table state are never sent to
+  the model. The scene itself is never modified.
+- **Token-efficient & graceful.** Images are downscaled and JPEG-
+  compressed before sending; analysis is cached per-scene; and every step
+  degrades quietly (no scene, no background, non-vision model, network
+  failure) without ever breaking play.
+
+### Verified
+- New `test/map-vision.test.mjs` extracts and exercises the real
+  `MapVision` helpers and `Client._modelSupportsVision()` against mock
+  Foundry/canvas/Image globals: background-source resolution (modern +
+  legacy), absolute/relative/data URL handling, downscale-dimension math,
+  JPEG quality, multimodal message shape, tolerant JSON parsing (fenced /
+  prose-wrapped / deduped / capped), POI→location mapping, cache
+  read/write, and the vision-model heuristic. **126 assertions pass**; the
+  **full suite is green at 344 assertions across 10 files**.
+
 ## [0.10.22] — 2026-06-09
 
 ### Added
@@ -1117,6 +1186,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.23]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.23
 [0.10.22]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.22
 [0.10.21]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.21
 [0.10.20]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.20
