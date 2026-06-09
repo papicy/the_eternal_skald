@@ -13,6 +13,30 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.19] — 2026-06-09
+
+### Changed
+- **Removed the last escaped backticks from the AI-prompt templates.** The
+  foe-prompt template literals quoted the keyword *unique* as `` \`unique\` ``
+  (escaped backticks inside a template literal). This is valid JavaScript, but it
+  is exactly the fragile detail that kept being blamed for the recurring line-1342
+  `missing ) after argument list` error. The word is now written with plain single
+  quotes (`'unique'`), so **there are zero escaped backticks left in the file** and
+  the template literal can never be mis-scanned as unterminated. No functional
+  change to the prompt's meaning.
+
+### Verified
+- The current `scripts/eternal-skald.js` parses **cleanly in five independent
+  parsers**: Node/V8 in non-strict *script* mode, Node/V8 in strict *module* mode,
+  **Acorn** (`sourceType: 'module'`), **Babel** (`sourceType: 'module'`), and a
+  **real Chrome ES-module load** — in the browser test the module parses and
+  *executes*, failing only later at runtime on the Foundry-only `Hooks` global,
+  which proves there is **no parse/syntax error**. All unit tests pass.
+- **If you still see `missing ) after argument list` at line 1342, you are loading
+  a cached copy of an old (pre-v0.10.17) script**, not this code. Fully update the
+  module so Foundry re-downloads the files, then hard-refresh (`Ctrl+Shift+R` /
+  `Cmd+Shift+R`) or restart Foundry to flush the cached module.
+
 ## [0.10.18] — 2026-06-09
 
 ### Changed
@@ -1013,6 +1037,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.19]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.19
 [0.10.18]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.18
 [0.10.17]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.17
 [0.10.16]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.16

@@ -1,5 +1,5 @@
 /* =====================================================================
- *  THE ETERNAL SKALD v0.10.18 — Foundry VTT v14 Module (Client)
+ *  THE ETERNAL SKALD v0.10.19 — Foundry VTT v14 Module (Client)
  *  ---------------------------------------------------------------------
  *  An AI-powered storytelling and combat-control assistant for Ironsworn
  *  and Ironsworn: Delve campaigns. Powered by Abacus AI ChatLLM.
@@ -1235,10 +1235,10 @@ RULES FOR CREATING FOES:
   invent names for ordinary creatures, and do NOT rename catalogue foes.
 • ONLY an IMPORTANT NARRATIVE foe — a named boss or unique antagonist the story
   is built around, who is NOT in the catalogue — may be CUSTOM-created. When you
-  do, give it an explicit rank AND append the keyword \`unique\` at the end, e.g.
+  do, give it an explicit rank AND append the keyword 'unique' at the end, e.g.
   [[EFFECT: create_combat Hrafn the Oathbreaker formidable unique]].
 • When unsure, prefer the closest catalogue foe over inventing one. Reserve
-  custom \`unique\` foes for genuine story-defining antagonists, not routine mobs.`;
+  custom 'unique' foes for genuine story-defining antagonists, not routine mobs.`;
   } catch (_) {
     return "";
   }
@@ -1378,13 +1378,13 @@ INITIATIVE state telling who is in control. You drive these with:
           • IMPORTANT NARRATIVE foes only — a named boss or unique antagonist
             that the story centres on and that is NOT in the catalogue — MAY
             be custom-created. Give it an explicit rank AND add the keyword
-            \`unique\` at the END so the system knows it is intentional.
+            'unique' at the END so the system knows it is intentional.
             e.g. [[EFFECT: create_combat Hrafn the Oathbreaker formidable unique]]
         <rank> threat scale: troublesome (trivial), dangerous (real threat),
         formidable (tough), extreme (deadly), epic (legendary). If you give
         no rank and the foe isn't in the compendium, the configured default
         rank is used. When in doubt, prefer a catalogue foe with no rank so
-        the official value is used; reserve custom \`unique\` foes for genuine
+        the official value is used; reserve custom 'unique' foes for genuine
         story-defining antagonists.
    [[EFFECT: create_vow <Name> <rank> <description>]]
         Create a vow/quest progress track when the character swears an iron vow.
@@ -1467,7 +1467,7 @@ directive on its OWN line so the track appears on the character's sheet:
         When a fight begins. REGULAR foes MUST be copied VERBATIM from the
         OFFICIAL FOE CATALOGUE (listed below) with NO rank (looked up in the
         compendium). Only an IMPORTANT narrative boss/unique antagonist not in
-        the catalogue may be custom — give it a rank AND the keyword \`unique\`,
+        the catalogue may be custom — give it a rank AND the keyword 'unique',
         e.g. [[EFFECT: create_combat Hrafn the Oathbreaker formidable unique]].
    [[EFFECT: mark_progress "<Vow/Journey Title>" [rank|+N]]]
         When the fiction clearly ADVANCES a specific open vow or journey (a
