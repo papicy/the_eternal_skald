@@ -801,6 +801,7 @@ GUIDELINES:
   const ironswornBlock = buildIronswornPromptBlock({
     allowMoves: !!extras.allowMoves,
     allowEffects: !!extras.allowEffects,
+    allowTrackEffects: !!extras.allowTrackEffects,
     context: extras.context
   });
 
@@ -1157,7 +1158,7 @@ Rules for the block:
  *
  * Returns "" when integration is unavailable so the prompt stays clean.
  */
-function buildIronswornPromptBlock({ allowMoves = false, allowEffects = false, allowFollowups = false, context = "" } = {}) {
+function buildIronswornPromptBlock({ allowMoves = false, allowEffects = false, allowFollowups = false, allowTrackEffects = false, context = "" } = {}) {
   if (!Integration.active()) return "";
 
   const moveList = IronswornController.moves
@@ -1292,6 +1293,37 @@ So for those moves, do NOT emit [[EFFECT: initiative ...]] or
 [[EFFECT: progress ...]] yourself — they would double-apply. You SHOULD
 still emit [[EFFECT: create_combat ...]] when a fight first starts (so the
 track exists to mark), and [[EFFECT: end_combat ...]] when a foe is finished.`);
+  }
+
+  // (v0.10.6) Track-management directives for the CONVERSATIONAL channels
+  // (!skald / !scene / !combat narration), where there is no dice roll to
+  // hang effects off. This is a focused, narration-framed counterpart to the
+  // roll-outcome effects block above: it documents ONLY the progress-track
+  // lifecycle directives (begin/close a journey, vow, or fight) and explicitly
+  // excludes the meter effects (momentum/harm/stress/supply/progress), which
+  // remain dice-driven. Only added when the full allowEffects block is NOT
+  // already present, to avoid duplicating the directive docs.
+  if (allowTrackEffects && !allowEffects) {
+    parts.push(`\
+PROGRESS TRACKS (begin or close them as the unfolding story warrants):
+When your narration introduces a LASTING undertaking — a journey toward a
+destination, a sworn vow, or the start/end of a fight — append the matching
+directive on its OWN line so the track appears on the character's sheet:
+   [[EFFECT: create_journey <Name> <rank> <description>]]
+        When the character sets out toward a destination / undertakes a journey.
+   [[EFFECT: create_vow <Name> <rank> <description>]]
+        When the character swears an iron vow.
+   [[EFFECT: create_combat <Foe Name> <rank>]]
+        When a fight begins. <rank> is OPTIONAL for standard foes (looked up in
+        the official compendium) — give one only for unique/invented foes.
+   [[EFFECT: complete_journey <Name>]] — when a destination is reached.
+   [[EFFECT: complete_vow <Name>]]     — when a vow is fulfilled.
+   [[EFFECT: end_combat <Foe Name>]]   — when a foe is defeated/flees/yields.
+<rank> scale: troublesome, dangerous, formidable, extreme, epic (default
+formidable). Use the track's EXACT name when closing it.
+Only emit these when the fiction clearly BEGINS or ENDS such an undertaking —
+never for momentary actions. Do NOT emit momentum/harm/stress/supply/progress
+directives here; those are applied automatically after dice rolls.`);
   }
 
   if (context && typeof context === "string" && context.trim()) {
@@ -3346,11 +3378,19 @@ async function runConversation(channel, userText, { task, label, variant = "defa
     // Narrative channels (skald/scene/combat) are the chronicle's primary
     // source. Allow the AI to append a [[SKALD_META]] block we can ingest.
     const allowJournal = ["skald", "scene", "combat"].includes(channel);
+    // (v0.10.6) Let the Skald begin/close progress tracks (journeys, vows,
+    // fights) it narrates in these conversational channels — not just after a
+    // dice roll. This is what makes an organically-narrated journey actually
+    // appear on the character sheet via [[EFFECT: create_journey …]]. Gated by
+    // the Ironsworn integration being active AND the "AI Applies Mechanical
+    // Effects" setting; only track-lifecycle effects are applied here (meter
+    // changes stay dice-driven — see Integration.applyNarrativeTrackEffects).
+    const allowTrackEffects = Integration.active() && (Settings.get("aiAppliesEffects") ?? true);
     // Recall semantically-relevant world memory for this prompt (v0.5.0).
     // Always resolves to a string ("" when RAG is off/not ready/fails).
     const memory = await RagBridge.fetchMemory(userText);
     const messages = [
-      { role: "system", content: buildSystemPrompt({ task, allowMoves, context, allowJournal, memory }) },
+      { role: "system", content: buildSystemPrompt({ task, allowMoves, allowTrackEffects, context, allowJournal, memory }) },
       ...Memory.get(channel)
     ];
 
@@ -3364,6 +3404,11 @@ async function runConversation(channel, userText, { task, label, variant = "defa
         Memory.push(channel, "assistant", reply);
         if (allowMoves && Integration.active()) {
           await Integration.postSuggestionFromReply(reply);
+        }
+        // (v0.10.6) Apply any track-lifecycle effects the Skald narrated
+        // (e.g. create_journey) so the track appears on the sheet.
+        if (allowTrackEffects) {
+          await Integration.applyNarrativeTrackEffects(reply, IronswornController.getActiveCharacter());
         }
         // Fire-and-forget chronicle ingestion (never blocks/breaks play).
         if (allowJournal) JournalSystem.ingestReply(reply, { channel });
@@ -3391,6 +3436,11 @@ async function runConversation(channel, userText, { task, label, variant = "defa
       // leaks into the chat card.
       const { clean } = Integration.parseMoveSuggestion(reply);
       await Chat.postSkald(formatMarkdown(stripDirectivesForDisplay(clean || reply)), { variant, title: label });
+    }
+    // (v0.10.6) Apply any track-lifecycle effects the Skald narrated
+    // (e.g. create_journey) so the track appears on the sheet.
+    if (allowTrackEffects) {
+      await Integration.applyNarrativeTrackEffects(reply, IronswornController.getActiveCharacter());
     }
     // Fire-and-forget chronicle ingestion (never blocks/breaks play).
     if (allowJournal) JournalSystem.ingestReply(reply, { channel });
@@ -4525,6 +4575,40 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
     });
   },
 
+  /**
+   * (v0.10.6) Effect kinds that represent the progress-track LIFECYCLE
+   * (begin / close a journey, vow, or fight). These are the only effects the
+   * conversational channels (!skald / !scene / !combat) apply, since they have
+   * no dice roll to hang meter changes off. Meter effects (momentum, harm,
+   * stress, supply, progress) stay dice-driven via {@link _narrateOutcome}.
+   */
+  _TRACK_LIFECYCLE_KINDS: ["create_journey", "create_vow", "create_combat", "complete_track", "end_combat"],
+
+  /**
+   * (v0.10.6) Parse a conversational reply for [[EFFECT:…]] directives and
+   * apply ONLY the track-lifecycle ones (create_journey / create_vow /
+   * create_combat / complete_* / end_combat). This is what makes a journey or
+   * vow the Skald narrates in a normal !skald/!scene/!combat exchange actually
+   * appear on the character sheet — previously these directives were parsed
+   * for display-stripping but never applied outside the post-roll path.
+   *
+   * Gated by the caller (only invoked when the Ironsworn integration is active
+   * and the "AI Applies Mechanical Effects" setting is on). Fully defensive:
+   * never throws into the conversation flow.
+   * @returns {Promise<string[]>} the list of applied-effect summaries (may be empty).
+   */
+  async applyNarrativeTrackEffects(reply, actor) {
+    try {
+      const { effects } = this.parseEffects(reply);
+      const trackEffects = (effects || []).filter(e => this._TRACK_LIFECYCLE_KINDS.includes(e.kind));
+      if (!trackEffects.length) return [];
+      return await this.applyEffects(trackEffects, actor);
+    } catch (e) {
+      console.warn(LOG_PREFIX, "applyNarrativeTrackEffects failed", e);
+      return [];
+    }
+  },
+
   /** Apply parsed [[EFFECT:…]] directives via the Ironsworn controller. */
   async applyEffects(effects, actor) {
     const applied = [];
@@ -4700,6 +4784,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
     if (applied.length && Settings.get("showEffectAnnouncements") !== false) {
       await Chat.postSystem(`<em>The Skald enacts: ${escapeHtml(applied.join("; "))}.</em>`, { gmWhisper: true });
     }
+    return applied;
   }
 };
 

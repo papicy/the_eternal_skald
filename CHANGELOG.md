@@ -13,6 +13,24 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.6] — 2026-06-09
+
+### Fixed
+- **Journeys (and other progress tracks) narrated in conversation now actually
+  get created.** Previously, the `create_journey` directive (and its siblings
+  `create_vow` / `create_combat`) only took effect when emitted by the post-roll
+  outcome narration. When the Skald introduced a journey, vow, or fight during
+  ordinary `!skald` / `!scene` / `!combat` narration — the natural way these
+  usually begin ("you set out for the high passes…") — the directive was stripped
+  from the displayed text and silently discarded, so no progress track ever
+  appeared on the character sheet. The conversational narration path now parses
+  and applies these **track-lifecycle** directives
+  (`create_journey` / `create_vow` / `create_combat` and their
+  `complete_*` / `end_combat` counterparts). Meter changes (momentum, health,
+  spirit, supply, progress ticks) remain strictly dice-driven and are **not**
+  applied from casual narration. Honors the existing **"AI Applies Mechanical
+  Effects"** setting.
+
 ## [0.10.5] — 2026-06-09
 
 ### Added
@@ -632,6 +650,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.6]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.6
 [0.10.5]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.5
 [0.10.4]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.4
 [0.10.3]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.3
