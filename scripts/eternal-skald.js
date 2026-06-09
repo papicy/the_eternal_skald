@@ -155,7 +155,10 @@ const COMMANDS = Object.freeze({
   MAP:           "!map",
   TEMPLATE:      "!template",
   // --- UX / polish (v0.9.0) ---
-  LINK_STYLE:    "!link-style"
+  LINK_STYLE:    "!link-style",
+  // --- Maintenance (v0.10.16) ---
+  RESET:         "!skald-reset",
+  WIPE:          "!skald-wipe"
 });
 
 /* ===================================================================== */
@@ -2978,6 +2981,9 @@ function dispatchCommand(rawText) {
       case COMMANDS.TEMPLATE:      return () => Commands.template(args);
       // --- UX / polish (v0.9.0) ---
       case COMMANDS.LINK_STYLE:    return () => Commands.linkStyle(args);
+      // --- Maintenance (v0.10.16) ---
+      case COMMANDS.RESET:         return () => Commands.reset(args);
+      case COMMANDS.WIPE:          return () => Commands.reset(args);
       default:               return null;
     }
   })();
@@ -3045,7 +3051,8 @@ const Commands = {
       [COMMANDS.TIMELINE,      "Show the campaign timeline of events. Filter with a term, e.g. <code>!timeline Reeves</code>"],
       [COMMANDS.RELATIONSHIPS, "Show the web of who-knows-whom across the chronicle. (alias <code>!map</code>)"],
       [COMMANDS.TEMPLATE,      "GM-only: scribe a structured entry by hand. e.g. <code>!template npc</code>"],
-      [COMMANDS.LINK_STYLE,    "GM-only: customise narration link colours/icons. e.g. <code>!link-style oracle #ff8800 fa-eye</code> (or <code>!link-style reset</code>)"]
+      [COMMANDS.LINK_STYLE,    "GM-only: customise narration link colours/icons. e.g. <code>!link-style oracle #ff8800 fa-eye</code> (or <code>!link-style reset</code>)"],
+      [COMMANDS.RESET,         "GM-only: wipe the chronicle for a new campaign — deletes unlocked Skald entries, semantic memory, conversation history & timeline (asks to confirm first). Alias <code>!skald-wipe</code>."]
     ];
 
     const tableRows = rows.map(([c, d]) =>
@@ -3332,6 +3339,164 @@ const Commands = {
       `<p><strong>Semantic Memory (RAG) status:</strong></p><table class="es-help-table"><tbody>${tableRows}</tbody></table>${tip}`,
       { variant: "help", title: "The Skald's Memory" }
     );
+  },
+
+  /* ------------------------ !skald-reset (v0.10.16) ---------------- */
+  /**
+   * GM-only "clean slate" for starting a new campaign. After a confirmation
+   * dialog, this:
+   *   1. Deletes every UNLOCKED Skald-scribed chronicle entry. Journals NOT
+   *      created by the Skald are never touched, and any entry the GM has
+   *      locked (module flag `locked === true`) is preserved.
+   *   2. Wipes the semantic-memory (RAG) vector store + query cache.
+   *   3. Resets all in-memory conversation buffers.
+   *   4. Empties the campaign timeline.
+   * Finally it whispers a report to the GM listing exactly what was cleared.
+   *
+   * Pass <code>force</code>/<code>confirm</code>/<code>yes</code> as an argument
+   * to skip the confirmation dialog (useful for macros).
+   *
+   * @param {string} [args]
+   */
+  async reset(args) {
+    if (!game.user?.isGM) {
+      return Chat.postSystem(`<em>Only the GM may wipe the chronicle for a new saga.</em>`, { gmWhisper: true });
+    }
+
+    // Survey what would be cleared so the confirmation is informed.
+    const isLocked = (j) => {
+      try { return j?.getFlag?.(MODULE_ID, "locked") === true; }
+      catch (_) { return false; }
+    };
+    let all = [];
+    try { all = JournalSystem.listEntries(); } catch (_) { all = []; }
+    const doomed = all.filter(j => !isLocked(j));
+    const lockedCount = all.length - doomed.length;
+
+    let vectorCount = 0;
+    try { vectorCount = await (BrowserRAG?.count?.() ?? 0); } catch (_) {}
+
+    let timelineCount = 0;
+    try { timelineCount = (JournalSystem.getTimeline?.() ?? []).length; } catch (_) {}
+
+    const skip = /^(force|confirm|yes|y)$/i.test(String(args || "").trim());
+    if (!skip) {
+      const confirmed = await this._confirmReset({
+        entries: doomed.length,
+        locked: lockedCount,
+        vectors: vectorCount,
+        timeline: timelineCount
+      });
+      if (!confirmed) {
+        return Chat.postSystem(`<em>The chronicle stands. Nothing was erased.</em>`, { gmWhisper: true });
+      }
+    }
+
+    const report = { entries: 0, vectors: 0, memory: false, timeline: false, locked: lockedCount, failed: 0 };
+
+    // 1. Delete unlocked Skald journal entries (batched). Their vectors are
+    //    wiped wholesale below, so no per-entry RAG removal is needed here.
+    if (doomed.length) {
+      const ids = doomed.map(j => j.id).filter(Boolean);
+      try {
+        await JournalEntry.deleteDocuments(ids);
+        report.entries = ids.length;
+      } catch (e) {
+        // Fall back to one-by-one so a single bad id can't abort the wipe.
+        console.warn(LOG_PREFIX, "[reset] batch delete failed, retrying individually:", e?.message || e);
+        for (const j of doomed) {
+          try { await j.delete(); report.entries++; }
+          catch (_) { report.failed++; }
+        }
+      }
+    }
+
+    // 2. Wipe semantic memory (RAG vector store + query cache).
+    try {
+      if (BrowserRAG?.isAvailable?.()) {
+        const ok = await BrowserRAG.clear();
+        if (ok) report.vectors = vectorCount;
+      }
+    } catch (e) { console.warn(LOG_PREFIX, "[reset] RAG clear failed:", e?.message || e); }
+
+    // 3. Reset all in-memory conversation buffers.
+    try { Memory.reset(); report.memory = true; } catch (_) {}
+
+    // 4. Empty the campaign timeline.
+    try { report.timeline = await JournalSystem.clearTimeline(); } catch (_) {}
+
+    // Report what was cleared (GM-only).
+    const rows = [
+      ["Chronicle entries deleted",        String(report.entries)],
+      ["Entries preserved (locked)",       String(report.locked)],
+      ["Semantic-memory vectors cleared",  String(report.vectors)],
+      ["Conversation memory",              report.memory ? "cleared" : "—"],
+      ["Campaign timeline",                report.timeline ? "cleared" : "—"]
+    ];
+    if (report.failed) rows.push(["Entries that could not be deleted", String(report.failed)]);
+    const tableRows = rows.map(([k, v]) => `<tr><td><strong>${k}</strong></td><td>${v}</td></tr>`).join("");
+    return Chat.postSkald(
+      `<p>The chronicle is wiped clean — a fresh saga may begin. Your own (non-Skald) journals were left untouched.</p>` +
+      `<table class="es-help-table"><tbody>${tableRows}</tbody></table>` +
+      `<p class="es-help-aside"><em>Tip: protect any entry from a future reset by setting its <code>${MODULE_ID}.locked</code> flag to <code>true</code>.</em></p>`,
+      { variant: "lore", title: "A Clean Slate", gmWhisper: true }
+    );
+  },
+
+  /**
+   * Show a yes/no confirmation before a destructive reset. Prefers DialogV2
+   * (v13+) and falls back to the classic Dialog. Resolves to a boolean.
+   * @param {{entries?:number, locked?:number, vectors?:number, timeline?:number}} [counts]
+   * @returns {Promise<boolean>}
+   */
+  async _confirmReset(counts = {}) {
+    const summary =
+      `<ul style="margin:.25em 0 .5em 1.1em;">` +
+      `<li><strong>${counts.entries || 0}</strong> chronicle entries will be deleted` +
+      (counts.locked ? ` (<strong>${counts.locked}</strong> locked entries kept)` : ``) + `</li>` +
+      `<li><strong>${counts.vectors || 0}</strong> semantic-memory vectors will be wiped</li>` +
+      `<li><strong>${counts.timeline || 0}</strong> timeline events will be cleared</li>` +
+      `<li>Conversation memory will be reset</li></ul>`;
+    const content =
+      `<div class="eternal-skald-card es-variant-lore"><div class="es-body">` +
+      `<p><strong>Wipe the chronicle for a new campaign?</strong></p>${summary}` +
+      `<p style="color:var(--color-text-dark-secondary,#888);">Your own journals (not scribed by the Skald) are <strong>not</strong> affected. This cannot be undone.</p>` +
+      `</div></div>`;
+
+    // Prefer DialogV2 (v13+).
+    try {
+      const DV2 = foundry?.applications?.api?.DialogV2;
+      if (DV2?.confirm) {
+        return await DV2.confirm({
+          window: { title: "Reset the Eternal Skald" },
+          content,
+          rejectClose: false,
+          modal: true
+        });
+      }
+    } catch (e) {
+      console.warn(LOG_PREFIX, "DialogV2 confirm failed, falling back:", e?.message || e);
+    }
+
+    // Classic Dialog fallback.
+    return new Promise((resolve) => {
+      try {
+        // eslint-disable-next-line no-undef
+        new Dialog({
+          title: "Reset the Eternal Skald",
+          content,
+          buttons: {
+            wipe:   { icon: '<i class="fas fa-trash"></i>', label: "Wipe", callback: () => resolve(true) },
+            cancel: { icon: '<i class="fas fa-times"></i>', label: "Cancel", callback: () => resolve(false) }
+          },
+          default: "cancel",
+          close: () => resolve(false)
+        }).render(true);
+      } catch (e) {
+        console.error(LOG_PREFIX, "No dialog API available for reset", e);
+        resolve(false);
+      }
+    });
   },
 
   /* ------------------------ !end-session (v0.4.0) ------------------ */

@@ -13,6 +13,37 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.16] — 2026-06-09
+
+### Added
+- **`!skald-reset` — a GM-only "clean slate" for a new campaign** (alias
+  `!skald-wipe`). Wipes the Skald's chronicle in one command so a fresh saga can
+  begin without dragging the old one along. After a **confirmation dialog**
+  (DialogV2 with a classic `Dialog` fallback) that summarises what will be
+  erased, it:
+  - **deletes every *unlocked* Skald-scribed journal entry** (batched via
+    `JournalEntry.deleteDocuments`, with a per-entry fallback),
+  - **wipes the semantic-memory (RAG) vector store** + query cache
+    (`BrowserRAG.clear()`),
+  - **resets all in-memory conversation buffers** (`Memory.reset()`), and
+  - **empties the campaign timeline** (`JournalSystem.clearTimeline()`).
+  It then whispers a **GM-only report** listing the counts of everything that
+  was cleared (and how many entries were preserved).
+- **Entry locking for reset safety.** Any chronicle entry whose
+  `the-eternal-skald.locked` flag is `true` is **preserved** by `!skald-reset`
+  and reported separately.
+- **Macro-friendly bypass.** Passing `force` / `confirm` / `yes`
+  (e.g. `!skald-reset force`) skips the confirmation dialog.
+
+### Changed
+- The `!skald-help` card and the README command reference now document
+  `!skald-reset` / `!skald-wipe`.
+
+### Notes
+- **Safety:** `!skald-reset` is **GM-only** and only ever deletes journals the
+  Skald itself scribed (entries flagged `createdBy` `ai`/`manual`). Journals you
+  created yourself are never touched.
+
 ## [0.10.15] — 2026-06-09
 
 ### Fixed
@@ -953,6 +984,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.16]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.16
 [0.10.15]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.15
 [0.10.14]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.14
 [0.10.13]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.13
