@@ -357,6 +357,85 @@ export const IronswornController = {
   },
 
   /**
+   * Common Ironsworn track NOUNS that are never a player-chosen proper name.
+   * A reference like "vow" / "journey" / "the vow" is a GENERIC pointer at a
+   * KIND of track, not the name of a specific one — so it must be resolved to
+   * the character's actual current track of that kind (read from the sheet),
+   * never matched literally. Used by the display resolver and by EntityLinker
+   * (which must not turn the bare word "vow" into a clickable phantom link).
+   */
+  _GENERIC_TRACK_WORDS: new Set([
+    "vow", "vows", "the vow", "my vow", "iron vow",
+    "journey", "journeys", "the journey",
+    "bond", "bonds", "the bond",
+    "track", "tracks", "progress track", "progress",
+    "quest", "quests", "the quest",
+    "combat", "fight", "foe", "foes"
+  ]),
+
+  /** True iff `s` is a generic track noun (see {@link _GENERIC_TRACK_WORDS}). */
+  isGenericTrackWord(s) {
+    const n = String(s ?? "").toLowerCase().trim().replace(/[.!?,;:]+$/, "");
+    return this._GENERIC_TRACK_WORDS.has(n);
+  },
+
+  /**
+   * Resolve the progress-track Item to DISPLAY for a (possibly generic or
+   * imprecise) reference — the single source of truth for the track cards the
+   * Skald posts. Always returns a LIVE Item document read straight from
+   * `actor.items` (never a cached/parallel copy), so its current/completed/rank
+   * are whatever the sheet currently holds.
+   *
+   * Resolution order:
+   *   1. Empty or a GENERIC noun ("vow", "the journey", ...) → the player's
+   *      real CURRENT track of that kind: newest OPEN first, else newest of the
+   *      kind, else any open vow/journey. This is what makes clicking the word
+   *      "vow" show "The Truth of the Star-Fall" rather than a phantom.
+   *   2. A direct Item id.
+   *   3. An exact (case-insensitive) name match — preferring an OPEN track when
+   *      several share the name.
+   *   4. A substring name match — again preferring an OPEN track.
+   *
+   * @param {Actor}  actor
+   * @param {string} trackRef
+   * @returns {Item|null}
+   */
+  resolveDisplayTrack(actor, trackRef) {
+    if (!actor?.items) return null;
+    const ref   = String(trackRef ?? "").trim();
+    const refLc = ref.toLowerCase();
+
+    // 1. Generic noun / empty → the character's real current track of the kind.
+    if (!ref || this.isGenericTrackWord(ref)) {
+      let kind = "vow";
+      if (/journey/.test(refLc))             kind = "journey";
+      else if (/bond/.test(refLc))           kind = "bond";
+      else if (/combat|fight|foe/.test(refLc)) kind = "combat";
+      return this._newestOpenTrackItem(actor, kind)
+          ?? this._newestTrackItemOfKind(actor, kind, /*openOnly=*/false)
+          ?? this._newestOpenTrackItem(actor, "vow")
+          ?? this._newestOpenTrackItem(actor, "journey");
+    }
+
+    // 2. Direct id.
+    const byId = actor.items.get?.(ref);
+    if (byId) return byId;
+
+    const notDone = i => !foundry.utils.getProperty(i, "system.completed");
+
+    // 3. Exact name — prefer an OPEN track, then any.
+    const exactOpen = actor.items.find?.(i => i.name?.toLowerCase() === refLc && notDone(i));
+    if (exactOpen) return exactOpen;
+    const exact = actor.items.find?.(i => i.name?.toLowerCase() === refLc);
+    if (exact) return exact;
+
+    // 4. Substring name — prefer an OPEN track, then any.
+    const subOpen = actor.items.find?.(i => i.name?.toLowerCase().includes(refLc) && notDone(i));
+    if (subOpen) return subOpen;
+    return actor.items.find?.(i => i.name?.toLowerCase().includes(refLc)) ?? null;
+  },
+
+  /**
    * Produce a compact, AI-friendly description of a character's full
    * mechanical state. Returns "" when no character is resolvable so the
    * prompt builder can omit the section cleanly.
@@ -953,12 +1032,27 @@ export const IronswornController = {
    * still found). Returns the live Item document.
    */
   _newestOpenTrackItem(actor, kind) {
+    return this._newestTrackItemOfKind(actor, kind, /*openOnly=*/true);
+  },
+
+  /**
+   * Like {@link _newestOpenTrackItem} but with control over whether already
+   * completed tracks are eligible. Used by the display resolver so that, when
+   * a player has only completed vows left, the card can still surface the most
+   * recent one (read fresh from the sheet) instead of finding nothing.
+   *
+   * @param {Actor}   actor
+   * @param {string}  kind       "vow" | "journey" | "combat" | "bond"
+   * @param {boolean} [openOnly=true] skip completed tracks when true.
+   * @returns {Item|null}
+   */
+  _newestTrackItemOfKind(actor, kind, openOnly = true) {
     if (!actor?.items) return null;
     const want = String(kind ?? "").toLowerCase();
     const strong = [];   // exact, confident matches (our flag / system subtype)
     const fallback = []; // best-effort matches (legacy / hand-made tracks)
     for (const item of actor.items) {
-      if (foundry.utils.getProperty(item, "system.completed")) continue;
+      if (openOnly && foundry.utils.getProperty(item, "system.completed")) continue;
       // Only real progress-track items can carry a progress score to roll.
       if (item.type !== "progress") continue;
       const flagKind = (item.getFlag?.(ES_SCOPE, "trackKind")

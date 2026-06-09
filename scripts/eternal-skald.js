@@ -2240,6 +2240,12 @@ const EntityLinker = {
           for (const track of IronswornController.getProgressTracks(actor)) {
             const name = (track?.name ?? "").trim();
             if (name.length < 3) continue;
+            // Never turn a GENERIC track noun ("vow", "journey", "bond", ...)
+            // into a clickable link: the bare word is not a player-chosen
+            // proper name, and linking it produces a phantom card disconnected
+            // from the real vow on the sheet. Such words are resolved to the
+            // actual current track only when explicitly acted on, not linked.
+            if (IronswornController.isGenericTrackWord?.(name)) continue;
             const key = name.toLowerCase();
             if (byName.has(key)) continue; // first definition wins
             byName.set(key, {
@@ -4146,10 +4152,20 @@ const Integration = {
         ui.notifications?.warn(`${SKALD_NAME}: no active character to read "${trackName}".`);
         return;
       }
+      // Resolve the ACTUAL sheet Item this reference points at — read straight
+      // from actor.items (the single source of truth), never a cached/parallel
+      // copy. A generic word like "vow" resolves to the character's real
+      // current vow (e.g. "The Truth of the Star-Fall") instead of matching a
+      // phantom literally-named track. We then read the track's live state from
+      // the freshly-built progress-track view so boxes/ticks/completion always
+      // mirror the sheet.
+      const item = IronswornController.resolveDisplayTrack(actor, trackName);
+      if (!item) {
+        ui.notifications?.info(`${SKALD_NAME}: progress track "${trackName}" not found on ${actor.name}.`);
+        return;
+      }
       const tracks = IronswornController.getProgressTracks(actor) ?? [];
-      const lc = String(trackName).toLowerCase();
-      const track = tracks.find(t => t.name?.toLowerCase() === lc)
-                 ?? tracks.find(t => t.name?.toLowerCase().includes(lc));
+      const track = tracks.find(t => t.id === item.id);
       if (!track) {
         ui.notifications?.info(`${SKALD_NAME}: progress track "${trackName}" not found on ${actor.name}.`);
         return;

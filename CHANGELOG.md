@@ -13,6 +13,36 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.13] — 2026-06-09
+
+### Fixed
+- **Vow / progress-track cards now read straight from the character sheet —
+  the single source of truth — fixing a phantom-vow bug.** The Skald's vow card
+  could display a track that had nothing to do with your real vow: a track
+  literally named *"Vow"*, rank `1`, `0/10` boxes (`0/40` ticks), marked
+  *"✓ This vow is complete."*, while the actual sheet held an open vow
+  (*"The Truth of the Star-Fall"*, formidable, `3/10` boxes). The card is now
+  bound to the live foundry-ironsworn `progress` Item on the actor and read
+  fresh every time it is shown:
+  - Progress comes from `system.current` (ticks), boxes = `ticks ÷ 4`.
+  - Completion comes from `system.completed`.
+  - Marking progress writes back to the Item (`system.current`) so the sheet
+    updates immediately.
+- **Clicking the bare word *"vow"* (or "journey"/"bond"/…) now opens your
+  ACTUAL current track**, not a phantom. A new display resolver
+  (`IronswornController.resolveDisplayTrack`) treats generic nouns as a pointer
+  at the *kind* of track and resolves them to the character's newest **open**
+  track of that kind, preferring open over completed and exact names over
+  substrings — all read directly from `actor.items`.
+
+### Changed
+- **Generic track nouns are no longer turned into clickable links.** The entity
+  linker used to index a track whose name was a common noun like *"vow"*,
+  turning every mention of the word into a phantom link. Such names are now
+  skipped (a real, player-chosen vow name like *"The Truth of the Star-Fall"*
+  is still linked normally), removing a parallel/stale path that could desync
+  from the sheet.
+
 ## [0.10.12] — 2026-06-09
 
 ### Fixed
@@ -851,6 +881,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.13]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.13
 [0.10.12]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.12
 [0.10.11]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.11
 [0.10.10]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.10
