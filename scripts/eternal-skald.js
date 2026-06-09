@@ -1177,6 +1177,71 @@ Rules for the block:
 }
 
 /**
+ * Build the OFFICIAL FOE CATALOGUE block for the system prompt — the list of
+ * foes the AI may use for REGULAR encounters, drawn from the two official
+ * foundry-ironsworn foe compendia (Ironsworn Foes + Delve Foes). The list is
+ * read synchronously from {@link IronswornController.getCompendiumFoeNames},
+ * which returns a cached snapshot primed on `ready`; until it is primed (or if
+ * the controller/compendia are unavailable) this returns "" and the catalogue
+ * is simply omitted, so foe creation degrades gracefully.
+ *
+ * Foes are grouped by rank for readability and the block spells out the rule:
+ * regular foes MUST be copied verbatim from the catalogue, while only
+ * important narrative bosses / unique antagonists may be custom-created (with
+ * an explicit rank + the `unique` marker on create_combat).
+ *
+ * @returns {string} the catalogue block, or "" when unavailable.
+ */
+function buildFoeGuidance() {
+  try {
+    if (!IronswornController || typeof IronswornController.getCompendiumFoeNames !== "function") return "";
+    const foes = IronswornController.getCompendiumFoeNames();
+    if (!Array.isArray(foes) || foes.length === 0) return "";
+
+    // Group foe names by canonical rank, in ascending threat order; anything
+    // with an unrecognised/blank rank is collected under "other".
+    const RANK_ORDER = ["troublesome", "dangerous", "formidable", "extreme", "epic"];
+    const groups = new Map(RANK_ORDER.map(r => [r, []]));
+    groups.set("other", []);
+    for (const f of foes) {
+      const name = String(f?.name ?? "").trim();
+      if (!name) continue;
+      const rank = String(f?.rank ?? "").trim().toLowerCase();
+      (groups.has(rank) ? groups.get(rank) : groups.get("other")).push(name);
+    }
+
+    const lines = [];
+    for (const rank of [...RANK_ORDER, "other"]) {
+      const names = groups.get(rank);
+      if (!names || names.length === 0) continue;
+      const label = rank === "other" ? "Unranked" : (rank.charAt(0).toUpperCase() + rank.slice(1));
+      lines.push(`  • ${label}: ${names.join(", ")}`);
+    }
+    if (lines.length === 0) return "";
+
+    return `\
+OFFICIAL FOE CATALOGUE — choose REGULAR foes from THIS LIST ONLY:
+The foes below come from the official Ironsworn foe compendia. They are grouped
+by rank (threat scale).
+${lines.join("\n")}
+
+RULES FOR CREATING FOES:
+• For any REGULAR encounter, pick a foe whose name appears in the catalogue
+  above and use it VERBATIM in [[EFFECT: create_combat <Foe Name>]] — OMIT the
+  rank so the client fills the canonical value from the compendium. Do NOT
+  invent names for ordinary creatures, and do NOT rename catalogue foes.
+• ONLY an IMPORTANT NARRATIVE foe — a named boss or unique antagonist the story
+  is built around, who is NOT in the catalogue — may be CUSTOM-created. When you
+  do, give it an explicit rank AND append the keyword \`unique\` at the end, e.g.
+  [[EFFECT: create_combat Hrafn the Oathbreaker formidable unique]].
+• When unsure, prefer the closest catalogue foe over inventing one. Reserve
+  custom \`unique\` foes for genuine story-defining antagonists, not routine mobs.`;
+  } catch (_) {
+    return "";
+  }
+}
+
+/**
  * Build the Ironsworn-integration portion of the system prompt. This
  * teaches the model that it can drive the real foundry-ironsworn rules
  * engine, lists the moves it may call for, defines the structured
@@ -1293,23 +1358,26 @@ dice results — you only react to the outcome you are given.
 COMBAT AUTOMATION (progress tracks, initiative):
 A fight in Ironsworn is run on a PROGRESS TRACK per foe, plus a single
 INITIATIVE state telling who is in control. You drive these with:
-   [[EFFECT: create_combat <Foe Name> <rank>]]
+   [[EFFECT: create_combat <Foe Name> <rank> <unique?>]]
         Create a combat progress track for a foe the moment a fight with
         them begins (the first time the character Enters the Fray, or a
         new foe joins).
-        RANK IS USUALLY OPTIONAL — the client looks the foe up in the
-        official Ironsworn foe compendium and uses its canonical rank.
-          • STANDARD foes (Bear, Wolf, Wyvern, Bandit, Hollow, Basilisk,
-            Troll, Harrow Spider, …): just give the NAME, omit the rank.
+          • REGULAR foes MUST be chosen from the OFFICIAL FOE CATALOGUE
+            listed elsewhere in this prompt — copy a name from it VERBATIM
+            and OMIT the rank (the client fills the canonical rank from the
+            compendium). Do NOT invent ordinary creatures.
             e.g. [[EFFECT: create_combat Bear]]  → rank filled from compendium.
-          • UNIQUE / CUSTOM foes you invent (not in the rulebook): give an
-            explicit rank so the track is sized correctly.
-            e.g. [[EFFECT: create_combat Ancient Shadow Dragon extreme]]
+          • IMPORTANT NARRATIVE foes only — a named boss or unique antagonist
+            that the story centres on and that is NOT in the catalogue — MAY
+            be custom-created. Give it an explicit rank AND add the keyword
+            `unique` at the END so the system knows it is intentional.
+            e.g. [[EFFECT: create_combat Hrafn the Oathbreaker formidable unique]]
         <rank> threat scale: troublesome (trivial), dangerous (real threat),
         formidable (tough), extreme (deadly), epic (legendary). If you give
         no rank and the foe isn't in the compendium, the configured default
-        rank is used. When in doubt for a named, ordinary creature, prefer
-        omitting the rank so the official value is used.
+        rank is used. When in doubt, prefer a catalogue foe with no rank so
+        the official value is used; reserve custom `unique` foes for genuine
+        story-defining antagonists.
    [[EFFECT: create_vow <Name> <rank> <description>]]
         Create a vow/quest progress track when the character swears an iron vow.
    [[EFFECT: complete_vow <Vow Name>]]
@@ -1368,9 +1436,12 @@ directive on its OWN line so the track appears on the character's sheet:
         When the character sets out toward a destination / undertakes a journey.
    [[EFFECT: create_vow <Name> <rank> <description>]]
         When the character swears an iron vow.
-   [[EFFECT: create_combat <Foe Name> <rank>]]
-        When a fight begins. <rank> is OPTIONAL for standard foes (looked up in
-        the official compendium) — give one only for unique/invented foes.
+   [[EFFECT: create_combat <Foe Name> <rank> <unique?>]]
+        When a fight begins. REGULAR foes MUST be copied VERBATIM from the
+        OFFICIAL FOE CATALOGUE (listed below) with NO rank (looked up in the
+        compendium). Only an IMPORTANT narrative boss/unique antagonist not in
+        the catalogue may be custom — give it a rank AND the keyword `unique`,
+        e.g. [[EFFECT: create_combat Hrafn the Oathbreaker formidable unique]].
    [[EFFECT: complete_journey <Name>]] — when a destination is reached.
    [[EFFECT: complete_vow <Name>]]     — when a vow is fulfilled.
    [[EFFECT: end_combat <Foe Name>]]   — when a foe is defeated/flees/yields.
@@ -1382,6 +1453,16 @@ Destination") in a complete_* directive.
 Only emit these when the fiction clearly BEGINS or ENDS such an undertaking —
 never for momentary actions. Do NOT emit momentum/harm/stress/supply/progress
 directives here; those are applied automatically after dice rolls.`);
+  }
+
+  // The official foe catalogue — embedded whenever combat tracks can be
+  // created (full effects OR the conversational track-effects channel) so the
+  // AI picks REGULAR foes from real compendium entries instead of inventing
+  // names. Returns "" until the foe index is primed (on `ready`), so it simply
+  // appears once the compendia are indexed.
+  if (allowEffects || allowTrackEffects) {
+    const foeGuidance = buildFoeGuidance();
+    if (foeGuidance) parts.push(foeGuidance);
   }
 
   if (context && typeof context === "string" && context.trim()) {
@@ -3906,8 +3987,20 @@ const Integration = {
       }
 
       if (verb === "create_combat") {
-        const { name, rank } = this._splitNameRank(rest);
-        return name ? { kind: "create_combat", name, rank } : null;
+        // An IMPORTANT narrative foe (boss / unique antagonist not in the
+        // official compendia) is flagged with a trailing keyword — `unique`,
+        // `boss`, `narrative`, or `custom`. Strip it off before splitting so
+        // the marker never leaks into the foe name, and record `important` so
+        // the optional "not a real compendium foe" advisory is suppressed.
+        let body2 = rest;
+        let important = false;
+        const mk = body2.match(/[\s(\[]+(unique|boss|narrative|custom)\)?\]?\s*$/i);
+        if (mk) {
+          important = true;
+          body2 = body2.slice(0, mk.index).trim();
+        }
+        const { name, rank } = this._splitNameRank(body2);
+        return name ? { kind: "create_combat", name, rank, important } : null;
       }
 
       if (verb === "create_vow") {
@@ -4912,10 +5005,24 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
             //   2. Compendium lookup  → official rank for standard foes.
             //   3. Default setting    → unknown custom foe with no rank given.
             let rank, source;
+            // For the optional advisory: whether this REGULAR (non-important)
+            // foe turned out NOT to be in the official compendia, plus the
+            // closest suggested name if the lookup offered one.
+            let notInCompendium = false;
+            let compendiumSuggestion = "";
             if (eff.rank) {
               rank = IronswornController.normalizeRank(eff.rank);
               source = "custom";
               this._dbg(`→ create_combat "${eff.name}": custom enemy, using AI-specified rank "${rank}"`);
+              // A regular foe given an explicit rank but NOT flagged important
+              // and NOT in the official compendia is a likely invented foe —
+              // note it for the GM advisory below.
+              if (!eff.important) {
+                try {
+                  const off = await IronswornController.isOfficialCompendiumFoe(eff.name);
+                  if (!off) notInCompendium = true;
+                } catch (_) { /* advisory only */ }
+              }
             } else {
               let lookup = null;
               try { lookup = await IronswornController.lookupEnemyInCompendium(eff.name); }
@@ -4929,6 +5036,10 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
                 source = "default";
                 const hint = lookup?.suggestion ? ` (did you mean "${lookup.suggestion}"?)` : "";
                 this._dbg(`→ create_combat "${eff.name}": not in compendium${hint}, using default rank "${rank}"`);
+                if (!eff.important) {
+                  notInCompendium = true;
+                  compendiumSuggestion = lookup?.suggestion || "";
+                }
               }
             }
             // Ironsworn is fought one foe at a time. The first time a new
@@ -4952,6 +5063,22 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
               const tag = source === "compendium" ? " [from compendium]" : source === "custom" ? " [custom]" : "";
               applied.push(`⚔ began combat “${eff.name}” [${rank}]${tag}`);
               this._notifyCombat(`⚔ Combat track created: ${eff.name} (${rank}${source === "compendium" ? ", official" : ""})`);
+              // Optional GM advisory: a REGULAR foe (not flagged as an
+              // important/unique narrative foe) that isn't in the official foe
+              // compendia is likely an invented name. Whisper a gentle heads-up
+              // to the GM so they can swap it for a catalogue foe if desired.
+              // Important/unique foes are intentional and never warned.
+              if (notInCompendium && !eff.important) {
+                try {
+                  const hint = compendiumSuggestion ? ` Closest official foe: “${compendiumSuggestion}”.` : "";
+                  await Chat.postSystem(
+                    `<em>⚠ “${eff.name}” is not in the official Ironsworn foe compendia. `
+                    + `If this is a routine foe, prefer one from the catalogue; if it is an `
+                    + `important boss/unique antagonist, that is fine.${hint}</em>`,
+                    { gmWhisper: true }
+                  );
+                } catch (_) { /* advisory only — never block combat creation */ }
+              }
             } else {
               await this._warnTrackCreateFailed("combat", eff.name, r?.error);
             }
@@ -7331,6 +7458,23 @@ Hooks.once("ready", () => {
       IronswornController._buildAssetIndex()
         .then(() => { try { EntityLinker.invalidate(); } catch (_) {} })
         .catch(() => { /* defensive — asset linking stays off */ });
+    }
+  } catch (_) { /* defensive */ }
+});
+
+// --- Foe catalogue priming (v0.10.14) --------------------------------
+// Regular foes must be drawn from the official foundry-ironsworn foe
+// compendia (Ironsworn Foes + Delve Foes). The system prompt embeds that
+// catalogue so the AI picks real foes instead of inventing names, but the
+// prompt builder is synchronous and reads a cached snapshot. Prime the foe
+// index once the world is ready (when the compendia are available) so the
+// catalogue is present from the first combat narration. Fire-and-forget and
+// fully defensive — if anything fails the prompt simply omits the catalogue
+// and foe creation still works (falling back to compendium rank lookup).
+Hooks.once("ready", () => {
+  try {
+    if (IronswornController?.isActive?.() && typeof IronswornController._buildFoeIndex === "function") {
+      IronswornController._buildFoeIndex().catch(() => { /* defensive — catalogue stays off */ });
     }
   } catch (_) { /* defensive */ }
 });

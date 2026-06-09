@@ -1521,6 +1521,71 @@ export const IronswornController = {
     return r.found ? r.rank : null;
   },
 
+  /**
+   * The two OFFICIAL foundry-ironsworn foe compendium packs that REGULAR
+   * encounters must draw from. Important narrative foes (bosses / unique
+   * antagonists) may be custom-created outside this list — see the prompt's
+   * foe-catalogue guidance and the `important` flag on create_combat.
+   */
+  FOE_COMPENDIUM_PACK_IDS: Object.freeze([
+    "foundry-ironsworn.ironswornfoes",
+    "foundry-ironsworn.ironsworndelvefoes"
+  ]),
+
+  /**
+   * True iff a pack id is one of the two official foe packs. Tolerant of both
+   * the fully-qualified id ("foundry-ironsworn.ironswornfoes") and the bare
+   * collection segment ("ironswornfoes"), across Foundry revisions.
+   */
+  _isOfficialFoePackId(id) {
+    const s = String(id ?? "").toLowerCase();
+    return s === "foundry-ironsworn.ironswornfoes"
+        || s === "foundry-ironsworn.ironsworndelvefoes"
+        || /(^|\.)ironswornfoes$/.test(s)
+        || /(^|\.)ironsworndelvefoes$/.test(s);
+  },
+
+  /**
+   * Synchronous read of the cached OFFICIAL compendium foe names (+ canonical
+   * ranks), restricted to the two official foe packs (ironswornfoes +
+   * ironsworndelvefoes). For prompt building, which is synchronous. Returns []
+   * until {@link _buildFoeIndex} has populated the cache (primed on `ready`),
+   * so it degrades gracefully — the foe catalogue simply isn't added to the
+   * prompt until the compendia are indexed. De-duplicated and name-sorted.
+   *
+   * @returns {Array<{name:string, rank:string}>}
+   */
+  getCompendiumFoeNames() {
+    if (!Array.isArray(this._foeIndexCache)) return [];
+    const seen = new Set();
+    const out = [];
+    for (const e of this._foeIndexCache) {
+      if (!this._isOfficialFoePackId(e.packId)) continue;
+      const key = e.lc || String(e.name ?? "").toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push({ name: e.name, rank: e.rank });
+    }
+    out.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    return out;
+  },
+
+  /**
+   * True iff `enemyName` confidently matches a foe in the OFFICIAL foe
+   * compendia (the two packs above). Used for the optional "this regular foe
+   * isn't a real compendium foe" advisory. Async (it may build the index).
+   *
+   * @param {string} enemyName
+   * @returns {Promise<boolean>}
+   */
+  async isOfficialCompendiumFoe(enemyName) {
+    if (!enemyName || !this.isActive()) return false;
+    try {
+      const r = await this.lookupEnemyInCompendium(enemyName);
+      return !!(r.found && this._isOfficialFoePackId(r.packId));
+    } catch (_) { return false; }
+  },
+
   /* =================================================================
    *  ORACLES
    * ================================================================= */

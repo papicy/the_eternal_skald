@@ -13,6 +13,41 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.14] — 2026-06-09
+
+### Added
+- **Official foe catalogue embedded in the AI prompt.** The names (and canonical
+  ranks) of every foe in the official foundry-ironsworn foe compendia —
+  `foundry-ironsworn.ironswornfoes` (*Ironsworn Foes*) and
+  `foundry-ironsworn.ironsworndelvefoes` (*Ironsworn: Delve Foes*) — are now
+  loaded, cached and injected into the system prompt (grouped by rank) whenever
+  the Skald can create combat tracks. The AI is instructed to choose **regular
+  foes from this list only**, copying the name *verbatim* so the combat track
+  gets the rulebook rank automatically.
+- **`unique` marker for important narrative foes.** A named boss or unique
+  antagonist that the story is built around — and that is *not* in the
+  compendia — may still be custom-created. The Skald gives it an explicit rank
+  and appends the keyword `unique` (also accepts `boss` / `narrative` /
+  `custom`), e.g. `[[EFFECT: create_combat Hrafn the Oathbreaker formidable unique]]`.
+  The parser records this as an `important` flag so such foes are treated as
+  intentional and never warned about.
+- **GM-only "not an official foe" advisory.** When a *regular* (non-`unique`)
+  foe turns out not to be in the official foe compendia, the Skald whispers a
+  gentle GM-only note suggesting the closest official foe (when one is found).
+  Important/unique foes are exempt. Advisory-only — it never blocks combat.
+- **Foe-index priming on world `ready`.** The foe compendia are indexed once the
+  world is ready (`IronswornController._buildFoeIndex`) so the synchronous prompt
+  builder has the catalogue available from the first combat narration.
+- New controller members: `FOE_COMPENDIUM_PACK_IDS`, `_isOfficialFoePackId()`,
+  `getCompendiumFoeNames()` (sync, cached, official-packs-only, deduped, sorted)
+  and `isOfficialCompendiumFoe()` (async).
+
+### Changed
+- **`create_combat` directive docs** (both the full effects block and the
+  conversational track-effects block) now tell the AI to draw regular foes from
+  the catalogue verbatim with no rank, and reserve explicit-rank + `unique`
+  creation for genuine story-defining antagonists.
+
 ## [0.10.13] — 2026-06-09
 
 ### Fixed
@@ -881,6 +916,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.14]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.14
 [0.10.13]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.13
 [0.10.12]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.12
 [0.10.11]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.11
