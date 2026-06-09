@@ -13,6 +13,23 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.4] — 2026-06-09
+
+### Fixed
+- **Manual move rolls from the "What Comes Next" buttons are now narrated.**
+  When the foundry-ironsworn pre-roll dialog is unavailable, rolling a move
+  from the Skald's suggestion buttons falls back to the module's own
+  *manual-roll* chat card (`flags["the-eternal-skald"].manualMove`). The
+  `createChatMessage` hook bailed out early for **any** message carrying the
+  module flag — *before* it dispatched the roll detector — so these manual
+  rolls were silently never narrated and the story stalled.
+  - The hook now runs `Integration.onIronswornRoll(message)` **first**
+    (it has its own dedupe / GM-only / non-roll-card guards), then applies
+    the "ignore our own posts" rule only to the `!command` dispatch.
+  - This mirrors the existing `updateChatMessage` hook, which already
+    excepted `manualMove` cards. System-produced roll cards and player
+    `!`-commands are unaffected.
+
 ## [0.10.3] — 2026-06-09
 
 ### Fixed
@@ -605,6 +622,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.4]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.4
 [0.10.3]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.3
 [0.10.2]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.2
 [0.10.1]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.1

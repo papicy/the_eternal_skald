@@ -6817,21 +6817,29 @@ Hooks.on("updateCombat", (combat, changed, options, userId) => {
 Hooks.on("createChatMessage", (message) => {
   console.log(`${LOG_PREFIX} [createChatMessage] HOOK FIRED`);
   try {
-    // Ignore our own posts — they always carry our module flag.
-    if (message?.flags?.[MODULE_ID]) {
-      console.log(`${LOG_PREFIX} [createChatMessage] message is ours — ignoring`);
-      return;
-    }
+    const ourFlags = message?.flags?.[MODULE_ID];
 
     // --- Ironsworn roll detection -------------------------------------
-    // If this message is a roll produced by the foundry-ironsworn system
-    // (e.g. the user triggered a move themselves, or via our suggestion
-    // card), let the Integration layer narrate the outcome. This runs
-    // independently of the `!command` dispatch below and never blocks it.
+    // Narrate rolls so the saga continues. This must run BEFORE the
+    // "ignore our own posts" guard below, because our OWN manual-fallback
+    // move cards (posted by IronswornController.manualMoveRoll when the
+    // system's pre-roll dialog is unavailable) carry our module flag with
+    // manualMove:true. Those are exactly the rolls the player triggers from
+    // the "What Comes Next" buttons, so they must reach onIronswornRoll.
+    // onIronswornRoll has its own guards (it skips our own NON-roll cards
+    // like narration/suggestions, dedupes, and is GM-only), so calling it
+    // unconditionally here is safe.
     try {
       Integration.onIronswornRoll(message);
     } catch (e) {
       console.warn(`${LOG_PREFIX} [createChatMessage] onIronswornRoll dispatch failed:`, e);
+    }
+
+    // Ignore our own posts for the `!command` dispatch below — they always
+    // carry our module flag, and a Skald-posted card is never a command.
+    if (ourFlags) {
+      console.log(`${LOG_PREFIX} [createChatMessage] message is ours — skipping command dispatch`);
+      return;
     }
 
     const rawText = message?.content ?? "";
