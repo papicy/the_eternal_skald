@@ -13,6 +13,29 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.3] — 2026-06-09
+
+### Fixed
+- **Old combat tracks no longer linger untracked when a new fight begins.**
+  Previously, starting a new combat left any earlier combat track open;
+  because progress marking only ever targets the newest active foe track,
+  those older tracks became orphaned and untracked, cluttering the sheet and
+  the AI's view of combat state.
+  - When a new combat track is created, the Skald now automatically marks any
+    combat track left open from a **previous** fight as complete (Ironsworn is
+    fought one foe at a time).
+  - Several foes introduced in the **same** narration coexist as separate
+    tracks — only combats that were open *before* the current reply are
+    auto-closed, so multi-foe scenes still work.
+
+### Added
+- **`Auto-Close Old Combat Tracks` world setting** (default **on**). Turn it
+  off to allow multiple simultaneous combat tracks instead of auto-closing
+  stale ones.
+- **`IronswornController.closeStaleCombatTracks(actor, opts)`** helper that
+  marks active combat tracks complete (with optional `onlyIds`/`exceptId`
+  scoping).
+
 ## [0.10.2] — 2026-06-09
 
 ### Added
@@ -582,6 +605,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.3]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.3
 [0.10.2]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.2
 [0.10.1]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.1
 [0.10.0]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.0
