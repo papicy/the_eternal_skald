@@ -13,6 +13,22 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.18] — 2026-06-09
+
+### Changed
+- **Republished to clear stale browser/Foundry caches.** Some users continued to
+  see the `missing ) after argument list` syntax error (reported around **line
+  1342**) *after* updating to v0.10.17. The committed script is verified clean —
+  it parses without error in strict **ES-module** mode (the same mode Foundry
+  uses), the previously-stray backticks (`` \`unique\` ``) are confirmed escaped,
+  and all unit tests pass — so the lingering error is a **cached copy of the old
+  script** in the browser/Foundry client, not a remaining code defect. This
+  release republishes the verified script and bumps the version so Foundry
+  re-downloads it; it also syncs the stale `v0.6.0` header comment in
+  `eternal-skald.js` to the real version. **No functional change** from v0.10.17.
+  If the error persists after updating, do a hard refresh (`Ctrl+Shift+R` /
+  `Cmd+Shift+R`) or restart Foundry to flush the cached module.
+
 ## [0.10.17] — 2026-06-09
 
 ### Fixed
@@ -997,6 +1013,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.18]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.18
 [0.10.17]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.17
 [0.10.16]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.16
 [0.10.15]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.15

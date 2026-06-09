@@ -1,5 +1,5 @@
 /* =====================================================================
- *  THE ETERNAL SKALD v0.6.0 — Foundry VTT v14 Module (Client)
+ *  THE ETERNAL SKALD v0.10.18 — Foundry VTT v14 Module (Client)
  *  ---------------------------------------------------------------------
  *  An AI-powered storytelling and combat-control assistant for Ironsworn
  *  and Ironsworn: Delve campaigns. Powered by Abacus AI ChatLLM.
