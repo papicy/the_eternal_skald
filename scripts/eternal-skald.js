@@ -4388,7 +4388,13 @@ const Integration = {
               const ref = moveDsId || move;
               const actor = IronswornController.getActiveCharacter();
               const res = await IronswornController.triggerMove(ref, { actor, stat });
-              if (!res?.ok) {
+              if (res?.ok && res.method === "milestone") {
+                // Milestone has no roll card — narrate it directly.
+                try {
+                  const fp = { moveName: "Reach a Milestone", outcome: "Progress Marked", score: null, challenge: [], match: false, resolved: true };
+                  setTimeout(() => this._narrateOutcome(null, fp).catch(e => console.warn(LOG_PREFIX, "milestone narration failed", e)), this._narrationDelayMs());
+                } catch (_) {}
+              } else if (!res?.ok) {
                 await Chat.postSystem(
                   `<strong>The dice would not answer:</strong> ${escapeHtml(res?.error ?? "unknown error")}`,
                   { gmWhisper: true }
@@ -4420,6 +4426,18 @@ const Integration = {
         `<strong>The dice would not answer:</strong> ${escapeHtml(res?.error ?? "unknown error")}`,
         { gmWhisper: true }
       );
+    }
+    // "Reach a Milestone" produces no roll card, so onIronswornRoll won't
+    // fire. Narrate it directly here so the Skald acknowledges the milestone.
+    if (res?.ok && res.method === "milestone") {
+      const milestoneDelayed = async () => {
+        try {
+          const fakeParsed = { moveName: "Reach a Milestone", outcome: "Progress Marked", score: null, challenge: [], match: false, resolved: true };
+          await this._narrateOutcome(null, fakeParsed);
+        } catch (e) { console.warn(LOG_PREFIX, "milestone narration failed", e); }
+      };
+      setTimeout(milestoneDelayed, this._narrationDelayMs());
+      return res;
     }
     // The resulting Ironsworn roll card (or manual card) is picked up by
     // onIronswornRoll(), which narrates the outcome.
@@ -4953,7 +4971,7 @@ const Integration = {
 
   /** Ask the AI to narrate an outcome and (optionally) apply effects. */
   async _narrateOutcome(message, parsed) {
-    const actor = message.speakerActor ?? IronswornController.getActiveCharacter();
+    const actor = message?.speakerActor ?? IronswornController.getActiveCharacter();
     const allowEffects = Settings.get("aiAppliesEffects") ?? true;
 
     // 1. Apply the deterministic combat mechanics FIRST (initiative on
@@ -4969,6 +4987,8 @@ const Integration = {
       // and (on a hit) advance it, so "Reach Your Destination" can later roll.
       try { const j = await this._autoJourneyFlow(parsed, actor); if (j) autoParts.push(j); }
       catch (e) { console.warn(LOG_PREFIX, "_autoJourneyFlow failed", e); }
+      try { const m = await this._autoMilestoneFlow(parsed, actor); if (m) autoParts.push(m); }
+      catch (e) { console.warn(LOG_PREFIX, "_autoMilestoneFlow failed", e); }
       autoSummary = autoParts.join("; ");
     }
 
@@ -5101,6 +5121,14 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
   },
 
   /**
+   * Is this the "Reach a Milestone" move?  No dice — just marks progress on
+   * the active vow by its rank.
+   */
+  _isMilestoneMove(moveName) {
+    return /\breach a milestone\b/i.test(String(moveName || ""));
+  },
+
+  /**
    * Best-effort meaningful name for an auto-created journey track, derived from
    * the player's stated intent (e.g. "travel to the Frozen Keep" →
    * "Journey to the Frozen Keep"). Falls back to a clean generic title so a
@@ -5169,15 +5197,32 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
   },
 
   /**
+   * Deterministically enact "Reach a Milestone": find the newest open vow
+   * and mark progress on it by its rank. This move has NO dice — it always
+   * succeeds. Returns a human-readable summary for the narration prompt.
+   */
+  async _autoMilestoneFlow(parsed, actor) {
+    if (!actor) return "";
+    if (!this._isMilestoneMove(parsed?.moveName)) return "";
+    const res = await IronswornController._executeMilestone(actor);
+    if (res?.ok) {
+      this._notifyProgress(res.track, res.boxes);
+      return `marked progress on vow "${res.track}" (now ${res.boxes ?? "?"}/10 boxes)`;
+    }
+    return res?.error ? `milestone: ${res.error}` : "";
+  },
+
+  /**
    * Remove progress / initiative / create_journey effects an auto-flow already
    * applied for a core combat OR journey move, so the AI can't double-apply
    * them. Non-combat / non-journey moves (and unrelated effects) pass through.
    */
   _filterRedundantCombatEffects(effects, parsed, autoSummary) {
     if (!autoSummary) return effects;
-    const combat  = this._isCombatMove(parsed?.moveName);
-    const journey = this._isJourneyMove(parsed?.moveName);
-    if (!combat && !journey) return effects;
+    const combat    = this._isCombatMove(parsed?.moveName);
+    const journey   = this._isJourneyMove(parsed?.moveName);
+    const milestone = this._isMilestoneMove(parsed?.moveName);
+    if (!combat && !journey && !milestone) return effects;
     return (effects || []).filter(e => {
       if (combat && e.kind === "initiative") { this._dbg("→ dropping redundant initiative effect (auto-applied)"); return false; }
       if (e.kind === "progress")             { this._dbg("→ dropping redundant progress effect (auto-applied)"); return false; }

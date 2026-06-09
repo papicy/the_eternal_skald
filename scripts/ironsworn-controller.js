@@ -523,6 +523,14 @@ export const IronswornController = {
       return this.rollProgressMove(moveRef, opts);
     }
 
+    // 0b. REACH A MILESTONE — not a roll; it simply marks progress on the
+    //     active vow by its rank. Handle it here so inline links and
+    //     doTriggerMove() both work without falling through to the "no
+    //     rollable stat" error.
+    if (this._isMilestoneMove(dataswornId, move?.name)) {
+      return this._executeMilestone(opts.actor ?? this.getActiveCharacter());
+    }
+
     // 1. Preferred: the system pre-roll dialog.
     if (dataswornId && this.hasPrerollDialog()) {
       try {
@@ -1035,6 +1043,34 @@ export const IronswornController = {
     if (/\/(fulfill_your_vow|reach_your_destination)$/.test(id)) return true;
     const n = String(name ?? "").toLowerCase().trim();
     return n === "fulfill your vow" || n === "reach your destination";
+  },
+
+  /**
+   * Is this the "Reach a Milestone" move?  It has no dice — it simply marks
+   * progress on the most recently sworn vow by its rank.
+   */
+  _isMilestoneMove(dsid, name) {
+    const id = String(dsid ?? "").toLowerCase();
+    if (/\/reach_a_milestone$/.test(id)) return true;
+    const n = String(name ?? "").toLowerCase().trim();
+    return n === "reach a milestone";
+  },
+
+  /**
+   * Execute the "Reach a Milestone" move: find the newest open vow and mark
+   * progress on it by rank.  Returns an {ok, track, boxes, …} result.
+   */
+  async _executeMilestone(actor) {
+    if (!actor) return { ok: false, error: "No active character." };
+    const vow = this._newestOpenTrackItem(actor, "vow");
+    if (!vow) return { ok: false, error: "No open vow to mark progress on." };
+    const result = await this.markProgressByRank(actor, vow.id);
+    if (result?.ok) {
+      const name = vow.name || "vow";
+      try { ui.notifications?.info(`Reach a Milestone: marked progress on "${name}" (now ${result.boxes ?? "?"}/10 boxes).`); } catch (_) {}
+      return { ok: true, method: "milestone", track: name, boxes: result.boxes, ticks: result.ticks };
+    }
+    return { ok: false, error: result?.error ?? "Could not mark progress." };
   },
 
   /**
