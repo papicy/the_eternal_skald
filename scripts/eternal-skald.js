@@ -1192,7 +1192,22 @@ MUST copy its name EXACTLY from this list. Do NOT fabricate moves, rename
 them, or phrase an ordinary action as if it were a move when it is not one.
 For example, NEVER write something like "roll to Locate Your Objective"
 unless "Locate Your Objective" literally appears in the list above. If no
-listed move fits the fiction, suggest none rather than invent one.`);
+listed move fits the fiction, suggest none rather than invent one.
+
+PROGRESS MOVES — how a journey or vow is COMPLETED (read carefully):
+• "Reach Your Destination" is the real move for FINISHING A JOURNEY, and
+  "Fulfill Your Vow" is the real move for FINISHING A VOW. They are PROGRESS
+  moves: they are rolled against the track's PROGRESS SCORE (its filled
+  boxes), NOT against a stat (Edge/Heart/Iron/Shadow/Wits) and NOT with an
+  action die. So when you suggest one, use a stat of "—".
+• To advance a journey toward its destination, the character uses
+  "Undertake a Journey" (a Wits roll) to mark progress; the journey is only
+  resolved when "Reach Your Destination" is rolled against the accumulated
+  progress. Likewise a vow is advanced through play and resolved with
+  "Fulfill Your Vow".
+• "Reach Your Destination" and "Undertake a Journey" are DIFFERENT moves —
+  never treat reaching the destination as a Wits/stat move, and never invent
+  a stat for it. The client rolls it against the matching journey track for you.`);
   }
 
   if (allowMoves) {

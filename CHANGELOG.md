@@ -13,6 +13,39 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.7] — 2026-06-09
+
+### Fixed
+- **Journey tracks now use the standard Ironsworn progress-track structure and
+  label.** Journeys were stored with a non-standard `subtype` of `"journey"`,
+  which the `foundry-ironsworn` sheet cannot localize — so the track's side
+  label rendered as the raw key `IRONSWORN.ITEM.SUBTYPEJOURNEY`. A journey is
+  simply a progress track, so it is now stored with the stock `"progress"`
+  subtype (correct **PROGRESS** label, standard mechanics). The Skald still
+  recognizes which tracks are journeys via its own internal flag, so journey
+  flavour and completion still work.
+- **"Reach Your Destination" and "Fulfill Your Vow" are now rolled correctly as
+  PROGRESS rolls.** These are progress moves — they roll the track's progress
+  score (its filled boxes) against the challenge dice, not an action die + a
+  stat. Previously the Skald tried to roll them like an ordinary stat move,
+  which dead-ended with *"Could not trigger … (no dialog and no rollable
+  stat)."* The module now routes them through the system's own progress-roll
+  dialog against the matching open journey/vow track (and reports a clear,
+  actionable message if no such track exists yet).
+- **Vow / journey completion now flows end-to-end.** Because the completion
+  move used to fail to roll, the Skald never narrated the resolution and so
+  never emitted the `complete_vow` / `complete_journey` directive — the tracks
+  were never marked complete on the sheet. With the progress roll fixed, a
+  successful "Reach Your Destination" / "Fulfill Your Vow" now resolves, the
+  Skald narrates it, and the track is marked complete (via the existing
+  `completeTrack` path, which sets `system.completed`).
+
+### Changed
+- The AI prompt now explains that "Reach Your Destination" (finish a journey)
+  and "Fulfill Your Vow" (finish a vow) are progress rolls against a track —
+  distinct from "Undertake a Journey" (a Wits roll to *advance* a journey) —
+  and must never be treated as stat moves or invented with a fabricated stat.
+
 ## [0.10.6] — 2026-06-09
 
 ### Fixed
@@ -650,6 +683,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.7]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.7
 [0.10.6]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.6
 [0.10.5]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.5
 [0.10.4]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.4

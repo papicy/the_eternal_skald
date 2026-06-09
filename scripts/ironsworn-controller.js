@@ -401,6 +401,18 @@ export const IronswornController = {
 
     dbg("triggerMove:", { moveRef, resolved: dataswornId });
 
+    // 0. PROGRESS MOVES — "Fulfill Your Vow" and "Reach Your Destination" are
+    //    not action rolls against a stat; they are PROGRESS rolls against a
+    //    specific track's score. The system's generic move dialog cannot roll
+    //    them without a track context (and they have no rollable stat), which
+    //    is exactly why they used to dead-end with "no dialog and no rollable
+    //    stat". Route them to the progress-roll path against the matching open
+    //    track instead. Reach Your Destination uses the same mechanics as
+    //    Fulfill Your Vow — both roll the track's progress score.
+    if (this._isProgressMove(dataswornId, move?.name)) {
+      return this.rollProgressMove(moveRef, opts);
+    }
+
     // 1. Preferred: the system pre-roll dialog.
     if (dataswornId && this.hasPrerollDialog()) {
       try {
@@ -705,12 +717,18 @@ export const IronswornController = {
     // the registered types and tag what the system actually expects.
     //   combat  → progress-style track (subtype "progress")
     //   vow     → subtype "vow"     (special-cased by the system's Fulfill move)
-    //   journey → subtype "journey" (a free-form subtype string; the data model
-    //             accepts any value and only special-cases "vow", so tagging
-    //             journeys lets us identify and flavour them without breaking
-    //             the system)
+    //   journey → subtype "progress" — a journey IS a standard Ironsworn
+    //             progress track. foundry-ironsworn ONLY ships localized labels
+    //             for the subtypes "progress", "vow" and "bond"/"connection"
+    //             (see system lang IRONSWORN.ITEM.Subtype*). A non-standard
+    //             subtype like "journey" renders the raw, unlocalized key
+    //             ("IRONSWORN.ITEM.SUBTYPEJOURNEY") on the sheet and skips the
+    //             stock progress structure. So we store journeys as the plain
+    //             "progress" subtype (correct "PROGRESS" label + standard
+    //             mechanics) and identify them as journeys via our own
+    //             `flags.<scope>.trackKind = "journey"` flag instead.
     //   bond    → subtype "bond"
-    const subtypeMap = { combat: "progress", journey: "journey", vow: "vow", bond: "bond" };
+    const subtypeMap = { combat: "progress", journey: "progress", vow: "vow", bond: "bond" };
     const subtype = subtypeMap[kind] ?? "progress";
     const itemType = this._pickItemType(
       kind === "vow"  ? ["vow", "progress"]
@@ -781,6 +799,128 @@ export const IronswornController = {
     } catch (e) {
       return { ok: false, error: e?.message ?? String(e) };
     }
+  },
+
+  /**
+   * True iff a move is a PROGRESS move that rolls a track's progress score
+   * (rather than an action roll against a stat). Currently the two the Skald
+   * drives: "Fulfill Your Vow" (vows) and "Reach Your Destination" (journeys).
+   * Matched on Datasworn ID first (rules-package agnostic) then by name.
+   */
+  _isProgressMove(dsid, name) {
+    const id = String(dsid ?? "").toLowerCase();
+    if (/\/(fulfill_your_vow|reach_your_destination)$/.test(id)) return true;
+    const n = String(name ?? "").toLowerCase().trim();
+    return n === "fulfill your vow" || n === "reach your destination";
+  },
+
+  /**
+   * The newest still-open (not completed) progress-track Item of a given
+   * kind ("vow" | "journey" | "combat" | …), or null. Classification uses our
+   * own `trackKind` flag first (set when the Skald created the track), then
+   * falls back to the system `system.subtype` (so a hand-made "vow" item is
+   * still found). Returns the live Item document.
+   */
+  _newestOpenTrackItem(actor, kind) {
+    if (!actor?.items) return null;
+    const want = String(kind ?? "").toLowerCase();
+    const matches = [];
+    for (const item of actor.items) {
+      if (foundry.utils.getProperty(item, "system.completed")) continue;
+      const flagKind = (item.getFlag?.(ES_SCOPE, "trackKind")
+                     ?? foundry.utils.getProperty(item, `flags.${ES_SCOPE}.trackKind`)
+                     ?? "").toLowerCase();
+      const subtype = String(foundry.utils.getProperty(item, "system.subtype") ?? "").toLowerCase();
+      // For vows, the system's own "vow" subtype also counts. Journeys are
+      // stored as plain "progress" tracks, so they are identified ONLY by our
+      // trackKind flag.
+      const isMatch = flagKind === want || (want === "vow" && subtype === "vow");
+      if (isMatch) matches.push(item);
+    }
+    if (!matches.length) return null;
+    // "Newest" by creation timestamp when available, else last in iteration.
+    matches.sort((a, b) => (b._stats?.createdTime ?? 0) - (a._stats?.createdTime ?? 0));
+    return matches[0];
+  },
+
+  /**
+   * Roll a PROGRESS move ("Fulfill Your Vow" / "Reach Your Destination")
+   * against a progress track's score, via the system's own progress-roll
+   * dialog (IronswornPrerollDialog.showForProgress) — identical to clicking
+   * the track's roll button. This is the correct mechanic for completing a
+   * vow or journey: you roll the track's progress score (filled boxes, 0–10)
+   * against the two challenge dice, NOT an action die + stat.
+   *
+   * The track is resolved from (in order): an explicit `opts.trackRef`, then
+   * the newest open track of the kind the move implies (vow → vow track,
+   * journey → journey track). The move's Datasworn ID is attached so the roll
+   * card shows the right move text/title.
+   *
+   * @param {string} moveRef  move name or Datasworn ID.
+   * @param {object} [opts]
+   * @param {Actor}  [opts.actor]
+   * @param {string} [opts.trackRef]  explicit track name/id to roll against.
+   * @returns {Promise<{ok:boolean, method:string, track?:string, error?:string}>}
+   */
+  async rollProgressMove(moveRef, opts = {}) {
+    const move = this._resolveMove(moveRef);
+    const dsid = move?.id ?? (typeof moveRef === "string" && moveRef.startsWith("move:") ? moveRef : null);
+    const actor = opts.actor ?? this.getActiveCharacter();
+    if (!actor) return { ok: false, method: "none", error: "No active character for a progress roll." };
+
+    // Which kind of track does this move roll against?
+    const idl = String(dsid ?? "").toLowerCase();
+    const nml = String(move?.name ?? moveRef).toLowerCase();
+    const kind = /reach_your_destination/.test(idl) || nml === "reach your destination" ? "journey"
+               : /fulfill_your_vow/.test(idl)       || nml === "fulfill your vow"       ? "vow"
+               : null;
+
+    // Resolve the track: explicit ref wins, else newest open track of the kind.
+    let track = opts.trackRef ? this.findTrack(actor, opts.trackRef) : null;
+    if (!track && kind) track = this._newestOpenTrackItem(actor, kind);
+    if (!track) {
+      const noun = kind ?? "progress";
+      return {
+        ok: false,
+        method: "none",
+        error: `No open ${noun} track to roll "${move?.name ?? moveRef}" against. ` +
+               `Begin the ${noun} first (or open its track card and roll from there).`
+      };
+    }
+
+    // Progress SCORE = filled boxes (0–10) = floor(ticks / 4), capped at 10.
+    const current = Number(foundry.utils.getProperty(track, "system.current") ?? 0);
+    const score = Math.max(0, Math.min(10, Math.floor(current / 4)));
+
+    // Preferred: the system's progress-roll dialog (attaches the move card).
+    const dlg = this.api()?.applications?.IronswornPrerollDialog;
+    if (typeof dlg?.showForProgress === "function") {
+      try {
+        await dlg.showForProgress(track.name ?? "(progress)", score, actor, dsid ?? undefined);
+        return { ok: true, method: "progress-dialog", track: track.name };
+      } catch (e) {
+        warn(`showForProgress("${track.name}") failed — trying the item's own fulfill():`, e?.message ?? e);
+      }
+    }
+
+    // Fallback: the track item's own fulfill() (the same method the sheet's
+    // roll button calls; picks the Fulfill Your Vow move for vow subtypes).
+    const sys = track.system;
+    if (typeof sys?.fulfill === "function") {
+      try {
+        await sys.fulfill();
+        return { ok: true, method: "fulfill", track: track.name };
+      } catch (e) {
+        warn(`track.system.fulfill() failed:`, e?.message ?? e);
+      }
+    }
+
+    return {
+      ok: false,
+      method: "none",
+      error: `Could not roll "${move?.name ?? moveRef}" against “${track.name}” — the ` +
+             `progress-roll dialog is unavailable. Roll it from the track on the sheet.`
+    };
   },
 
   /* =================================================================
