@@ -1347,6 +1347,11 @@ hit / miss / match):
    [[EFFECT: stress <N>]]
    [[EFFECT: supply <+N|-N>]]
    [[EFFECT: progress <Track Name> <+N ticks | rank>]]
+   [[EFFECT: mark_progress "<Vow/Journey Title>" [<+N | rank>]]]
+        Advance a SPECIFIC named vow or journey track by its EXACT title (use
+        the titles listed under "Open vows"/"Open journeys" in the live game
+        state). With no tick/rank suffix it marks one tick-set by the track's
+        rank. Prefer this over a bare "progress" when you know the track name.
    [[EFFECT: oracle <Oracle Name>]] (ask the system to roll an oracle)
 Outcome semantics: STRONG HIT = you get what you want, often +momentum.
 WEAK HIT = you succeed at a cost (lose supply/momentum, partial info).
@@ -1390,7 +1395,11 @@ INITIATIVE state telling who is in control. You drive these with:
         way a vow gets closed, so always emit it when a vow is fulfilled.
    [[EFFECT: create_journey <Name> <rank> <description>]]
         Begin a journey progress track when the character undertakes a journey
-        toward a destination (the journey counterpart of create_vow).
+        toward a destination (the journey counterpart of create_vow). Give it a
+        SPECIFIC, evocative name tied to the destination (e.g. "Journey to the
+        Frozen Keep") — never a bare "Journey". NOTE: when the resolved move is
+        "Undertake a Journey" the client AUTO-OPENS a journey track for you if
+        none is open, so for that move you do NOT need to emit create_journey.
    [[EFFECT: complete_journey <Journey Name>]]
         Mark a journey COMPLETE when the destination is reached in the fiction —
         i.e. after a successful "Reach Your Destination" move, or whenever the
@@ -1415,7 +1424,22 @@ IMPORTANT — combat moves are AUTOMATED for you. When the resolved move is
 So for those moves, do NOT emit [[EFFECT: initiative ...]] or
 [[EFFECT: progress ...]] yourself — they would double-apply. You SHOULD
 still emit [[EFFECT: create_combat ...]] when a fight first starts (so the
-track exists to mark), and [[EFFECT: end_combat ...]] when a foe is finished.`);
+track exists to mark), and [[EFFECT: end_combat ...]] when a foe is finished.
+
+JOURNEYS are AUTOMATED too. When the resolved move is "Undertake a Journey",
+the client AUTOMATICALLY opens a journey track (if none is open yet) and, on a
+hit, marks progress on it by its rank. So for that move do NOT emit
+[[EFFECT: create_journey ...]] or [[EFFECT: progress ...]] yourself — just
+narrate. The journey is later FINISHED with the "Reach Your Destination"
+progress move; when it resolves successfully, emit [[EFFECT: complete_journey]]
+(no roll-name) to close it.
+
+REFERENCE OPEN TRACKS BY THEIR EXACT TITLES. The live game state lists the
+character's "Open vows" and "Open journeys" by title. When you advance or
+complete one through narration, use mark_progress / complete_* with that EXACT
+title (or omit the name to act on the active track) — never invent a title and
+never use a move name ("Fulfill Your Vow" / "Reach Your Destination") as a
+track title.`);
   }
 
   // (v0.10.6) Track-management directives for the CONVERSATIONAL channels
@@ -1442,17 +1466,22 @@ directive on its OWN line so the track appears on the character's sheet:
         compendium). Only an IMPORTANT narrative boss/unique antagonist not in
         the catalogue may be custom — give it a rank AND the keyword `unique`,
         e.g. [[EFFECT: create_combat Hrafn the Oathbreaker formidable unique]].
+   [[EFFECT: mark_progress "<Vow/Journey Title>" [rank|+N]]]
+        When the fiction clearly ADVANCES a specific open vow or journey (a
+        milestone reached, a leg of the journey completed). Use the track's
+        EXACT title from the "Open vows"/"Open journeys" list in the live game
+        state. No suffix marks progress by the track's rank.
    [[EFFECT: complete_journey <Name>]] — when a destination is reached.
    [[EFFECT: complete_vow <Name>]]     — when a vow is fulfilled.
    [[EFFECT: end_combat <Foe Name>]]   — when a foe is defeated/flees/yields.
 <rank> scale: troublesome, dangerous, formidable, extreme, epic (default
-formidable). Use the track's EXACT name when closing it; if unsure, you MAY
-omit the name (e.g. [[EFFECT: complete_vow]]) and the system will close the
-active vow/journey. Never put the MOVE name ("Fulfill Your Vow" / "Reach Your
-Destination") in a complete_* directive.
-Only emit these when the fiction clearly BEGINS or ENDS such an undertaking —
-never for momentary actions. Do NOT emit momentum/harm/stress/supply/progress
-directives here; those are applied automatically after dice rolls.`);
+formidable). Use the track's EXACT name when advancing or closing it; if
+unsure, you MAY omit the name (e.g. [[EFFECT: complete_vow]]) and the system
+will act on the active vow/journey. Never put the MOVE name ("Fulfill Your Vow"
+/ "Reach Your Destination") in a mark_progress or complete_* directive.
+Only emit these when the fiction clearly BEGINS, ADVANCES, or ENDS such an
+undertaking — never for momentary actions. Do NOT emit momentum/harm/stress/
+supply directives here; those are applied automatically after dice rolls.`);
   }
 
   // The official foe catalogue — embedded whenever combat tracks can be
@@ -3955,14 +3984,37 @@ const Integration = {
     if (firstWord === "harm")   { const n = parseInt(body.slice(4), 10); return Number.isFinite(n) ? { kind: "harm",   value: Math.abs(n) } : null; }
     if (firstWord === "stress") { const n = parseInt(body.slice(6), 10); return Number.isFinite(n) ? { kind: "stress", value: Math.abs(n) } : null; }
     if (firstWord === "supply") { const n = parseInt(body.slice(6), 10); return Number.isFinite(n) ? { kind: "supply", value: n } : null; }
-    if (firstWord === "progress") {
-      // "progress <Track Name> <+N | rank>"
-      const rest = body.slice(8).trim();
-      const tickMatch = rest.match(/([+-]?\d+)\s*(?:ticks?)?\s*$/i);
-      const rankMatch = /\brank\b\s*$/i.test(rest);
-      let name = rest, value = 4, byRank = false;
-      if (rankMatch) { byRank = true; name = rest.replace(/\brank\b\s*$/i, "").trim(); }
-      else if (tickMatch) { value = parseInt(tickMatch[1], 10); name = rest.slice(0, tickMatch.index).trim(); }
+    // "progress <Track Name> <+N | rank>" and its by-title alias
+    // "mark_progress <Track Title> [+N | rank]" / 'mark_progress "Track Title"'.
+    // mark_progress is meant for advancing a NAMED vow/journey from the
+    // narrative (no dice roll), so when it carries no explicit tick count it
+    // defaults to marking by the track's rank.
+    const isMarkProgress = firstWord === "mark_progress" || lc.startsWith("mark progress ") || lc === "mark progress";
+    if (firstWord === "progress" || isMarkProgress) {
+      let rest;
+      if (firstWord === "progress")            rest = body.slice(8).trim();
+      else if (firstWord === "mark_progress")  rest = body.slice(13).trim();
+      else                                     rest = body.replace(/^mark\s+progress/i, "").trim();
+
+      let name, value = 4, byRank = false;
+      // A quoted title — 'mark_progress "The Truth of the Star-Fall" +8' or
+      // just 'mark_progress "The Long Road North"' — is the clearest form.
+      const quoted = rest.match(/^["'“”]([^"'“”]+)["'“”]\s*(.*)$/);
+      if (quoted) {
+        name = quoted[1].trim();
+        const tail = (quoted[2] || "").trim();
+        const tm = tail.match(/([+-]?\d+)/);
+        if (/\brank\b/i.test(tail)) byRank = true;
+        else if (tm) value = parseInt(tm[1], 10);
+        else byRank = true;                 // bare quoted title → by rank
+      } else {
+        const tickMatch = rest.match(/([+-]?\d+)\s*(?:ticks?)?\s*$/i);
+        const rankMatch = /\brank\b\s*$/i.test(rest);
+        name = rest;
+        if (rankMatch)      { byRank = true; name = rest.replace(/\brank\b\s*$/i, "").trim(); }
+        else if (tickMatch) { value = parseInt(tickMatch[1], 10); name = rest.slice(0, tickMatch.index).trim(); }
+        else if (isMarkProgress) { byRank = true; }   // unquoted mark_progress, no ticks → by rank
+      }
       name = name.replace(/^on\s+/i, "").replace(/[:\-—]+$/, "").trim();
       if (!name) return null;
       return { kind: "progress", track: name, value, byRank };
@@ -4745,8 +4797,14 @@ const Integration = {
     //    gives us a factual summary to feed into the narration prompt.
     let autoSummary = "";
     if (allowEffects) {
-      try { autoSummary = await this._autoCombatFlow(parsed, actor); }
+      const autoParts = [];
+      try { const c = await this._autoCombatFlow(parsed, actor);  if (c) autoParts.push(c); }
       catch (e) { console.warn(LOG_PREFIX, "_autoCombatFlow failed", e); }
+      // Journey side: on "Undertake a Journey" ensure a journey track exists
+      // and (on a hit) advance it, so "Reach Your Destination" can later roll.
+      try { const j = await this._autoJourneyFlow(parsed, actor); if (j) autoParts.push(j); }
+      catch (e) { console.warn(LOG_PREFIX, "_autoJourneyFlow failed", e); }
+      autoSummary = autoParts.join("; ");
     }
 
     const ctx = this.gatherContext();
@@ -4868,15 +4926,99 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
   },
 
   /**
-   * Remove progress / initiative effects the auto-combat flow already
-   * applied for a core combat move, so the AI can't double-apply them.
-   * Non-combat moves (or non-progress/initiative effects) pass through.
+   * Is this the journey-ADVANCING move ("Undertake a Journey")? This is the
+   * move whose hit marks journey progress — distinct from the journey-FINISHING
+   * progress move ("Reach Your Destination"), which rolls the accumulated
+   * track and is handled by IronswornController.rollProgressMove().
+   */
+  _isJourneyMove(moveName) {
+    return /\bundertake (?:a|your|the|this) journey\b/i.test(String(moveName || ""));
+  },
+
+  /**
+   * Best-effort meaningful name for an auto-created journey track, derived from
+   * the player's stated intent (e.g. "travel to the Frozen Keep" →
+   * "Journey to the Frozen Keep"). Falls back to a clean generic title so a
+   * track ALWAYS gets a sensible name rather than an empty/placeholder one.
+   */
+  _inferJourneyName() {
+    const intent = String(this._lastIntent || "").trim();
+    if (intent) {
+      // "...to/toward/towards/for/into <Destination>" — capture a proper-ish
+      // place name (allow a leading "the").
+      const m = intent.match(/\b(?:to|toward|towards|for|into|reach|reaching|bound for)\s+((?:the\s+)?[A-Z][\w''’\- ]{2,48})/);
+      if (m) {
+        const dest = m[1].trim().replace(/[.,;:!?]+$/, "").replace(/\s+/g, " ");
+        if (dest && !/^journey\b/i.test(dest)) return `Journey to ${dest}`;
+      }
+    }
+    return "The Journey";
+  },
+
+  /** Default rank for an auto-created journey track. */
+  _inferJourneyRank() {
+    return "formidable";
+  },
+
+  /**
+   * Deterministically enact the journey side of "Undertake a Journey" so that
+   * "Reach Your Destination" always has an open track to roll against:
+   *   • If no open journey track exists, OPEN one (named from the player's
+   *     intent, or a clean generic title) — this is the root-cause fix for the
+   *     "No open journey track to roll 'Reach Your Destination' against" error.
+   *   • On a hit (strong/weak), MARK PROGRESS on that journey by its rank, the
+   *     standard effect of a successful "Undertake a Journey".
+   * Returns a short human-readable summary (for the prompt + GM whisper), or ""
+   * when the move isn't a journey move / nothing applied.
+   */
+  async _autoJourneyFlow(parsed, actor) {
+    if (!actor) return "";
+    if (!this._isJourneyMove(parsed?.moveName)) return "";
+
+    const out    = String(parsed.outcome || "").toLowerCase();
+    const strong = out.includes("strong");
+    const hit    = strong || out.includes("weak");
+    const notes  = [];
+
+    // Ensure there is an open journey track to advance / later complete.
+    let track = IronswornController._newestOpenTrackItem(actor, "journey");
+    if (!track) {
+      const name = this._inferJourneyName();
+      const rank = this._inferJourneyRank();
+      const res  = await IronswornController.createProgressTrack(actor, name, "journey", rank);
+      if (res?.ok) {
+        track = IronswornController._newestOpenTrackItem(actor, "journey");
+        notes.push(`opened journey “${res.name || name}” (${rank})`);
+        try { ui.notifications?.info(`${SKALD_NAME}: journey begun — ${res.name || name}.`); } catch (_) {}
+      } else {
+        notes.push("could not open a journey track");
+      }
+    }
+
+    // On a hit, mark progress on the (now open) journey by its rank.
+    if (track && hit) {
+      const pr = await IronswornController.markProgressByRank(actor, track.id);
+      if (pr?.ok) { this._notifyProgress(pr.track, pr.boxes); notes.push(`advanced ${pr.track} (now ${pr.boxes}/10 boxes)`); }
+    }
+    return notes.join("; ");
+  },
+
+  /**
+   * Remove progress / initiative / create_journey effects an auto-flow already
+   * applied for a core combat OR journey move, so the AI can't double-apply
+   * them. Non-combat / non-journey moves (and unrelated effects) pass through.
    */
   _filterRedundantCombatEffects(effects, parsed, autoSummary) {
-    if (!autoSummary || !this._isCombatMove(parsed?.moveName)) return effects;
+    if (!autoSummary) return effects;
+    const combat  = this._isCombatMove(parsed?.moveName);
+    const journey = this._isJourneyMove(parsed?.moveName);
+    if (!combat && !journey) return effects;
     return (effects || []).filter(e => {
-      if (e.kind === "initiative") { this._dbg("→ dropping redundant initiative effect (auto-applied)"); return false; }
-      if (e.kind === "progress")   { this._dbg("→ dropping redundant progress effect (auto-applied)"); return false; }
+      if (combat && e.kind === "initiative") { this._dbg("→ dropping redundant initiative effect (auto-applied)"); return false; }
+      if (e.kind === "progress")             { this._dbg("→ dropping redundant progress effect (auto-applied)"); return false; }
+      // The journey track is opened deterministically by _autoJourneyFlow, so
+      // drop any AI-emitted create_journey to avoid a duplicate track.
+      if (journey && e.kind === "create_journey") { this._dbg("→ dropping redundant create_journey effect (auto-applied)"); return false; }
       return true;
     });
   },
@@ -4888,7 +5030,13 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
    * no dice roll to hang meter changes off. Meter effects (momentum, harm,
    * stress, supply, progress) stay dice-driven via {@link _narrateOutcome}.
    */
-  _TRACK_LIFECYCLE_KINDS: ["create_journey", "create_vow", "create_combat", "complete_track", "end_combat"],
+  // NOTE: "progress" is included so the conversational channels can advance a
+  // NAMED vow/journey from the narrative (the [[EFFECT: mark_progress "Title"]]
+  // / [[EFFECT: progress <Title> …]] directive) WITHOUT requiring a dice roll
+  // first — markProgress() resolves the track by its title. This is separate
+  // from the post-roll path (_narrateOutcome), which applies effects directly
+  // and filters auto-applied progress, so there is no double-marking risk.
+  _TRACK_LIFECYCLE_KINDS: ["create_journey", "create_vow", "create_combat", "complete_track", "end_combat", "progress"],
 
   /**
    * (v0.10.6) Parse a conversational reply for [[EFFECT:…]] directives and

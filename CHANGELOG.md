@@ -13,6 +13,43 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.15] — 2026-06-09
+
+### Fixed
+- **"Undertake a Journey" never had a track to advance.** Rolling *Undertake a
+  Journey* without an open journey track meant *Reach Your Destination* later
+  failed with **"No open journey track to roll 'Reach Your Destination'
+  against."** The post-roll narration path now runs a deterministic
+  **`_autoJourneyFlow`**: when the resolved move is *Undertake a Journey* and no
+  journey track is open, it **auto-creates one** (named from the player's
+  inferred destination, e.g. *"Journey to the Frozen Keep"*, else a clean
+  generic title) and, on a strong/weak hit, **marks progress on it by its
+  rank** — mirroring the existing `_autoCombatFlow` for fights.
+
+### Added
+- **`mark_progress` effect directive (advance a track by its exact title).**
+  `[[EFFECT: mark_progress "<Vow/Journey Title>" [<+N | rank>]]]` advances a
+  specific named track resolved against the real sheet items (`findTrack`).
+  Quoted titles are supported; with no tick/rank suffix it marks by the track's
+  rank. It is an alias of the existing `progress` effect, made title-first for
+  reliable narrative matching.
+- **Narrative progress + completion without a roll.** `progress` is now part of
+  the track-lifecycle effect set applied by the conversational channels
+  (`!skald` / `!scene` / `!combat`), so a vow/journey can be advanced *and*
+  completed (`complete_vow` / `complete_journey`) directly from narration —
+  no progress roll required first.
+- **Open vows & journeys listed by title for the AI.** `describeCharacter()`
+  now adds explicit *"Open vows"* and *"Open journeys"* lines (by exact title)
+  to the live game state, and the prompt instructs the Skald to reference open
+  tracks by their exact titles — never a guessed name or a move name.
+
+### Changed
+- The redundant-effect filter now also drops any AI-emitted `progress` /
+  `create_journey` directives for the *Undertake a Journey* move (handled
+  deterministically by `_autoJourneyFlow`), preventing duplicate journey tracks
+  or double-marked progress. The prompt documents that journeys are automated
+  for that move, just like combat.
+
 ## [0.10.14] — 2026-06-09
 
 ### Added
@@ -916,6 +953,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.15]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.15
 [0.10.14]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.14
 [0.10.13]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.13
 [0.10.12]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.12

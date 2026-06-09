@@ -466,10 +466,23 @@ export const IronswornController = {
     if (tracks.length) {
       lines.push("Progress tracks:");
       for (const t of tracks.slice(0, 12)) {
-        const rank = t.rank ? ` [${t.rank}]` : "";
+        const rank = t.rank ? ` [${this.normalizeRank(t.rank)}]` : "";
         const done = t.completed ? " (completed)" : "";
         lines.push(`  - ${t.name}${rank}: ${t.boxes}/10 boxes (${t.current}/40 ticks)${done}`);
       }
+
+      // Surface OPEN vows and journeys by their EXACT titles so the AI can
+      // reference them precisely (e.g. mark progress on / complete the right
+      // named track) instead of guessing or using the move name as a title.
+      const isJourney = t =>
+        (t.kind === "journey") ||
+        (!t.kind && t.subtype !== "vow" && t.subtype !== "bond" && t.subtype !== "foe"
+         && t.subtype !== "connection" && t.subtype !== "bondset");
+      const isVow = t => t.kind === "vow" || t.subtype === "vow";
+      const openVows = tracks.filter(t => !t.completed && isVow(t)).map(t => `"${t.name}"`);
+      const openJourneys = tracks.filter(t => !t.completed && !isVow(t) && isJourney(t)).map(t => `"${t.name}"`);
+      if (openVows.length)     lines.push(`Open vows (reference by EXACT title): ${openVows.join(", ")}`);
+      if (openJourneys.length) lines.push(`Open journeys (reference by EXACT title): ${openJourneys.join(", ")}`);
     }
     return lines.join("\n");
   },
