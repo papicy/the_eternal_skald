@@ -70,6 +70,10 @@
         "name": "AI Applies Mechanical Effects",
         "hint": "Permit the Skald to apply mechanical effects it proposes — adjusting momentum, harm, stress, supply, marking progress, rolling oracles, and running the combat automation (combat tracks & initiative). On by default. Turn OFF to keep the player in full control of the sheet."
       },
+      "showEffectAnnouncements": {
+        "name": "Show Effect Announcements",
+        "hint": "Post the brief \"The Skald enacts: …\" whisper messages that announce the mechanical effects the Skald applies (momentum changes, progress marks, completed tracks, etc.). On by default. Turn OFF to hide these technical notices and keep the chat focused on the narration."
+      },
       "autoCreateCombatTracks": {
         "name": "Auto-Create Combat Tracks",
         "hint": "When the Skald narrates the start of a fight, automatically create a combat progress track for each foe so attacks can be marked against it. Requires AI Applies Mechanical Effects."
