@@ -13,6 +13,72 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.27] — 2026-06-10
+
+### Fixed
+- **Combat-foe track labelling.** Combat (foe) tracks created by the Skald are
+  now stored with `system.subtype = "progress"` (plus the existing
+  `the-eternal-skald.trackKind = "combat"` flag) instead of the bare `"foe"`
+  subtype. The foundry-ironsworn sheet only localizes the *vow / progress /
+  connection* subtypes, so a `"foe"` subtype rendered as the raw key
+  `IRONSWORN.ITEM.SubtypeFoe` on the track card. Foe tracks now show a proper
+  rank/progress label, exactly mirroring how journeys are handled. Combat-track
+  detection (`getCombatTracks`) is unchanged — it keys off the `trackKind` flag,
+  not the subtype — so nothing else regresses.
+- **Legacy repair (idempotent).** `IronswornController.normalizeCombatTrackSubtypes(actor)`
+  migrates any combat-flagged tracks already on a sheet from the old `"foe"`
+  subtype to `"progress"`. It runs automatically inside the `create_combat`
+  stale-cleanup pass and is safe to run repeatedly (it only touches
+  combat-flagged tracks whose subtype is still `"foe"`).
+
+### Added
+- **Story-arc awareness (Phase 2 — actor flags).** The Skald now remembers the
+  focus of the current arc via two lightweight actor flags under
+  `flags["the-eternal-skald"]`:
+  - `activeVow` / `activeCombat` store the Item id of the focus vow and the
+    active fight. New controller methods `getActiveVow` / `setActiveVow`,
+    `getActiveCombatFlagTrack` / `setActiveCombat` / `clearActiveCombat`, with
+    validation against the live items on the sheet.
+  - `getActiveCombat(actor)` now prefers the flagged fight, falling back to the
+    previous heuristic; `identifyStoryFocusVow(actor)` returns the flagged vow
+    first. `setActiveCombat` is set when a fight begins and `clearActiveCombat`
+    when it ends. Marking progress on a track auto-sets the matching flag
+    (`_syncActiveFlagForTrack`), so the focus follows the action.
+- **AI write directives (Phase 3).** The Skald can now advance and conclude
+  tracks straight from the fiction with three directives, each fuzzy-matched to
+  the real track on the active sheet, validated, applied safely, audit-logged,
+  and whispered to the GM:
+  - `[[MARK_COMPLETE:kind:Name]]` — fulfil/end/reach the named track.
+  - `[[ADD_PROGRESS:kind:Name:N]]` — add **N boxes** (N×4 ticks) of progress.
+  - `[[SET_PROGRESS:kind:Name:N]]` — set progress to **N boxes** absolute
+    (clamped 0–10 boxes / 0–40 ticks).
+  - `kind` is one of `vow` / `journey` / `combat` / `bond`. Fuzzy matching
+    (`findTrackFuzzy`, word-overlap ≥ 0.5) tolerates minor title drift;
+    `setProgress` writes absolute box counts and re-syncs the active flag.
+    Every write is logged via `_auditWrite` and reported to the GM
+    (e.g. `🤖 Skald marked "The Truth of the Star-Fall" complete`).
+- **Roll integration (Phase 4).** A **Strong Hit** on *Fulfill Your Vow* /
+  *End the Fight* / *Reach Your Destination* now **auto-completes** the matching
+  track (resolved via the active flags, with a kind-based fallback), and the
+  redundant AI completion effect is filtered out so the track is never
+  double-closed. A **weak hit or miss never auto-completes** — it is narrated as
+  still in progress with guidance toward the fiction. Move classification lives
+  in `_completionMoveKind`; the flow in `_autoCompletionFlow` is woven into
+  `_narrateOutcome`.
+- **Prompt guidance.** `buildIronswornPromptBlock()` gained a
+  **PROGRESS-TRACK WRITE DIRECTIVES** section teaching the directive syntax and
+  the rules around it (use exact track names; only mark complete at 10/10 on a
+  Strong Hit or a clear narrative conclusion; never on a weak hit or miss).
+
+### Verified
+- New `test/progress-track-writes.test.mjs` (55 assertions) covering the
+  combat-foe label fix and legacy migration, the Phase 2 active-flag accessors
+  and auto-sync, `findTrackFuzzy` (exact / substring / fuzzy / kind filter),
+  `setProgress` (absolute boxes, clamping, flag sync), the write-directive
+  parser (`MARK_COMPLETE` / `ADD_PROGRESS` / `SET_PROGRESS`, kind validation),
+  and Phase 4 completion-move classification. All 13 test suites pass with no
+  regressions.
+
 ## [0.10.26] — 2026-06-10
 
 ### Added
@@ -1283,6 +1349,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.27]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.27
 [0.10.26]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.26
 [0.10.24]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.24
 [0.10.23]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.23

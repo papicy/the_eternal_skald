@@ -69,10 +69,12 @@ const journey = (name, ticks, opts = {}) => ({
   system: { subtype: "progress", rank: opts.rank ?? 3, current: ticks, completed: opts.completed ?? false },
   _id: opts.id
 });
+// Combat-foe labelling fix: combat tracks created by the Skald on a character
+// are stored with subtype "progress" (clean label) + trackKind "combat" flag.
 const combat = (name, ticks, opts = {}) => ({
   name, type: "progress",
   flags: { [ES]: { trackKind: "combat" } },
-  system: { subtype: "foe", rank: opts.rank ?? 3, current: ticks, completed: opts.completed ?? false },
+  system: { subtype: "progress", rank: opts.rank ?? 3, current: ticks, completed: opts.completed ?? false },
   _id: opts.id
 });
 

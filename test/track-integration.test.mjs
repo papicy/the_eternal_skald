@@ -147,11 +147,18 @@ console.log("[1] createProgressTrack → conforms to ProgressModel schema");
   eq(actor.items.get(br.id).system.rank, 1, "bond rank numeric 1 (troublesome)");
 
   // -- COMBAT (foe) --
+  // Combat-foe labelling fix: combat tracks on a CHARACTER are stored with
+  // subtype "progress" (like journeys) — NOT "foe" — because the character
+  // sheet only localizes vow/progress/connection subtypes and would otherwise
+  // render the raw "IRONSWORN.ITEM.SubtypeFoe" key. Combat identity is carried
+  // by the trackKind="combat" flag.
   const cr = await Ctrl.createProgressTrack(actor, "Brown Bear", "combat", "dangerous");
   const foe = actor.items.get(cr.id);
   eq(foe.type, "progress", "combat item type 'progress'");
-  eq(foe.system.subtype, "foe", "combat subtype 'foe' (matches foe sheet)");
+  eq(foe.system.subtype, "progress", "combat subtype 'progress' (clean label; not raw SubtypeFoe)");
   eq(foe.flags["the-eternal-skald"].trackKind, "combat", "combat trackKind flag");
+  // getCombatTracks must still recognise this track via the trackKind flag.
+  ok(Ctrl.getCombatTracks(actor).some(t => t.name === "Brown Bear"), "getCombatTracks finds combat track stored as subtype 'progress'");
 }
 
 console.log("[2] detection of SHEET-MADE tracks (vice versa)");

@@ -482,7 +482,137 @@ export const IronswornController = {
    *   boxes:number,completed:boolean}|null}  null when no fight is active.
    */
   getActiveCombat(actor) {
+    // Phase 2 (story-arc tracking): prefer the explicitly-tracked active combat
+    // flag (set when a fight begins) when it still points at an OPEN combat
+    // track on this actor. Fall back to the newest-open heuristic otherwise, so
+    // sheet-made foes and legacy data still resolve.
+    const flagged = this.getActiveCombatFlagTrack(actor);
+    if (flagged) return flagged;
     return this.getActiveCombatTrack(actor);
+  },
+
+  /* =====================================================================
+   * Phase 2 — STORY-ARC TRACKING (active vow / active combat flags)
+   *
+   * The Skald remembers which vow and which fight the story is currently
+   * about, persisted as actor flags so it survives reloads:
+   *   flags["the-eternal-skald"].activeVow    → Item id of the focus vow
+   *   flags["the-eternal-skald"].activeCombat → Item id of the active foe
+   * These are advisory hints: every getter VALIDATES the flag still points at
+   * an open track of the right kind, and returns null (never throws) otherwise,
+   * so stale ids self-heal. All writes are defensive and best-effort.
+   * ================================================================= */
+
+  /** Read the actor's stored active-vow flag id (or null). */
+  _activeFlagId(actor, key) {
+    if (!actor) return null;
+    try {
+      return actor.getFlag?.(ES_SCOPE, key)
+          ?? foundry.utils.getProperty(actor, `flags.${ES_SCOPE}.${key}`)
+          ?? null;
+    } catch (_) { return null; }
+  },
+
+  /**
+   * The currently-tracked "story focus" vow as an Item, validated to still be
+   * an open vow on this actor. Returns null when unset/stale/completed.
+   * READ-ONLY.
+   * @returns {{id:string,name:string}|null}
+   */
+  getActiveVow(actor) {
+    if (!actor?.items) return null;
+    const id = this._activeFlagId(actor, "activeVow");
+    if (!id) return null;
+    const item = actor.items.get?.(id);
+    if (!item) return null;
+    if (foundry.utils.getProperty(item, "system.completed")) return null;
+    const kind = item.getFlag?.(ES_SCOPE, "trackKind")
+              ?? foundry.utils.getProperty(item, `flags.${ES_SCOPE}.trackKind`);
+    const subtype = String(foundry.utils.getProperty(item, "system.subtype") ?? "").toLowerCase();
+    if (kind !== "vow" && subtype !== "vow") return null;
+    return { id: item.id, name: item.name };
+  },
+
+  /**
+   * Remember which vow the story is currently about. Accepts an Item id, a
+   * track name, or a track-like object with an `id`. Validates it resolves to a
+   * vow on this actor before writing. Best-effort; never throws.
+   * @returns {Promise<{ok:boolean, id?:string, name?:string, error?:string}>}
+   */
+  async setActiveVow(actor = this.getActiveCharacter(), vowRef = null) {
+    if (!actor) return { ok: false, error: "No actor." };
+    try {
+      if (vowRef == null) {
+        await actor.unsetFlag?.(ES_SCOPE, "activeVow");
+        return { ok: true, id: null };
+      }
+      const ref = (vowRef && typeof vowRef === "object") ? (vowRef.id ?? vowRef.name) : vowRef;
+      const item = this.findTrack(actor, ref);
+      if (!item) return { ok: false, error: `No track matching "${ref}".` };
+      await actor.setFlag?.(ES_SCOPE, "activeVow", item.id);
+      dbg(`setActiveVow: ${actor.name} → "${item.name}" (${item.id})`);
+      return { ok: true, id: item.id, name: item.name };
+    } catch (e) {
+      warn("setActiveVow failed:", e?.message ?? e);
+      return { ok: false, error: e?.message ?? String(e) };
+    }
+  },
+
+  /**
+   * The active-combat flag resolved to a combat track summary, validated to
+   * still be an open combat track on this actor. Returns null when
+   * unset/stale/completed. READ-ONLY.
+   */
+  getActiveCombatFlagTrack(actor) {
+    if (!actor?.items) return null;
+    const id = this._activeFlagId(actor, "activeCombat");
+    if (!id) return null;
+    const item = actor.items.get?.(id);
+    if (!item) return null;
+    if (foundry.utils.getProperty(item, "system.completed")) return null;
+    const kind = item.getFlag?.(ES_SCOPE, "trackKind")
+              ?? foundry.utils.getProperty(item, `flags.${ES_SCOPE}.trackKind`);
+    const subtype = String(foundry.utils.getProperty(item, "system.subtype") ?? "").toLowerCase();
+    if (kind !== "combat" && subtype !== "foe") return null;
+    const current = foundry.utils.getProperty(item, "system.current") ?? 0;
+    return {
+      id: item.id,
+      name: item.name,
+      rank: foundry.utils.getProperty(item, "system.rank") ?? null,
+      current,
+      boxes: Math.floor(current / 4),
+      completed: false
+    };
+  },
+
+  /**
+   * Remember which fight is currently active. Accepts an Item id, track name,
+   * or track-like object. Validates it resolves to a combat track on this
+   * actor. Best-effort; never throws.
+   * @returns {Promise<{ok:boolean, id?:string, name?:string, error?:string}>}
+   */
+  async setActiveCombat(actor = this.getActiveCharacter(), combatRef = null) {
+    if (!actor) return { ok: false, error: "No actor." };
+    try {
+      if (combatRef == null) {
+        await actor.unsetFlag?.(ES_SCOPE, "activeCombat");
+        return { ok: true, id: null };
+      }
+      const ref = (combatRef && typeof combatRef === "object") ? (combatRef.id ?? combatRef.name) : combatRef;
+      const item = this.findTrack(actor, ref);
+      if (!item) return { ok: false, error: `No track matching "${ref}".` };
+      await actor.setFlag?.(ES_SCOPE, "activeCombat", item.id);
+      dbg(`setActiveCombat: ${actor.name} → "${item.name}" (${item.id})`);
+      return { ok: true, id: item.id, name: item.name };
+    } catch (e) {
+      warn("setActiveCombat failed:", e?.message ?? e);
+      return { ok: false, error: e?.message ?? String(e) };
+    }
+  },
+
+  /** Clear the active-combat flag (e.g. when a fight ends). Best-effort. */
+  async clearActiveCombat(actor = this.getActiveCharacter()) {
+    return this.setActiveCombat(actor, null);
   },
 
   /**
@@ -492,10 +622,12 @@ export const IronswornController = {
    * conflating parallel vows. READ-ONLY; never writes.
    *
    * Resolution order (highest authority first):
-   *   1. The last progress track actually rolled this session
+   *   1. The explicit "active vow" flag ({@link getActiveVow}) when set and
+   *      still pointing at an open vow — the GM/AI's deliberate story focus.
+   *   2. The last progress track actually rolled this session
    *      ({@link _lastProgressTrack}) — but only if it is a still-open VOW on
-   *      THIS actor. This is the strongest "what we're doing right now" signal.
-   *   2. The newest still-open vow ({@link _newestOpenTrackItem}) as a
+   *      THIS actor. This is a strong "what we're doing right now" signal.
+   *   3. The newest still-open vow ({@link _newestOpenTrackItem}) as a
    *      graceful fallback.
    * Returns null when the character has no open vow.
    *
@@ -505,7 +637,11 @@ export const IronswornController = {
   identifyStoryFocusVow(actor) {
     if (!actor?.items) return null;
 
-    // 1. Honour the last-rolled track when it is an open vow on this actor.
+    // 1. Highest authority — the explicitly-tracked active vow (story arc).
+    const active = this.getActiveVow(actor);
+    if (active) return active;
+
+    // 2. Honour the last-rolled track when it is an open vow on this actor.
     const last = this._lastProgressTrack;
     if (last?.id && last.actorId === actor.id && last.kind === "vow") {
       const item = actor.items.get?.(last.id);
@@ -514,7 +650,7 @@ export const IronswornController = {
       }
     }
 
-    // 2. Fallback — the newest still-open vow.
+    // 3. Fallback — the newest still-open vow.
     const vow = this._newestOpenTrackItem(actor, "vow");
     return vow ? { id: vow.id, name: vow.name } : null;
   },
@@ -528,6 +664,68 @@ export const IronswornController = {
     return actor.items.find?.(i => i.name?.toLowerCase() === lc)
         ?? actor.items.find?.(i => i.name?.toLowerCase().includes(lc))
         ?? null;
+  },
+
+  /** The trackKind ("vow"|"journey"|"combat"|"bond") of a progress Item. */
+  _trackKindOf(item) {
+    if (!item) return null;
+    const flagKind = item.getFlag?.(ES_SCOPE, "trackKind")
+                  ?? foundry.utils.getProperty(item, `flags.${ES_SCOPE}.trackKind`);
+    if (flagKind) return String(flagKind).toLowerCase();
+    const subtype = String(foundry.utils.getProperty(item, "system.subtype") ?? "").toLowerCase();
+    if (subtype === "vow")  return "vow";
+    if (subtype === "foe")  return "combat";
+    if (subtype === "bond" || subtype === "connection") return "bond";
+    return "journey"; // plain "progress" subtype with no flag → journey-like
+  },
+
+  /**
+   * Fuzzy-match a progress track by name, optionally constrained to a track
+   * KIND ("vow" | "journey" | "combat" | "bond"). Used by the AI write
+   * directives, where the model may paraphrase a track's name slightly. Tries,
+   * in order: exact id / exact name / substring (via findTrack), then a
+   * normalized word-overlap score against open tracks of the requested kind.
+   * Returns the matching Item or null (never throws).
+   *
+   * @param {Actor}  actor
+   * @param {string} name
+   * @param {string|null} [kind]
+   * @returns {Item|null}
+   */
+  findTrackFuzzy(actor, name, kind = null) {
+    if (!actor?.items || !name) return null;
+    const wantKind = kind ? String(kind).toLowerCase() : null;
+    const matchesKind = (it) => !wantKind || this._trackKindOf(it) === wantKind;
+
+    // 1. Direct id / exact-name / substring match that ALSO satisfies the kind.
+    const direct = this.findTrack(actor, name);
+    if (direct && matchesKind(direct)) return direct;
+
+    // Normalisation: lower-case, strip leading articles & non-alphanumerics.
+    const norm = (s) => String(s ?? "").toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\b(the|a|an|of|to|your|my)\b/g, " ")
+      .replace(/\s+/g, " ").trim();
+    const target = norm(name);
+    if (!target) return direct && matchesKind(direct) ? direct : null;
+    const targetWords = new Set(target.split(" ").filter(Boolean));
+    if (!targetWords.size) return null;
+
+    // 2. Word-overlap scoring across candidate tracks of the right kind.
+    let best = null, bestScore = 0;
+    for (const it of actor.items) {
+      if (it.type !== "progress") continue;
+      if (!matchesKind(it)) continue;
+      const candWords = new Set(norm(it.name).split(" ").filter(Boolean));
+      if (!candWords.size) continue;
+      let shared = 0;
+      for (const w of targetWords) if (candWords.has(w)) shared++;
+      // Jaccard-like score over the smaller set so short names still match.
+      const score = shared / Math.min(targetWords.size, candWords.size);
+      if (score > bestScore) { bestScore = score; best = it; }
+    }
+    // Require a solid majority of shared significant words to avoid mismatches.
+    return bestScore >= 0.5 ? best : null;
   },
 
   /**
@@ -1018,9 +1216,32 @@ export const IronswornController = {
     try {
       await track.update({ "system.current": next });
       dbg(`markProgress: "${track.name}" ${cur} -> ${next}`);
+      // Phase 2 (story-arc tracking): marking progress on a vow / combat track
+      // is a strong "this is the current arc" signal — keep the active-vow /
+      // active-combat flag in sync so context markers and AI directives target
+      // the right track. Best-effort; never blocks the progress write.
+      try { await this._syncActiveFlagForTrack(actor, track); } catch (_) {}
       return { ok: true, track: track.name, current: next, boxes: Math.floor(next / 4) };
     } catch (e) {
       return { ok: false, error: e?.message ?? String(e) };
+    }
+  },
+
+  /**
+   * Update the active-vow / active-combat flag to point at `track` when it is
+   * an OPEN vow or combat track. Internal helper for the progress-marking
+   * paths. Best-effort; swallows errors (advisory state only).
+   */
+  async _syncActiveFlagForTrack(actor, track) {
+    if (!actor || !track) return;
+    if (foundry.utils.getProperty(track, "system.completed")) return;
+    const kind = track.getFlag?.(ES_SCOPE, "trackKind")
+              ?? foundry.utils.getProperty(track, `flags.${ES_SCOPE}.trackKind`);
+    const subtype = String(foundry.utils.getProperty(track, "system.subtype") ?? "").toLowerCase();
+    if (kind === "vow" || (subtype === "vow" && kind !== "journey")) {
+      await this.setActiveVow(actor, track.id);
+    } else if (kind === "combat" || subtype === "foe") {
+      await this.setActiveCombat(actor, track.id);
     }
   },
 
@@ -1034,6 +1255,33 @@ export const IronswornController = {
     const rank = this.normalizeRank(foundry.utils.getProperty(track, "system.rank"));
     const perMark = RANK_TICKS[rank] ?? 4;
     return this.markProgress(actor, track.id, perMark * Math.max(1, times));
+  },
+
+  /**
+   * Set a track's progress to an ABSOLUTE number of filled boxes (0–10). Used
+   * by the AI [[SET_PROGRESS:kind:Name:boxes]] write directive. Boxes are
+   * converted to ticks (×4) and clamped to the 0–40 schema range. Also keeps
+   * the active-vow / active-combat flag in sync. Best-effort.
+   *
+   * @param {Actor}  actor
+   * @param {string} trackRef   track name or id
+   * @param {number} boxes      0–10 filled progress boxes
+   * @returns {Promise<{ok:boolean, track?:string, current?:number, boxes?:number, error?:string}>}
+   */
+  async setProgress(actor, trackRef, boxes) {
+    const track = this.findTrack(actor, trackRef);
+    if (!track) return { ok: false, error: `Track "${trackRef}" not found.` };
+    const n = Number(boxes);
+    if (!Number.isFinite(n)) return { ok: false, error: `Invalid box count "${boxes}".` };
+    const ticks = Math.max(0, Math.min(40, Math.round(n) * 4));
+    try {
+      await track.update({ "system.current": ticks });
+      dbg(`setProgress: "${track.name}" → ${ticks} ticks (${ticks / 4} boxes)`);
+      try { await this._syncActiveFlagForTrack(actor, track); } catch (_) {}
+      return { ok: true, track: track.name, current: ticks, boxes: Math.floor(ticks / 4) };
+    } catch (e) {
+      return { ok: false, error: e?.message ?? String(e) };
+    }
   },
 
   /**
@@ -1086,8 +1334,21 @@ export const IronswornController = {
     //                PROGRESS label + standard mechanics) and tag them as
     //                journeys via our own `flags.<scope>.trackKind="journey"`.
     //      bond    → subtype "bond"
-    //      combat  → subtype "foe"   (exactly what the foe sheet creates)
-    const subtypeMap = { combat: "foe", journey: "progress", vow: "vow", bond: "bond" };
+    //      combat  → subtype "progress" — SEE NOTE BELOW.
+    //
+    //    COMBAT-FOE LABELLING FIX: foe-sheet.vue uses subtype "foe", but that
+    //    creator runs on a *foe Actor* (type "foe"), whose sheet supplies its own
+    //    label. On a *character* sheet the progress list renders the subtype via
+    //    `localize("IRONSWORN.ITEM.Subtype" + subtype.capitalize())`. The system
+    //    only localizes "vow"/"progress"/"connection" (bond is special-cased to
+    //    connection), so a combat track stored as subtype "foe" on a character
+    //    renders the raw key "IRONSWORN.ITEM.SubtypeFoe" as its label — the
+    //    "combat foes are not labelled correctly" bug. We therefore store combat
+    //    tracks EXACTLY like journeys: subtype "progress" (clean "Progress" label +
+    //    standard mechanics) tagged via `flags.<scope>.trackKind="combat"`. The
+    //    foe's name still lives in the Item name, and getCombatTracks() detects
+    //    combat primarily via the trackKind flag, so nothing downstream breaks.
+    const subtypeMap = { combat: "progress", journey: "progress", vow: "vow", bond: "bond" };
     const subtype = subtypeMap[kind] ?? "progress";
     // The Item type is ALWAYS "progress" in foundry-ironsworn (there is no
     // separate "vow"/"bond"/"foe" *type* — only a subtype). Probe the
@@ -1548,6 +1809,48 @@ export const IronswornController = {
       dbg(`closeStaleCombatTracks: closed ${closed.length} stale combat track(s): ${closed.join(", ")}`);
     }
     return { ok: true, closed };
+  },
+
+  /**
+   * LEGACY REPAIR (combat-foe labelling fix): older Skald builds stored combat
+   * tracks with `system.subtype="foe"`, which renders the raw key
+   * "IRONSWORN.ITEM.SubtypeFoe" as the label on the *character* sheet (only
+   * vow/progress/connection subtypes are localized there). New combat tracks are
+   * created with subtype "progress" (+ trackKind "combat" flag) so they label
+   * cleanly. This idempotent, additive repair migrates any pre-existing
+   * combat-flagged tracks still carrying subtype "foe" to subtype "progress".
+   *
+   * It is intentionally driven from a WRITE path (the create_combat handler),
+   * never from a read/describe path. Only touches tracks WE tagged
+   * trackKind="combat"; never rewrites a real foe-Actor's own progress item.
+   *
+   * @returns {Promise<{ok:boolean, fixed:string[], error?:string}>}
+   */
+  async normalizeCombatTrackSubtypes(actor = this.getActiveCharacter()) {
+    if (!actor?.items) return { ok: false, fixed: [], error: "No actor." };
+    const fixed = [];
+    try {
+      for (const item of actor.items) {
+        if (item.type !== "progress") continue;
+        const kind = item.getFlag?.(ES_SCOPE, "trackKind")
+                  ?? foundry.utils.getProperty(item, `flags.${ES_SCOPE}.trackKind`);
+        if (kind !== "combat") continue; // only our own combat tracks
+        const subtype = String(foundry.utils.getProperty(item, "system.subtype") ?? "").toLowerCase();
+        if (subtype !== "foe") continue; // already migrated / nothing to do
+        try {
+          await item.update({ "system.subtype": "progress" });
+          fixed.push(item.name);
+        } catch (e) {
+          warn("normalizeCombatTrackSubtypes: failed to migrate", item.name, e?.message ?? e);
+        }
+      }
+    } catch (e) {
+      return { ok: false, fixed, error: e?.message ?? String(e) };
+    }
+    if (fixed.length) {
+      dbg(`normalizeCombatTrackSubtypes: migrated ${fixed.length} legacy combat track(s) to subtype "progress": ${fixed.join(", ")}`);
+    }
+    return { ok: true, fixed };
   },
 
   /**
