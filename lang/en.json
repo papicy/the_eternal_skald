@@ -28,7 +28,7 @@
       },
       "modelName": {
         "name": "AI Model",
-        "hint": "Model identifier to use for generation. Defaults to gemini-3-flash-preview. Use any model your chosen provider exposes (e.g. gpt-4o for OpenAI, anthropic/claude-3.5-sonnet for OpenRouter, gemini-1.5-pro for Google AI)."
+        "hint": "Pick the model for generation from the list — it is filtered to the AI Provider chosen above and sorted by price (free models first), shown as 'Model Name ($X.XX per 1M tokens) - Provider'. Change the provider above and this list updates instantly. Defaults to gemini-3-flash-preview. If you previously typed a custom model id, it is preserved at the top as '(current)'."
       },
       "apiEndpoint": {
         "name": "API Endpoint",
@@ -145,7 +145,7 @@
       },
       "visionModel": {
         "name": "Vision Model",
-        "hint": "Which AI model performs map/image analysis. 'Inherit' reuses your Narration Model (ideal when it is already multimodal, e.g. gemini-3-flash-preview or gpt-4o). Models marked ★ are recommended for reading detailed fantasy maps with small text labels — gpt-4o, claude-3-5-sonnet, gemini-2.0-flash and gemini-2.5-pro have the strongest OCR/fine-detail vision. Lightweight tiers (e.g. gpt-4o-mini) accept images but routinely miss small labels and faint paths. If the chosen model cannot see images, the Skald skips analysis with a GM-only notice rather than wasting a call.",
+        "hint": "Which AI model performs map/image analysis. 'Inherit' reuses your Narration Model (ideal when it is already multimodal, e.g. gemini-3-flash-preview or gpt-4o). The rest of the list is filtered to the AI Provider chosen above and sorted by price (free models first), shown as 'Model Name ($X.XX per 1M tokens) - Provider'; change the provider and this list updates instantly. Flagship multimodal models (gpt-4o, the Claude Sonnet/Opus 4 family, Gemini 2.5/3) have the strongest OCR/fine-detail vision; lightweight 'mini'/'nano'/'lite' tiers accept images but routinely miss small labels and faint paths. If the chosen model cannot see images, the Skald skips analysis with a GM-only notice rather than wasting a call.",
         "choices": {
           "inherit": "Inherit from Narration Model"
         }
