@@ -1,5 +1,5 @@
 /* =====================================================================
- *  THE ETERNAL SKALD v0.10.28 — Foundry VTT v14 Module (Client)
+ *  THE ETERNAL SKALD v0.10.29 — Foundry VTT v14 Module (Client)
  *  ---------------------------------------------------------------------
  *  An AI-powered storytelling and combat-control assistant for Ironsworn
  *  and Ironsworn: Delve campaigns. Powered by Abacus AI ChatLLM.
@@ -8973,6 +8973,37 @@ function stripHtml(html) {
 }
 
 /**
+ * (v0.10.29) Cross-hook dispatch dedupe guard.
+ *
+ * WHY: a single `!command` can be seen by ALL THREE command-interception
+ * hooks (chatMessage → preCreateChatMessage → createChatMessage). On
+ * Foundry builds that honour an early `return false` only the first hook
+ * fires, but on builds that IGNORE the cancellation (documented v14
+ * behaviour, see the strategy note above) the same line reaches two or
+ * three hooks — each of which would otherwise dispatch the command again.
+ * That produced the "identical sequence runs 3×" symptom: e.g. `!scout`
+ * firing three AI vision passes and posting duplicate cards/notices.
+ *
+ * The guard records the last dispatch time per normalised command text and
+ * suppresses an identical re-dispatch inside a short window. We still report
+ * the line as "consumed" (return true) so every hook keeps suppressing the
+ * raw `!command` echo — we simply do not run the handler more than once.
+ */
+const _recentDispatches = new Map();
+const _DISPATCH_DEDUPE_MS = 1500;
+
+function _alreadyDispatched(key) {
+  const now = Date.now();
+  // Opportunistic cleanup so the map never grows unbounded.
+  for (const [k, t] of _recentDispatches) {
+    if (now - t > _DISPATCH_DEDUPE_MS) _recentDispatches.delete(k);
+  }
+  const last = _recentDispatches.get(key);
+  _recentDispatches.set(key, now);
+  return last !== undefined && (now - last) < _DISPATCH_DEDUPE_MS;
+}
+
+/**
  * Shared command-trigger: returns true iff `text` starts with one of
  * our `!` commands AND we successfully dispatched the handler.
  *
@@ -8989,6 +9020,15 @@ function tryCommandFromText(text, source) {
   }
   if (!stripped.startsWith("!")) return false;
   console.log(`${LOG_PREFIX} [${source}] candidate command text:`, JSON.stringify(stripped));
+
+  // (v0.10.29) Suppress duplicate dispatch when more than one interception
+  // hook sees the same line. Report consumed (true) so the raw echo is still
+  // suppressed, but only run the handler for the first hook to reach here.
+  if (_alreadyDispatched(stripped)) {
+    console.log(`${LOG_PREFIX} [${source}] duplicate within ${_DISPATCH_DEDUPE_MS}ms — already dispatched, suppressing re-run`);
+    return true;
+  }
+
   // Pass the STRIPPED text to dispatch — never the HTML-wrapped form.
   const dispatched = dispatchCommand(stripped);
   console.log(`${LOG_PREFIX} [${source}] dispatchCommand returned:`, dispatched);

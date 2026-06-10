@@ -13,6 +13,23 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.29] — 2026-06-10
+
+### Fixed
+- **Duplicate command dispatch (`!scout` ran 3×).** A single `!` command
+  could be processed by all three command-interception hooks
+  (`chatMessage` → `preCreateChatMessage` → `createChatMessage`). On Foundry
+  builds that honour an early `return false` only the first hook fires, but on
+  builds that **ignore** the cancellation (documented v14 behaviour) the same
+  line reached two or three hooks — and each independently dispatched the
+  command. This produced the "identical sequence runs 3×" symptom (e.g.
+  `!scout` firing three AI vision passes and posting duplicate cards/notices,
+  burning 3× the tokens). `tryCommandFromText()` now carries a short-lived
+  cross-hook **dedupe guard**: the first hook to see a given command line
+  dispatches it; identical re-dispatches within a 1.5s window are suppressed
+  (the raw `!command` echo is still hidden from chat). Purely additive,
+  backwards-compatible.
+
 ## [0.10.28] — 2026-06-10
 
 ### Fixed
