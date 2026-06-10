@@ -13,6 +13,30 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.30] — 2026-06-10
+
+### Fixed
+- **`!scout` still stalled on hosted Foundry despite the v0.10.28 502 fix.**
+  The v0.10.28 fallback correctly *detected* a dead `/skald-api` hook (404 or
+  502/503/504) and fell back to the direct browser→AI path — but it never
+  *remembered* the result. In `auto` mode every subsequent call re-probed the
+  hook, POSTing to the doomed proxy and waiting out another slow **502 Bad
+  Gateway** before falling back again. A single `!scout` fires several vision
+  passes (a full-map overview plus each grid section), so those gateway
+  timeouts stacked up and the scout appeared to hang or fail — the console
+  showed repeated `POST …/skald-api/chat 502 (Bad Gateway)` lines, one per
+  pass, with the "falling back" notice shown only once.
+
+### Added
+- **Session-sticky direct fallback (`Client._hookKnownDead`).** The first time
+  an `auto`-mode call finds the hook unreachable (network error, 404, or
+  502/503/504), the Skald latches a session flag. `chat()` and `chatStream()`
+  now check it up front: once the hook is known dead, they skip the proxy POST
+  entirely and call the AI directly straight away. Only the first call pays the
+  probe cost; every later vision pass is fast. Purely additive and
+  backwards-compatible — *Server hook only* mode still surfaces genuine
+  upstream errors, *Direct* mode is unchanged, and no real AI error is masked.
+
 ## [0.10.29] — 2026-06-10
 
 ### Fixed

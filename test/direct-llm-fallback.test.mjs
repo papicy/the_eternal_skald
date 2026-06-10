@@ -191,6 +191,53 @@ ok(/_consumeStreamingResponse\s*\(/.test(SRC),
      "[7] directFallback notification string exists");
 }
 
+/* --------------------------------------------------------------------- *
+ * [8] (v0.10.30) Session-sticky direct fallback. Once an auto-mode call
+ *     finds the hook dead, the Skald latches `_hookKnownDead` and later
+ *     calls skip the doomed proxy POST, going straight to direct. This fixes
+ *     `!scout` still stalling on hosted Foundry: each of a scout's several
+ *     vision passes re-probed the hook and waited out another slow 502.
+ * --------------------------------------------------------------------- */
+{
+  ok(/_hookKnownDead/.test(SRC), "[8] _hookKnownDead session flag exists");
+
+  // _noticeDirectFallback latches the flag (so all four fallback branches set it).
+  const ndf = extractFrom(SRC, "_noticeDirectFallback()");
+  ok(/this\._hookKnownDead\s*=\s*true/.test(ndf),
+     "[8] _noticeDirectFallback latches _hookKnownDead = true");
+
+  // chat() short-circuits to _directChat when the hook is known dead.
+  const chat = extractFrom(SRC, "async chat(messages");
+  ok(/mode === "auto"\s*&&\s*this\._hookKnownDead[\s\S]*?_directChat\(/.test(chat),
+     "[8] chat() skips the proxy and goes direct once hook is known dead");
+  // The short-circuit must come BEFORE the proxy fetch(API_PATH) in chat().
+  ok(chat.indexOf("this._hookKnownDead") < chat.indexOf("fetch(API_PATH"),
+     "[8] chat() short-circuit precedes the proxy fetch(API_PATH)");
+
+  // chatStream() does the same for the streaming path.
+  const cstream = extractFrom(SRC, "async chatStream(messages");
+  ok(/mode === "auto"\s*&&\s*this\._hookKnownDead[\s\S]*?_directChatStream\(/.test(cstream),
+     "[8] chatStream() skips the proxy once hook is known dead");
+  ok(cstream.indexOf("this._hookKnownDead") < cstream.indexOf("fetch(STREAM_PATH"),
+     "[8] chatStream() short-circuit precedes the proxy fetch(STREAM_PATH)");
+
+  // Behavioural: a single scout = N passes should hit the proxy at most ONCE.
+  // Model the decision the way chat() does for auto mode.
+  let proxyHits = 0, directHits = 0, hookKnownDead = false;
+  const PROXY_DEAD = true; // simulate the hosted-Foundry 502 hook
+  function simulateAutoCall() {
+    if (hookKnownDead) { directHits++; return; }      // v0.10.30 short-circuit
+    proxyHits++;                                       // probe the proxy
+    if (PROXY_DEAD) { hookKnownDead = true; directHits++; } // 502 → latch + fallback
+  }
+  // One scout fires an overview pass + 4 grid-section passes = 5 calls.
+  for (let i = 0; i < 5; i++) simulateAutoCall();
+  ok(proxyHits === 1,
+     `[8] only the first pass probes the dead proxy (got ${proxyHits}, want 1)`);
+  ok(directHits === 5,
+     `[8] all 5 passes still reach the AI directly (got ${directHits}, want 5)`);
+}
+
 /* --------------------------------------------------------------------- */
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

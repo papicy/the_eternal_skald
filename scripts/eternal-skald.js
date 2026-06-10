@@ -1,5 +1,5 @@
 /* =====================================================================
- *  THE ETERNAL SKALD v0.10.29 — Foundry VTT v14 Module (Client)
+ *  THE ETERNAL SKALD v0.10.30 — Foundry VTT v14 Module (Client)
  *  ---------------------------------------------------------------------
  *  An AI-powered storytelling and combat-control assistant for Ironsworn
  *  and Ironsworn: Delve campaigns. Powered by Abacus AI ChatLLM.
@@ -1814,12 +1814,30 @@ const Client = {
   _directFallbackNoticed: false,
 
   /**
+   * (v0.10.30) Once an `auto`-mode call has determined the server hook is
+   * unusable this session (network error, 404, or 502/503/504 from a proxy),
+   * remember it. Subsequent calls then skip the doomed `/skald-api/*` POST and
+   * go straight to the direct browser→AI path.
+   *
+   * Why this matters: a single `!scout` fires several vision passes (overview
+   * + map sections). Without this flag, EVERY pass re-tried the dead hook
+   * first and waited out a slow gateway 502 (often many seconds) before
+   * falling back — stacking up so much latency that the scout appeared to
+   * hang or fail. With the flag, only the first call pays the probe cost.
+   */
+  _hookKnownDead: false,
+
+  /**
    * (v0.10.12) Post a single, friendly heads-up (console + GM toast) the
    * first time an `auto`-mode call falls back to the direct browser→AI
    * path because the server hook wasn't found. Subsequent fallbacks are
    * silent. Never throws.
+   *
+   * (v0.10.30) Also latches {@link _hookKnownDead} so later calls this
+   * session skip the dead hook entirely.
    */
   _noticeDirectFallback() {
+    this._hookKnownDead = true;
     if (this._directFallbackNoticed) return;
     this._directFallbackNoticed = true;
     console.warn(
@@ -2131,6 +2149,13 @@ const Client = {
       return this._directChat(payload, endpoint, apiKey);
     }
 
+    // (v0.10.30) A previous auto-mode call already found the hook dead this
+    // session — don't waste a slow proxy round-trip (502) on every subsequent
+    // vision pass. Go straight to the working direct path.
+    if (mode === "auto" && this._hookKnownDead) {
+      return this._directChat(payload, endpoint, apiKey);
+    }
+
     let response = null;
     try {
       response = await fetch(API_PATH, {
@@ -2236,6 +2261,12 @@ const Client = {
     console.log(LOG_PREFIX, "Streaming AI:", { endpoint, model, mode, msgCount: messages.length });
 
     if (mode === "direct") {
+      return this._directChatStream(payload, endpoint, apiKey, handlers);
+    }
+
+    // (v0.10.30) Hook already known dead this session — skip the doomed proxy
+    // POST and stream directly from the AI endpoint.
+    if (mode === "auto" && this._hookKnownDead) {
       return this._directChatStream(payload, endpoint, apiKey, handlers);
     }
 
