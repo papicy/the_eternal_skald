@@ -1,5 +1,5 @@
 /* =====================================================================
- *  THE ETERNAL SKALD v0.10.24 — Foundry VTT v14 Module (Client)
+ *  THE ETERNAL SKALD v0.10.28 — Foundry VTT v14 Module (Client)
  *  ---------------------------------------------------------------------
  *  An AI-powered storytelling and combat-control assistant for Ironsworn
  *  and Ironsworn: Delve campaigns. Powered by Abacus AI ChatLLM.
@@ -1838,14 +1838,34 @@ const Client = {
   },
 
   /**
-   * (v0.10.12) Decide whether a server-hook response means "the hook isn't
-   * loaded" — i.e. Foundry served its own 404 page for `/skald-api/*`. A
-   * network error is signalled by passing a null `response`.
+   * (v0.10.12) Decide whether a server-hook response means the same-origin
+   * `/skald-api/*` route is effectively unusable, so auto-mode should fall
+   * back to the direct browser→AI path. A network error is signalled by
+   * passing a null `response`.
+   *
+   * Recognised signatures:
+   *   • null            — network/connection failure (hook unreachable)
+   *   • 404 Not Found   — Foundry served its own 404 page (hook not loaded)
+   *   • 502/503/504     — (v0.10.28) reverse-proxy/gateway failure. Common on
+   *                       hosted/managed Foundry when a large map-vision POST
+   *                       hits the missing /skald-api route and the proxy
+   *                       (e.g. openresty) returns a Bad Gateway HTML page
+   *                       instead of a clean 404.
+   *   • 413 Too Large   — (v0.10.28) the hook/proxy rejected an oversized body
+   *                       (vision payloads exceed the 2 MiB hook limit).
+   *
+   * In every one of these cases the hook path cannot serve the request, so in
+   * auto-mode we fall back to calling the AI directly. This is consulted ONLY
+   * in the auto-mode fallback branches — in "server" mode a genuine upstream
+   * error is still surfaced via the normal `!response.ok` path, and in
+   * "direct" mode this is never called — so a real LLM error is never masked.
+   *
    * @param {Response|null} response
    * @returns {boolean}
    */
   _hookMissing(response) {
-    return !response || response.status === 404;
+    if (!response) return true;
+    return [404, 413, 502, 503, 504].includes(response.status);
   },
 
   /**
