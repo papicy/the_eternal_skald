@@ -305,6 +305,103 @@ export const IronswornController = {
   },
 
   /**
+   * (v0.10.25 — asset tracking) Read the character's owned ASSET Items
+   * (companions, paths, combat talents, rituals, …) and summarise them in
+   * an AI-friendly, token-efficient shape. READ-ONLY and synchronous, so it
+   * mirrors {@link getProgressTracks} and is safe to call from the prompt
+   * builder on every turn.
+   *
+   * The foundry-ironsworn AssetModel stores each asset as an embedded Item of
+   * `type === "asset"`, whose `system` carries:
+   *   • `category`   — e.g. "Companion" | "Path" | "Combat Talent" | "Ritual".
+   *   • `abilities[]` — ordered list; each `{ name, enabled, description, … }`.
+   *                     The count of `enabled === true` entries says how far the
+   *                     asset is unlocked/upgraded.
+   *   • `track`       — optional asset condition meter `{ enabled, name,
+   *                     value, min, max }` (e.g. a companion's health).
+   *
+   * Every read is null-guarded via `foundry.utils.getProperty`, so an asset
+   * authored under an older/newer schema degrades to sensible defaults rather
+   * than throwing.
+   *
+   * @param {Actor}  actor                the actor to read (may be null).
+   * @param {object} [opts]
+   * @param {number} [opts.limit=12]      max assets to return (token budget).
+   * @returns {Array<{id:string,name:string,category:(string|null),
+   *   unlocked:number,total:number,
+   *   track:({name:string,value:(number|null),max:(number|null)}|null)}>}
+   *   A (possibly empty) array — never null.
+   */
+  getAssets(actor, { limit = 12 } = {}) {
+    if (!actor?.items) return [];
+    const out = [];
+    for (const item of actor.items) {
+      if (item?.type !== "asset") continue;
+      const abilities = foundry.utils.getProperty(item, "system.abilities");
+      const list = Array.isArray(abilities) ? abilities : [];
+      const unlocked = list.filter(a => a?.enabled === true).length;
+      const track = foundry.utils.getProperty(item, "system.track") ?? null;
+      const hasTrack = track && typeof track === "object" && track.enabled === true;
+      out.push({
+        id: item.id,
+        name: item.name,
+        category: foundry.utils.getProperty(item, "system.category") ?? null,
+        unlocked,
+        total: list.length,
+        track: hasTrack
+          ? {
+              name: track.name || "track",
+              value: typeof track.value === "number" ? track.value : null,
+              max: typeof track.max === "number" ? track.max : null
+            }
+          : null
+      });
+      if (out.length >= limit) break;
+    }
+    return out;
+  },
+
+  /**
+   * (v0.10.25 — XP tracking) Read the character's experience in a unified,
+   * model-agnostic shape, covering BOTH Ironsworn rulesets:
+   *   • Classic Ironsworn — a single integer counter at `system.xp`
+   *     (experience earned to date).
+   *   • Starforged — three legacy tracks under `system.legacies`
+   *     (`quests`, `bonds`, `discoveries`), each a ProgressTicks value, with a
+   *     paired `*XpSpent` counter recording XP already spent from that legacy.
+   *
+   * The two models are not mutually exclusive in data, so both are read and
+   * returned independently; callers decide what to surface. Fully null-guarded
+   * and never throws — absent fields come back as `null`.
+   *
+   * @param {Actor} actor   the actor to read (may be null).
+   * @returns {{xp:(number|null),
+   *   legacies:({quests:number,questsXpSpent:number,
+   *     bonds:number,bondsXpSpent:number,
+   *     discoveries:number,discoveriesXpSpent:number}|null)}}
+   */
+  getExperience(actor) {
+    if (!actor) return { xp: null, legacies: null };
+    const xpRaw = foundry.utils.getProperty(actor, "system.xp");
+    const xp = typeof xpRaw === "number" ? xpRaw : null;
+
+    const L = foundry.utils.getProperty(actor, "system.legacies");
+    const num = (v) => (typeof v === "number" ? v : 0);
+    const legacies = (L && typeof L === "object")
+      ? {
+          quests:             num(L.quests),
+          questsXpSpent:      num(L.questsXpSpent),
+          bonds:              num(L.bonds),
+          bondsXpSpent:       num(L.bondsXpSpent),
+          discoveries:        num(L.discoveries),
+          discoveriesXpSpent: num(L.discoveriesXpSpent)
+        }
+      : null;
+
+    return { xp, legacies };
+  },
+
+  /**
    * All progress-track Items on the actor. Ironsworn stores vows, bonds,
    * journeys and combat/progress tracks as embedded Items whose type
    * varies between data-model revisions, so we accept several type names
@@ -343,6 +440,83 @@ export const IronswornController = {
       }
     }
     return out;
+  },
+
+  /**
+   * (v0.10.26 — Phase 1 context) Human/AI-readable label describing how full a
+   * progress track is, so the prompt can state plainly whether a completion
+   * move is even available yet. READ-ONLY and pure.
+   *
+   * A track is "full" — eligible for its completion move (Fulfill Your Vow /
+   * Reach Your Destination / End the Fight) — at 10/10 boxes. Below that the
+   * narrative must continue; the AI must not offer the completion move.
+   *
+   * @param {number}  boxes      filled boxes 0–10 (floor(ticks / 4)).
+   * @param {boolean} completed  whether the track is already marked complete.
+   * @param {string}  [kind]     "vow" | "journey" | "combat" — tunes the verb
+   *                             ("READY TO FULFILL" vs "READY TO END").
+   * @returns {string}           e.g. "10/10 boxes - ✅ READY TO FULFILL" or
+   *                             "7/10 boxes - NOT YET FULL".
+   */
+  fullnessLabel(boxes, completed = false, kind = "vow") {
+    const b = Math.max(0, Math.min(10, Number(boxes) || 0));
+    if (completed) return `${b}/10 boxes - (completed)`;
+    if (b >= 10) {
+      const verb = kind === "combat" ? "READY TO END"
+                 : kind === "journey" ? "READY TO REACH"
+                 : "READY TO FULFILL";
+      return `10/10 boxes - ✅ ${verb}`;
+    }
+    return `${b}/10 boxes - NOT YET FULL`;
+  },
+
+  /**
+   * (v0.10.26 — Phase 1 context) The single ACTIVE combat track, if the
+   * character is currently fighting. Ironsworn is fought one foe at a time, so
+   * there is at most one active combat. Thin, clearly-named wrapper over
+   * {@link getActiveCombatTrack} provided for the Phase-1 context surface;
+   * READ-ONLY.
+   *
+   * @param {Actor} actor
+   * @returns {{id:string,name:string,rank:(string|number|null),current:number,
+   *   boxes:number,completed:boolean}|null}  null when no fight is active.
+   */
+  getActiveCombat(actor) {
+    return this.getActiveCombatTrack(actor);
+  },
+
+  /**
+   * (v0.10.26 — Phase 1 context) Best guess at WHICH open vow the current
+   * narrative is about ("story focus"), so the prompt can mark it and the AI
+   * applies progress/effects to the contextually-relevant arc instead of
+   * conflating parallel vows. READ-ONLY; never writes.
+   *
+   * Resolution order (highest authority first):
+   *   1. The last progress track actually rolled this session
+   *      ({@link _lastProgressTrack}) — but only if it is a still-open VOW on
+   *      THIS actor. This is the strongest "what we're doing right now" signal.
+   *   2. The newest still-open vow ({@link _newestOpenTrackItem}) as a
+   *      graceful fallback.
+   * Returns null when the character has no open vow.
+   *
+   * @param {Actor} actor
+   * @returns {{id:string,name:string}|null}
+   */
+  identifyStoryFocusVow(actor) {
+    if (!actor?.items) return null;
+
+    // 1. Honour the last-rolled track when it is an open vow on this actor.
+    const last = this._lastProgressTrack;
+    if (last?.id && last.actorId === actor.id && last.kind === "vow") {
+      const item = actor.items.get?.(last.id);
+      if (item && !foundry.utils.getProperty(item, "system.completed")) {
+        return { id: item.id, name: item.name };
+      }
+    }
+
+    // 2. Fallback — the newest still-open vow.
+    const vow = this._newestOpenTrackItem(actor, "vow");
+    return vow ? { id: vow.id, name: vow.name } : null;
   },
 
   /** Find a progress track Item by (case-insensitive) name or by id. */
@@ -462,28 +636,93 @@ export const IronswornController = {
     const debilities = this.getDebilities(actor);
     if (debilities.length) lines.push(`Debilities: ${debilities.join(", ")}`);
 
+    // (v0.10.26 — Phase 1 context) Progress tracks, grouped and explicitly
+    // labelled FULL / NOT YET FULL, with the ACTIVE combat and the STORY FOCUS
+    // vow marked. The fullness label tells the AI plainly whether a completion
+    // move (Fulfill Your Vow / End the Fight / Reach Your Destination) is even
+    // available yet — preventing it from concluding a track before 10/10.
     const tracks = this.getProgressTracks(actor);
     if (tracks.length) {
-      lines.push("Progress tracks:");
-      for (const t of tracks.slice(0, 12)) {
-        const rank = t.rank ? ` [${this.normalizeRank(t.rank)}]` : "";
-        const done = t.completed ? " (completed)" : "";
-        lines.push(`  - ${t.name}${rank}: ${t.boxes}/10 boxes (${t.current}/40 ticks)${done}`);
-      }
-
-      // Surface OPEN vows and journeys by their EXACT titles so the AI can
-      // reference them precisely (e.g. mark progress on / complete the right
-      // named track) instead of guessing or using the move name as a title.
+      const isVow = t => t.kind === "vow" || t.subtype === "vow";
+      const isCombat = t => t.kind === "combat" || t.subtype === "foe";
       const isJourney = t =>
         (t.kind === "journey") ||
-        (!t.kind && t.subtype !== "vow" && t.subtype !== "bond" && t.subtype !== "foe"
-         && t.subtype !== "connection" && t.subtype !== "bondset");
-      const isVow = t => t.kind === "vow" || t.subtype === "vow";
-      const openVows = tracks.filter(t => !t.completed && isVow(t)).map(t => `"${t.name}"`);
-      const openJourneys = tracks.filter(t => !t.completed && !isVow(t) && isJourney(t)).map(t => `"${t.name}"`);
-      if (openVows.length)     lines.push(`Open vows (reference by EXACT title): ${openVows.join(", ")}`);
-      if (openJourneys.length) lines.push(`Open journeys (reference by EXACT title): ${openJourneys.join(", ")}`);
+        (!t.kind && !isVow(t) && !isCombat(t)
+         && t.subtype !== "bond" && t.subtype !== "connection" && t.subtype !== "bondset");
+
+      const activeCombat = this.getActiveCombat(actor);
+      const focusVow     = this.identifyStoryFocusVow(actor);
+
+      const fmt = (t, kind) => {
+        const rank = t.rank ? ` [${this.normalizeRank(t.rank)}]` : "";
+        return `${t.name}${rank}: ${this.fullnessLabel(t.boxes, t.completed, kind)}`;
+      };
+
+      lines.push("PROGRESS TRACKS:");
+
+      // ACTIVE COMBAT — at most one in Ironsworn; surface it first and flagged.
+      if (activeCombat) {
+        lines.push(`  ⚔️ ACTIVE COMBAT — ${fmt(activeCombat, "combat")}`);
+      }
+
+      const openVows     = tracks.filter(t => !t.completed && isVow(t));
+      const openJourneys = tracks.filter(t => !t.completed && !isVow(t) && isJourney(t));
+
+      if (openVows.length) {
+        lines.push("  VOWS:");
+        for (const t of openVows.slice(0, 8)) {
+          const focus = focusVow && focusVow.id === t.id ? "[STORY FOCUS] " : "";
+          lines.push(`    📜 ${focus}${fmt(t, "vow")}`);
+        }
+      }
+      if (openJourneys.length) {
+        lines.push("  JOURNEYS:");
+        for (const t of openJourneys.slice(0, 8)) {
+          lines.push(`    🗺️ ${fmt(t, "journey")}`);
+        }
+      }
+
+      // Any other / completed tracks (bonds, finished arcs) for completeness.
+      const others = tracks.filter(t =>
+        t.completed || (!isVow(t) && !isJourney(t) && !(activeCombat && t.id === activeCombat.id)));
+      for (const t of others.slice(0, 6)) {
+        lines.push(`    • ${fmt(t, t.kind || "vow")}`);
+      }
+
+      // Reference-by-exact-title lines (kept from prior versions) so the AI can
+      // target the right named track in mark-progress / completion directives.
+      const openVowTitles     = openVows.map(t => `"${t.name}"`);
+      const openJourneyTitles = openJourneys.map(t => `"${t.name}"`);
+      if (openVowTitles.length)     lines.push(`Open vows (reference by EXACT title): ${openVowTitles.join(", ")}`);
+      if (openJourneyTitles.length) lines.push(`Open journeys (reference by EXACT title): ${openJourneyTitles.join(", ")}`);
     }
+
+    // (v0.10.25) ASSETS — companions, paths, talents, rituals. Surfaced by
+    // EXACT name plus unlock progress and any condition meter, so the AI can
+    // reference what the character actually owns instead of inventing kit.
+    const assets = this.getAssets(actor);
+    if (assets.length) {
+      lines.push("Assets:");
+      for (const a of assets) {
+        const cat   = a.category ? ` (${a.category})` : "";
+        const prog  = a.total ? ` — ${a.unlocked}/${a.total} abilities` : "";
+        const track = a.track
+          ? `; ${a.track.name} ${a.track.value ?? "?"}${a.track.max != null ? `/${a.track.max}` : ""}`
+          : "";
+        lines.push(`  - ${a.name}${cat}${prog}${track}`);
+      }
+    }
+
+    // (v0.10.25) EXPERIENCE — classic Ironsworn `xp` counter and/or the
+    // Starforged legacy tracks. Either may be absent depending on ruleset, so
+    // each is surfaced only when present.
+    const xpInfo = this.getExperience(actor);
+    if (xpInfo.xp != null) lines.push(`Experience: ${xpInfo.xp} XP earned`);
+    if (xpInfo.legacies) {
+      const L = xpInfo.legacies;
+      lines.push(`Legacies (ticks): Quests ${L.quests}, Bonds ${L.bonds}, Discoveries ${L.discoveries}`);
+    }
+
     return lines.join("\n");
   },
 
