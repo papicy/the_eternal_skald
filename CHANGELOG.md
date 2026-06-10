@@ -13,6 +13,32 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.28] — 2026-06-10
+
+### Fixed
+- **MapVision 502 error.** Fixed the `MapVision 502 Bad Gateway` failure that
+  broke `!scout` (and automatic scene scouting) on hosted/managed Foundry by
+  expanding the hosted-mode fallback logic to handle infrastructure errors
+  (502/503/504/413). Previously `Client._hookMissing()` treated **only** a
+  `404` (Foundry's own not-found page) as "server hook not loaded". When a
+  large map-vision request hit the missing `/skald-api` route on hosted
+  Foundry, the reverse proxy (openresty) answered with a **502 Bad Gateway**
+  HTML page instead of a clean 404 — so the auto-mode fallback to the direct
+  browser→AI path was never triggered, the call threw `Skald API error 502`,
+  and the proxy's raw HTML error page was injected into the chat card.
+  `_hookMissing()` now returns `true` for a null response (network failure)
+  and for status codes **404, 413, 502, 503 and 504**, so the Skald
+  transparently retries the call directly and scouting works on hosted Foundry.
+
+### Changed
+- `Client._hookMissing(response)` now recognises `[404, 413, 502, 503, 504]`
+  (plus a null response) as "hook unreachable", with documentation of each
+  signature. This is consulted **only** in the `auto`-mode fallback branches of
+  `chat()` / `chatStream()`; in `server` mode a genuine upstream error is still
+  surfaced via the normal `!response.ok` path, and in `direct` mode it is never
+  called — so a real AI/LLM error is never masked. Purely additive, backwards-
+  compatible resilience fix.
+
 ## [0.10.27] — 2026-06-10
 
 ### Fixed
@@ -1349,6 +1375,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.28]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.28
 [0.10.27]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.27
 [0.10.26]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.26
 [0.10.24]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.24

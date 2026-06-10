@@ -149,13 +149,34 @@ ok(/_consumeStreamingResponse\s*\(/.test(SRC),
 }
 
 /* --------------------------------------------------------------------- *
- * [6] _hookMissing treats a 404 or a null response (network error) as a
- *     missing hook.
+ * [6] _hookMissing treats a null response (network error), a 404, and the
+ *     infrastructure/proxy errors 413/502/503/504 as a missing/unreachable
+ *     hook. The 502/503/504/413 cases (v0.10.28) fix the MapVision 502 bug
+ *     where a hosted-Foundry reverse proxy answered a large vision POST to the
+ *     missing /skald-api route with a 502 Bad Gateway instead of a clean 404.
  * --------------------------------------------------------------------- */
 {
   const hm = extractFrom(SRC, "_hookMissing(response)");
   ok(/!response/.test(hm) && /404/.test(hm),
      "[6] _hookMissing returns true for null response or status 404");
+  for (const code of [413, 502, 503, 504]) {
+    ok(new RegExp(`\\b${code}\\b`).test(hm),
+       `[6] _hookMissing recognises status ${code} as hook-unreachable`);
+  }
+
+  // Behavioural check: evaluate the real predicate body against sample responses.
+  const body = hm.slice(hm.indexOf("{") + 1, hm.lastIndexOf("}"));
+  /* eslint-disable no-new-func */
+  const hookMissing = new Function("response", body);
+  ok(hookMissing(null) === true,          "[6] null response → missing");
+  ok(hookMissing({ status: 404 }) === true,  "[6] 404 → missing");
+  ok(hookMissing({ status: 502 }) === true,  "[6] 502 → missing (MapVision fix)");
+  ok(hookMissing({ status: 503 }) === true,  "[6] 503 → missing");
+  ok(hookMissing({ status: 504 }) === true,  "[6] 504 → missing");
+  ok(hookMissing({ status: 413 }) === true,  "[6] 413 → missing");
+  ok(hookMissing({ status: 200 }) === false, "[6] 200 → present (no false fallback)");
+  ok(hookMissing({ status: 400 }) === false, "[6] 400 → present (real error surfaced)");
+  ok(hookMissing({ status: 500 }) === false, "[6] 500 → present (real upstream error surfaced)");
 }
 
 /* --------------------------------------------------------------------- *
