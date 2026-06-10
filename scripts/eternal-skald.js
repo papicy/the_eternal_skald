@@ -6561,7 +6561,15 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
       const track = IronswornController.getActiveCombatTrack(actor);
       if (track) {
         const pr = await IronswornController.markProgressByRank(actor, track.id);
-        if (pr?.ok) { this._notifyProgress(pr.track, pr.boxes); notes.push(`inflicted harm on ${pr.track} (now ${pr.boxes}/10 boxes)`); }
+        if (pr?.ok) {
+          this._notifyProgress(pr.track, pr.boxes);
+          notes.push(`inflicted harm on ${pr.track} (now ${pr.boxes}/10 boxes)`);
+          // (fix — foe auto-completion) A foe brought to full progress (10/10)
+          // is defeated; close the track deterministically instead of leaving
+          // it open. Clears the active-combat flag inside the helper.
+          const done = await this._autoCompleteIfFull(actor, track.id, "combat");
+          if (done) notes.push(`${pr.track} defeated (10/10 — auto-completed)`);
+        }
       } else {
         notes.push("no active foe track to mark — create one with [[EFFECT: create_combat …]]");
       }
@@ -6669,6 +6677,51 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
   },
 
   /**
+   * (fix — journey/combat auto-completion) Complete a progress track that has
+   * reached FULL progress (10 boxes / 40 ticks). Shared by the journey and
+   * combat auto-flows so a track that fills up via "Undertake a Journey" or
+   * "Strike"/"Clash" closes itself deterministically instead of lingering open
+   * forever.
+   *
+   * Two bugs were caused by tracks never closing at 10/10:
+   *   • JOURNEYS — because the first journey track stayed open forever,
+   *     _autoJourneyFlow kept REUSING it, collapsing every journey into one
+   *     perpetually-open track (the "all journeys group together" bug).
+   *   • FOES — a foe brought to 10/10 by Strikes/Clashes was never marked
+   *     defeated (the "foe combat doesn't auto-complete" bug).
+   *
+   * Completion goes through IronswornController.completeTrack(), which only
+   * flips `system.completed`. The automatic vow-XP hook (updateItem) is gated
+   * to VOWS only, so completing a JOURNEY or COMBAT track here never awards XP.
+   *
+   * @param {Actor}  actor
+   * @param {string} trackId   the track Item id
+   * @param {string} kind      "journey" | "combat" (controls notification + flag cleanup)
+   * @returns {Promise<boolean>} true when this call completed the track.
+   */
+  async _autoCompleteIfFull(actor, trackId, kind) {
+    try {
+      const t = actor?.items?.get?.(trackId);
+      if (!t) return false;
+      if (foundry.utils.getProperty(t, "system.completed")) return false;
+      const cur = foundry.utils.getProperty(t, "system.current") ?? 0;
+      if (cur < 40) return false;                       // not yet 10/10 boxes
+      const r = await IronswornController.completeTrack(actor, trackId);
+      if (!r?.ok) return false;
+      // A finished fight is no longer the active combat — clear the flag.
+      if (kind === "combat") { try { await IronswornController.clearActiveCombat(actor); } catch (_) {} }
+      const verb = kind === "combat" ? "🏆 foe defeated" : "🏁 destination reached";
+      try { this._notifyCombat(`${verb}: ${r.name} (10/10)`); } catch (_) {}
+      try { await Chat.postSystem(`<em>🤖 Skald marked “${escapeHtml(r.name)}” complete (full progress — 10/10).</em>`, { gmWhisper: true }); } catch (_) {}
+      this._auditWrite("AUTO_COMPLETE_FULL", { trackKind: kind, name: r.name }, true, "reached 10/10 boxes");
+      return true;
+    } catch (e) {
+      console.warn(LOG_PREFIX, "_autoCompleteIfFull failed", e);
+      return false;
+    }
+  },
+
+  /**
    * Is this the "Reach a Milestone" move?  No dice — just marks progress on
    * the active vow by its rank.
    */
@@ -6721,14 +6774,39 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
     const hit    = strong || out.includes("weak");
     const notes  = [];
 
-    // Ensure there is an open journey track to advance / later complete.
+    // Resolve WHICH journey track this move advances.
+    //
+    // (fix — journey separation) Previously we ALWAYS reused the newest open
+    // journey track, so a journey to a *different* destination simply advanced
+    // the prior, still-open track — collapsing every journey into a single
+    // perpetually-open track (the "all journeys group together" bug). The root
+    // cause was compounded by journeys never closing at 10/10, so that first
+    // track lingered open forever and was reused indefinitely.
+    //
+    // Now: if we can confidently identify THIS move's destination (a specific
+    // "Journey to X" inferred from the player's intent), we reuse an open
+    // journey ONLY when it is the same destination; a different destination
+    // opens its own track so simultaneous journeys stay separate. When the
+    // destination is unknown (generic "The Journey"), we keep the conservative
+    // reuse-newest behaviour to avoid spamming near-duplicate tracks.
+    const inferredName = this._inferJourneyName();             // "Journey to X" | "The Journey"
+    const specific     = !/^the journey$/i.test(inferredName); // did we identify a real destination?
     let track = IronswornController._newestOpenTrackItem(actor, "journey");
+
+    if (track && specific) {
+      // Reuse only an OPEN journey matching this destination; else branch a new one.
+      const match     = IronswornController.findTrackFuzzy(actor, inferredName, "journey");
+      const matchOpen = match && !foundry.utils.getProperty(match, "system.completed");
+      track = matchOpen ? match : null;
+    }
+
     if (!track) {
-      const name = this._inferJourneyName();
+      const name = inferredName;
       const rank = this._inferJourneyRank();
       const res  = await IronswornController.createProgressTrack(actor, name, "journey", rank);
       if (res?.ok) {
-        track = IronswornController._newestOpenTrackItem(actor, "journey");
+        track = IronswornController.getProgressTrack(actor, res.id)
+             ?? IronswornController._newestOpenTrackItem(actor, "journey");
         notes.push(`opened journey “${res.name || name}” (${rank})`);
         try { ui.notifications?.info(`${SKALD_NAME}: journey begun — ${res.name || name}.`); } catch (_) {}
       } else {
@@ -6739,7 +6817,15 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
     // On a hit, mark progress on the (now open) journey by its rank.
     if (track && hit) {
       const pr = await IronswornController.markProgressByRank(actor, track.id);
-      if (pr?.ok) { this._notifyProgress(pr.track, pr.boxes); notes.push(`advanced ${pr.track} (now ${pr.boxes}/10 boxes)`); }
+      if (pr?.ok) {
+        this._notifyProgress(pr.track, pr.boxes);
+        notes.push(`advanced ${pr.track} (now ${pr.boxes}/10 boxes)`);
+        // (fix — journey completion) A journey that has reached full progress
+        // (10/10) is finished; close it deterministically so it stops being
+        // reused by later journeys (which caused the grouping bug).
+        const done = await this._autoCompleteIfFull(actor, track.id, "journey");
+        if (done) notes.push(`reached destination “${pr.track}” (10/10 — auto-completed)`);
+      }
     }
     return notes.join("; ");
   },
@@ -7108,7 +7194,16 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
             break;
           }
           case "end_combat": {
-            r = await IronswornController.completeTrack(actor, eff.name);
+            // (fix — narrative conclusion) Resolve the foe track even when the
+            // AI omits or paraphrases the foe name while narrating the fight's
+            // end ("the beast falls", "you cut him down"). Try the literal name,
+            // then a fuzzy combat-kind match, then the active-combat track, so a
+            // narrated conclusion reliably closes the fight without an exact name.
+            let foe = eff.name ? IronswornController.findTrackFuzzy(actor, eff.name, "combat") : null;
+            if (!foe) { try { foe = IronswornController.getActiveCombat(actor); } catch (_) { foe = null; } }
+            r = foe
+              ? await IronswornController.completeTrack(actor, foe.id)
+              : await IronswornController.completeTrack(actor, eff.name);
             if (r?.ok) {
               applied.push(`ended combat “${r.name}”`);
               this._notifyCombat(`🏆 Combat ended: ${r.name}`);
