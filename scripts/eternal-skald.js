@@ -1059,6 +1059,28 @@ const Settings = {
       default: "impacts"
     });
 
+    /* (v0.10.37 — Phase 3) Whether the AI GM may CREATE content out of the
+     * official compendia: spawn foe actors, add assets/items to a character,
+     * or create a blank player character. Entity creation is heavier than
+     * sheet edits, so this is its own explicit, GM-only safety switch.
+     *   "off"   — never create anything.
+     *   "foes"  — spawn foe actors only (default; low-risk GM convenience).
+     *   "full"  — foes + add assets/items + create characters.
+     * All creation still runs GM-side through the Document API. */
+    game.settings.register(MODULE_ID, "aiCreatesContent", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.aiCreatesContent.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.aiCreatesContent.hint"),
+      scope: "world",
+      config: true,
+      type: String,
+      choices: {
+        "off":   "Off — never create actors or items",
+        "foes":  "Foes only — spawn foe actors from the bestiary",
+        "full":  "Full — foes, assets/items, and new characters"
+      },
+      default: "foes"
+    });
+
     /* ---- Combat automation (v0.3.0) ---- */
 
     game.settings.register(MODULE_ID, "autoCreateCombatTracks", {
@@ -2228,6 +2250,43 @@ INITIATIVE state telling who is in control. You drive these with:
    [[EFFECT: end_combat <Foe Name>]]
         Mark a foe's combat track complete when they are defeated, flee,
         yield, or the fight otherwise ends.
+
+ COMPENDIUM CREATION (assets, foes, items, characters):
+ You may bring REAL content out of the official Ironsworn compendia into the
+ game. These are GM-gated (the table can disable them) and are verified
+ against the compendia before anything is created — so always use EXACT names
+ from the official catalogue when you know them.
+   [[EFFECT: create_foe <Name> <rank?> <unique?>]]
+        Spawn a foe ACTOR (a full statted NPC) into the world when a notable
+        enemy appears. Prefer a name VERBATIM from the OFFICIAL FOE CATALOGUE
+        and omit the rank — the canonical foe (rank, features, tactics,
+        progress track) is copied straight from the compendium.
+          e.g. [[EFFECT: create_foe Bear]]
+        For an IMPORTANT custom antagonist not in the catalogue, give a rank
+        and add 'unique' at the end (a minimal custom foe is then created).
+          e.g. [[EFFECT: create_foe Hrafn the Oathbreaker formidable unique]]
+        NOTE: create_foe spawns a standalone foe ACTOR; create_combat (above)
+        opens a combat progress track on the PC sheet. Use create_combat to
+        run the fight; use create_foe when you want the foe to exist as its
+        own actor/token in the world.
+   [[EFFECT: add_asset <Asset Name>]]
+        Add an ASSET from the official asset compendia to the active
+        character (e.g. when they gain a companion, path, or piece of gear).
+        Use the EXACT asset name. Idempotent — re-adding an owned asset is a
+        no-op. e.g. [[EFFECT: add_asset Sword]] or [[EFFECT: add_asset "Loyal Companion"]].
+   [[EFFECT: add_item <Item Name>]]
+        Add any other compendium ITEM (move sheet, delve theme/domain, etc.)
+        to the active character by EXACT name. Use sparingly — most play needs
+        only assets. e.g. [[EFFECT: add_item "Delve the Depths"]].
+   [[EFFECT: create_character <Name>]]
+        Create a NEW blank player character actor with default starting stats
+        and full meters (for onboarding a new hero). Rare — only when the GM
+        or fiction explicitly introduces a brand-new player character.
+          e.g. [[EFFECT: create_character Astrid Wolfsbane]]
+ These creation effects only fire if the GM has enabled them (foe-spawning is
+ on by default; assets/items/characters require the "Full" creation setting).
+ If a name is not found, nothing is invented — the GM is quietly advised of the
+ closest match instead. Never guess at compendium names; copy them exactly.
    [[EFFECT: grant_xp <amount> <reason>]]
         Award the character a DISCRETIONARY amount of experience for a notable
         milestone the rules don't auto-score (e.g. a dramatic story beat the
@@ -5441,6 +5500,50 @@ const Integration = {
       if (!Number.isFinite(value)) return null;
       return { kind: "set_stat", stat, value };
     }
+
+    // ---- Compendium creation (v0.10.37 — Phase 3) ----
+    // [[EFFECT: add_asset <Asset Name>]]            — add an asset to the PC
+    // [[EFFECT: add_item <Item Name>]]              — add any compendium item
+    // [[EFFECT: create_foe <Name> [rank] [unique]]] — spawn a foe actor
+    // [[EFFECT: create_character <Name>]]           — create a blank PC
+    // Names may be quoted; ranks use the canonical rank words. A trailing
+    // `unique`/`boss`/`narrative`/`custom` keyword on create_foe flags a
+    // bespoke (non-compendium) antagonist so the custom-fallback is expected.
+    if (firstWord === "add_asset" || lc.startsWith("add asset")) {
+      const rest = body.replace(/^add[_\s]asset/i, "").trim();
+      const name = this._unquote(rest);
+      return name ? { kind: "add_asset", name } : null;
+    }
+    if (firstWord === "add_item" || lc.startsWith("add item")) {
+      const rest = body.replace(/^add[_\s]item/i, "").trim();
+      const name = this._unquote(rest);
+      return name ? { kind: "add_item", name } : null;
+    }
+    if (firstWord === "create_foe" || lc.startsWith("create foe") ||
+        firstWord === "spawn_foe"  || lc.startsWith("spawn foe")) {
+      let rest = body.replace(/^(create|spawn)[_\s]foe/i, "").trim();
+      let important = false;
+      const mk = rest.match(/[\s(\[]+(unique|boss|narrative|custom)\)?\]?\s*$/i);
+      if (mk) { important = true; rest = rest.slice(0, mk.index).trim(); }
+      // Quoted name keeps any spaces intact; otherwise split off a trailing rank.
+      const q = rest.match(/^["'“”]([^"'“”]+)["'“”]\s*(.*)$/);
+      let name, rank = null;
+      if (q) {
+        name = q[1].trim();
+        const tok = (q[2] || "").trim().split(/\s+/)[0]?.toLowerCase().replace(/[^a-z]/g, "") || "";
+        rank = this._RANKS.includes(tok) ? tok : null;
+      } else {
+        ({ name, rank } = this._splitNameRank(rest));
+      }
+      return name ? { kind: "create_foe", name, rank, important } : null;
+    }
+    if (firstWord === "create_character" || lc.startsWith("create character") ||
+        firstWord === "create_pc" || lc.startsWith("create pc")) {
+      const rest = body.replace(/^create[_\s](character|pc)/i, "").trim();
+      const name = this._unquote(rest);
+      return name ? { kind: "create_character", name } : null;
+    }
+
     // "progress <Track Name> <+N | rank>" and its by-title alias
     // "mark_progress <Track Title> [+N | rank]" / 'mark_progress "Track Title"'.
     // mark_progress is meant for advancing a NAMED vow/journey from the
@@ -5573,6 +5676,18 @@ const Integration = {
 
   /** Ironsworn rank words, used to split "Name <rank> [description]". */
   _RANKS: ["troublesome", "dangerous", "formidable", "extreme", "epic"],
+
+  /**
+   * Strip surrounding quotes and trailing punctuation from a directive tail,
+   * yielding a clean entity name. Returns "" for empty/whitespace input.
+   */
+  _unquote(rest) {
+    if (!rest) return "";
+    let s = String(rest).trim();
+    const q = s.match(/^["'“”]([^"'“”]+)["'“”]\s*$/);
+    if (q) s = q[1];
+    return s.replace(/^[:\-—|]+/, "").replace(/[:\-—|]+$/, "").trim();
+  },
 
   /**
    * Split a directive tail of the form "<Name...> [rank] [description...]".
@@ -7027,6 +7142,23 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
     } catch (_) { /* advisory only */ }
   },
 
+  /**
+   * (v0.10.37 — Phase 3) GM-only advisory when a compendium-creation effect
+   * (add_asset / add_item / create_foe / create_character) could not be
+   * fulfilled. Includes the closest suggested name when the lookup offered
+   * one, so the GM can correct the directive. Never throws.
+   */
+  async _warnCreateFailed(kind, name, error, suggestion) {
+    try {
+      const hint = suggestion ? ` Did you mean “${escapeHtml(suggestion)}”?` : "";
+      await Chat.postSystem(
+        `<em>⚠ Could not add/create the ${escapeHtml(kind)} “${escapeHtml(name ?? "")}”: ` +
+        `${escapeHtml(error ?? "unknown error")}.${hint}</em>`,
+        { gmWhisper: true }
+      );
+    } catch (_) { /* advisory only */ }
+  },
+
   /** Apply parsed [[EFFECT:…]] directives via the Ironsworn controller. */
   async applyEffects(effects, actor) {
     const applied = [];
@@ -7303,6 +7435,104 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
             }
             break;
           }
+
+          /* ---- Compendium creation (v0.10.37 — Phase 3) ---------------------
+           * Bring official compendium content into play. All creation runs
+           * GM-side through the Document API in the controller, is verified
+           * against the compendia first, and is gated by the aiCreatesContent
+           * setting: "off" blocks everything, "foes" allows only foe spawning,
+           * "full" allows assets/items/characters too. A close-but-unmatched
+           * name surfaces a gentle GM advisory rather than guessing. */
+          case "add_asset": {
+            const mode = Settings.get("aiCreatesContent") ?? "foes";
+            if (mode !== "full") {
+              this._auditWrite("ADD_ASSET", { name: eff.name }, false, `disabled (aiCreatesContent=${mode})`);
+              break;
+            }
+            if (!actor) { await this._warnNoActor("add an asset", eff.name); break; }
+            r = await IronswornController.addAssetToActor(actor, eff.name);
+            if (r?.ok && !r.noop) {
+              applied.push(`added asset “${r.name}”`);
+              this._notifyCombat(`🎴 Asset added: ${r.name}`);
+              this._auditWrite("ADD_ASSET", { name: r.name }, true, `matched ${r.match} → ${actor.name}`);
+            } else if (r?.noop) {
+              this._auditWrite("ADD_ASSET", { name: r.name }, true, "no-op (already owned)");
+            } else {
+              this._auditWrite("ADD_ASSET", { name: eff.name }, false, r?.error);
+              await this._warnCreateFailed("asset", eff.name, r?.error, r?.suggestion);
+            }
+            break;
+          }
+          case "add_item": {
+            const mode = Settings.get("aiCreatesContent") ?? "foes";
+            if (mode !== "full") {
+              this._auditWrite("ADD_ITEM", { name: eff.name }, false, `disabled (aiCreatesContent=${mode})`);
+              break;
+            }
+            if (!actor) { await this._warnNoActor("add an item", eff.name); break; }
+            r = await IronswornController.addItemToActor(actor, eff.name);
+            if (r?.ok && !r.noop) {
+              applied.push(`added ${r.type || "item"} “${r.name}”`);
+              this._notifyCombat(`📦 Item added: ${r.name}`);
+              this._auditWrite("ADD_ITEM", { name: r.name }, true, `${r.type} → ${actor.name}`);
+            } else if (r?.noop) {
+              this._auditWrite("ADD_ITEM", { name: r.name }, true, "no-op (already owned)");
+            } else {
+              this._auditWrite("ADD_ITEM", { name: eff.name }, false, r?.error);
+              await this._warnCreateFailed("item", eff.name, r?.error, r?.suggestion);
+            }
+            break;
+          }
+          case "create_foe": {
+            // Foe spawning is the default-on creation (low-risk GM convenience):
+            // allowed unless aiCreatesContent is "off".
+            const mode = Settings.get("aiCreatesContent") ?? "foes";
+            if (mode === "off") {
+              this._auditWrite("CREATE_FOE", { name: eff.name }, false, "disabled (aiCreatesContent=off)");
+              break;
+            }
+            r = await IronswornController.createFoeActor(eff.name, { rank: eff.rank, important: eff.important });
+            if (r?.ok) {
+              const tag = r.source === "compendium" ? " [official]" : " [custom]";
+              const rk = r.rank ? ` [${r.rank}]` : "";
+              applied.push(`👹 spawned foe “${r.name}”${rk}${tag}`);
+              this._notifyCombat(`👹 Foe spawned: ${r.name}${rk}${r.source === "compendium" ? ", official" : ""}`);
+              this._auditWrite("CREATE_FOE", { name: r.name }, true, `${r.source}${r.match ? `, matched ${r.match}` : ""}`);
+              // Advisory: a custom foe that wasn't flagged important but has a
+              // close compendium name — suggest the catalogue foe to the GM.
+              if (r.source === "custom" && r.suggestion && !eff.important) {
+                try {
+                  await Chat.postSystem(
+                    `<em>👹 “${escapeHtml(eff.name)}” was spawned as a custom foe. `
+                    + `Closest official foe: “${escapeHtml(r.suggestion)}”.</em>`,
+                    { gmWhisper: true }
+                  );
+                } catch (_) { /* advisory only */ }
+              }
+            } else {
+              this._auditWrite("CREATE_FOE", { name: eff.name }, false, r?.error);
+              await this._warnCreateFailed("foe", eff.name, r?.error, r?.suggestion);
+            }
+            break;
+          }
+          case "create_character": {
+            const mode = Settings.get("aiCreatesContent") ?? "foes";
+            if (mode !== "full") {
+              this._auditWrite("CREATE_CHARACTER", { name: eff.name }, false, `disabled (aiCreatesContent=${mode})`);
+              break;
+            }
+            r = await IronswornController.createCharacter(eff.name);
+            if (r?.ok) {
+              applied.push(`🧝 created character “${r.name}”`);
+              this._notifyCombat(`🧝 Character created: ${r.name}`);
+              this._auditWrite("CREATE_CHARACTER", { name: r.name }, true, `id=${r.actorId}`);
+            } else {
+              this._auditWrite("CREATE_CHARACTER", { name: eff.name }, false, r?.error);
+              await this._warnCreateFailed("character", eff.name, r?.error);
+            }
+            break;
+          }
+
           case "initiative": {
             const gain = eff.value === "gain";
             r = await IronswornController.setInitiative(actor, gain);
@@ -10742,6 +10972,21 @@ Hooks.once("ready", () => {
   try {
     if (IronswornController?.isActive?.() && typeof IronswornController._buildFoeIndex === "function") {
       IronswornController._buildFoeIndex().catch(() => { /* defensive — catalogue stays off */ });
+    }
+  } catch (_) { /* defensive */ }
+});
+
+// --- Foe-ACTOR index priming (v0.10.37 — Phase 3) --------------------
+// The create_foe effect spawns a real foe ACTOR copied from the foe-actor
+// compendia (foe-actors-is / -delve / -sf). Building that index is async, so
+// prime it once on ready (fire-and-forget, fully defensive) — the first
+// create_foe directive then resolves without an indexing stall. If it fails
+// the lookup simply rebuilds on demand and createFoeActor falls back to a
+// minimal custom foe.
+Hooks.once("ready", () => {
+  try {
+    if (IronswornController?.isActive?.() && typeof IronswornController._buildFoeActorIndex === "function") {
+      IronswornController._buildFoeActorIndex().catch(() => { /* defensive — rebuilds on demand */ });
     }
   } catch (_) { /* defensive */ }
 });

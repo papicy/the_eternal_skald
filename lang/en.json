@@ -110,6 +110,10 @@
         "name": "AI Modifies Character Sheet",
         "hint": "Controls whether the Skald may directly edit the character sheet beyond the basic meters. \"Impacts only\" (default) lets it toggle conditions/debilities (wounded, shaken, corrupted, etc.) as the story warrants; \"Full\" also lets it set base stats (edge, heart, iron, shadow, wits) within 0–5. \"Off\" keeps impacts and stats entirely player-controlled. All edits are GM-applied, bounded, and logged."
       },
+      "aiCreatesContent": {
+        "name": "AI Creates Content",
+        "hint": "Controls whether the Skald may create new entities from the official Ironsworn compendia. \"Foes only\" (default) lets it spawn foe actors from the bestiary as encounters arise; \"Full\" also lets it add assets/items to your character and create new player characters. \"Off\" disables all creation. Every creation is GM-applied, verified against the compendia first, and logged."
+      },
       "autoCreateCombatTracks": {
         "name": "Auto-Create Combat Tracks",
         "hint": "When the Skald narrates the start of a fight, automatically create a combat progress track for each foe so attacks can be marked against it. Requires AI Applies Mechanical Effects."
