@@ -54,6 +54,13 @@ const RANK_TO_NUM = Object.freeze({
   troublesome: 1, dangerous: 2, formidable: 3, extreme: 4, epic: 5
 });
 
+/* Experience awarded for FULFILLING a vow / progress track, by rank — the
+ * canonical Ironsworn SRD scale ("mark experience equal to the rank of the
+ * vow you fulfil"): Troublesome 1 … Epic 5. Used by grantXp / xpForRank. */
+const RANK_XP = Object.freeze({
+  troublesome: 1, dangerous: 2, formidable: 3, extreme: 4, epic: 5
+});
+
 /* Debug logging is toggled by eternal-skald.js via setDebug(). */
 let DEBUG = false;
 
@@ -399,6 +406,236 @@ export const IronswornController = {
       : null;
 
     return { xp, legacies };
+  },
+
+  /* ===================================================================
+   *  EXPERIENCE (XP) GRANTING — Phase 1
+   *  -----------------------------------------------------------------
+   *  WRITE counterpart to getExperience(). All experience awards in the
+   *  module funnel through grantXp() so the behaviour stays consistent
+   *  and auditable. Two write models, chosen by the active ruleset:
+   *    • classic    → increments the integer `system.xp` counter
+   *                   (Ironsworn classic & Delve).
+   *    • starforged → marks ticks on a legacy track under
+   *                   `system.legacies` (Starforged & Sundered Isles).
+   *  Both go through actor.update() (never direct mutation) so the
+   *  system stays the single source of truth and fires its own hooks.
+   * ================================================================= */
+
+  /**
+   * Experience earned for fulfilling a vow / progress track of a given rank.
+   * Mirrors IronswornData.xpForRank so callers that only hold the controller
+   * still have it. Troublesome 1 … Epic 5; weak hit halves (rounded up).
+   *
+   * @param {string|number} rank canonical rank word or numeric ChallengeRank.
+   * @param {{weakHit?: boolean}} [opts]
+   * @returns {number} whole XP (0 for an unknown rank).
+   */
+  xpForRank(rank, { weakHit = false } = {}) {
+    let key = (typeof rank === "number") ? RANK_NUM[rank] : String(rank ?? "").toLowerCase().trim();
+    const base = RANK_XP[key] ?? 0;
+    if (!base) return 0;
+    return weakHit ? Math.ceil(base / 2) : base;
+  },
+
+  /**
+   * Detect which Ironsworn ruleset family decides HOW experience is recorded.
+   * foundry-ironsworn exposes four boolean world settings (one per rules
+   * package). We collapse them to two XP write models:
+   *   • "classic"    — single integer counter at `system.xp` (classic, delve)
+   *   • "starforged" — legacy tracks under `system.legacies` (starforged,
+   *                    sundered isles)
+   * Defaults to "classic" when nothing is readable — it is the safest model
+   * and the field every character carries.
+   *
+   * @returns {"classic"|"starforged"}
+   */
+  getRuleset() {
+    try {
+      const flag = (k) => {
+        try { return game?.settings?.get?.(SYSTEM_ID, k) === true; } catch (_) { return false; }
+      };
+      const classic = flag("ruleset-classic");
+      const delve   = flag("ruleset-delve");
+      const sf      = flag("ruleset-starforged");
+      const si      = flag("ruleset-sundered_isles");
+      // Classic/Delve take priority — `system.xp` is the simplest, universal
+      // model. Only when ONLY a Starforged-family ruleset is on do we switch.
+      if (classic || delve) return "classic";
+      if (sf || si) return "starforged";
+    } catch (_) { /* fall through */ }
+    return "classic";
+  },
+
+  /** Convenience predicate — true when the active ruleset uses legacy tracks. */
+  isStarforgedRuleset() {
+    return this.getRuleset() === "starforged";
+  },
+
+  /**
+   * Award experience to a character through the system's data model. THE
+   * single XP-write entry point. Never throws; always returns a result object.
+   *
+   * @param {Actor}  actor
+   * @param {number} amount  whole XP to grant (> 0). For the starforged model
+   *        this is converted to amount×4 legacy ticks (4 ticks = 1 XP).
+   * @param {object} [opts]
+   * @param {string} [opts.reason]    short note shown in the GM whisper.
+   * @param {"classic"|"starforged"} [opts.mode] force a write model (else
+   *        auto-detected via getRuleset()).
+   * @param {string} [opts.legacyKey] which legacy track to mark for the
+   *        starforged model: "quests" (default) | "bonds" | "discoveries".
+   * @param {boolean} [opts.silent]   suppress the GM chat confirmation.
+   * @returns {Promise<{ok:boolean, mode?:string, amount?:number,
+   *   total?:number, legacyKey?:string, ticks?:number, error?:string}>}
+   */
+  async grantXp(actor, amount, { reason = "", mode = null, legacyKey = "quests", silent = false } = {}) {
+    if (!actor) return { ok: false, error: "No actor." };
+    const xp = Math.round(Number(amount));
+    if (!Number.isFinite(xp) || xp <= 0) {
+      return { ok: false, error: `Invalid XP amount "${amount}".` };
+    }
+
+    const ruleset = (mode === "classic" || mode === "starforged") ? mode : this.getRuleset();
+    try {
+      if (ruleset === "starforged") {
+        const key = ["quests", "bonds", "discoveries"].includes(legacyKey) ? legacyKey : "quests";
+        const path = `system.legacies.${key}`;
+        const cur = foundry.utils.getProperty(actor, path);
+        // If this character has no legacy field (mixed/odd data), degrade to
+        // the universal classic counter rather than failing the award.
+        if (typeof cur !== "number") return this._grantXpClassic(actor, xp, reason, silent);
+        const ticks = xp * 4;                 // 4 ticks = 1 XP on a legacy track
+        const next = Math.max(0, cur + ticks);
+        await actor.update({ [path]: next });
+        dbg(`grantXp(starforged): ${key} ${cur} -> ${next} (+${xp} xp / ${ticks} ticks)`);
+        if (!silent) await this._postXpChat(actor, xp, reason, { mode: "starforged", legacyKey: key });
+        return { ok: true, mode: "starforged", amount: xp, legacyKey: key, ticks, total: next };
+      }
+      return this._grantXpClassic(actor, xp, reason, silent);
+    } catch (e) {
+      warn("grantXp failed:", e?.message ?? e);
+      return { ok: false, error: e?.message ?? String(e) };
+    }
+  },
+
+  /** Classic-model XP write: increment the integer `system.xp` counter. */
+  async _grantXpClassic(actor, xp, reason, silent) {
+    const path = "system.xp";
+    const curRaw = foundry.utils.getProperty(actor, path);
+    const cur = typeof curRaw === "number" ? curRaw : 0;
+    const next = Math.max(0, cur + xp);       // experience never drops below 0
+    await actor.update({ [path]: next });
+    dbg(`grantXp(classic): system.xp ${cur} -> ${next} (+${xp})`);
+    if (!silent) await this._postXpChat(actor, xp, reason, { mode: "classic", total: next });
+    return { ok: true, mode: "classic", amount: xp, total: next };
+  },
+
+  /**
+   * Convenience wrapper that awards the rank-appropriate XP for fulfilling a
+   * vow/progress track, with idempotency: a track is flagged once awarded so
+   * the same vow can never grant XP twice (whatever path completed it). This
+   * is what both the automatic completion hook AND the grant_xp_vow directive
+   * call, so they reconcile through the shared flag.
+   *
+   * @param {Actor} actor
+   * @param {Item}  track  the progress-track Item being fulfilled.
+   * @param {object} [opts]
+   * @param {("strong"|"weak"|"miss"|string)} [opts.outcome] roll outcome — a
+   *        "weak" outcome halves the award when the weak-hit rule is enabled.
+   * @param {boolean} [opts.weakHitHalf] enable the optional half-XP rule.
+   * @param {string}  [opts.reason]
+   * @returns {Promise<{ok:boolean, skipped?:string, xp?:number, error?:string}>}
+   */
+  async grantVowXp(actor, track, { outcome = "strong", weakHitHalf = false, reason = "" } = {}) {
+    if (!actor || !track) return { ok: false, error: "No actor or track." };
+    try {
+      // Idempotency: bail if this track already awarded XP.
+      const already = track.getFlag?.(ES_SCOPE, "xpAwarded")
+        ?? foundry.utils.getProperty(track, `flags.${ES_SCOPE}.xpAwarded`);
+      if (already) {
+        dbg(`grantVowXp: "${track.name}" already awarded XP — skipping`);
+        return { ok: true, skipped: "already-awarded", xp: 0 };
+      }
+      const rank = foundry.utils.getProperty(track, "system.rank");
+      const weak = String(outcome).toLowerCase() === "weak" && !!weakHitHalf;
+      const xp = this.xpForRank(rank, { weakHit: weak });
+      if (xp <= 0) {
+        dbg(`grantVowXp: "${track.name}" rank "${rank}" yielded 0 XP — skipping`);
+        return { ok: true, skipped: "zero-xp", xp: 0 };
+      }
+      // Flag BEFORE awarding so a re-entrant hook (the award writes the actor,
+      // not the item, so it won't re-fire this path) can never double-grant.
+      try { await track.setFlag?.(ES_SCOPE, "xpAwarded", true); } catch (_) { /* best-effort */ }
+      const why = reason || `fulfilled “${track.name}”${rank ? ` (${this._rankWord(rank)})` : ""}${weak ? " — weak hit, half XP" : ""}`;
+      const res = await this.grantXp(actor, xp, { reason: why });
+      if (!res.ok) {
+        // Roll back the flag so a later retry can still award.
+        try { await track.unsetFlag?.(ES_SCOPE, "xpAwarded"); } catch (_) {}
+        return res;
+      }
+      return { ok: true, xp, mode: res.mode, total: res.total };
+    } catch (e) {
+      warn("grantVowXp failed:", e?.message ?? e);
+      return { ok: false, error: e?.message ?? String(e) };
+    }
+  },
+
+  /**
+   * Resolve WHICH vow a `grant_xp_vow` directive refers to. Unlike the
+   * completion resolver, this also considers a JUST-COMPLETED vow, since the
+   * award directive usually follows a complete_vow in the same reply. Order:
+   *   1. The last progress track rolled this session, if it is a vow here.
+   *   2. The explicit active vow.
+   *   3. The newest vow that has NOT yet been awarded XP (open or completed),
+   *      else the newest vow overall.
+   * Returns the Item or null.
+   */
+  resolveVowForXp(actor) {
+    if (!actor?.items) return null;
+    const last = this._lastProgressTrack;
+    if (last?.id && last.actorId === actor.id && (!last.kind || last.kind === "vow")) {
+      const item = actor.items.get?.(last.id);
+      if (item && this._trackKindOf(item) === "vow") return item;
+    }
+    const active = this.getActiveVow?.(actor);
+    if (active?.id) {
+      const item = actor.items.get?.(active.id);
+      if (item && this._trackKindOf(item) === "vow") return item;
+    }
+    const vows = (actor.items.filter?.(i => this._trackKindOf(i) === "vow")) ?? [];
+    if (!vows.length) return null;
+    const awarded = (v) => v.getFlag?.(ES_SCOPE, "xpAwarded")
+      ?? foundry.utils.getProperty(v, `flags.${ES_SCOPE}.xpAwarded`);
+    const unawarded = vows.filter(v => !awarded(v));
+    const pool = unawarded.length ? unawarded : vows;
+    return pool[pool.length - 1];
+  },
+
+  /** Map a rank (word or numeric ChallengeRank) to its canonical word. */
+  _rankWord(rank) {
+    if (typeof rank === "number") return RANK_NUM[rank] ?? String(rank);
+    return String(rank ?? "").toLowerCase().trim();
+  },
+
+  /** Post a concise GM-whispered confirmation that XP was awarded. */
+  async _postXpChat(actor, xp, reason, info = {}) {
+    try {
+      const who = actor?.name ? `<strong>${actor.name}</strong>` : "The hero";
+      const why = reason ? ` — <em>${reason}</em>` : "";
+      const where = info.mode === "starforged"
+        ? ` to the ${info.legacyKey || "quests"} legacy`
+        : (typeof info.total === "number" ? ` (now ${info.total} total)` : "");
+      const recipients = ChatMessage.getWhisperRecipients?.("GM") ?? [];
+      await ChatMessage.create({
+        speaker: { alias: "The Eternal Skald" },
+        whisper: recipients,
+        content: `<div class="es-xp-award"><p>✨ ${who} earned <strong>${xp} experience</strong>${where}${why}.</p></div>`,
+        flags: { "the-eternal-skald": { xpAward: true, amount: xp, reason, ...info } }
+      });
+    } catch (e) {
+      warn("_postXpChat failed:", e?.message ?? e);
+    }
   },
 
   /**
