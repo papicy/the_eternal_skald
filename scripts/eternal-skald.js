@@ -1664,6 +1664,34 @@ MULTIPLE TRACKS — DON'T CONFLATE STORY ARCS:
   enemy only. Do not start narrating a second simultaneous fight.`);
   }
 
+  // (v0.10.27 — Phase 3) Explicit progress-track WRITE directives. These give
+  // the Skald a precise, auditable way to finish or adjust a SPECIFIC track by
+  // its exact name. Added whenever effects / track-effects are in play.
+  if (allowEffects || allowTrackEffects) {
+    parts.push(`\
+PROGRESS-TRACK WRITE DIRECTIVES (precise, optional — use sparingly):
+When you need to act on a SPECIFIC named track, you may emit these directives.
+They are applied directly to the sheet and logged for the GM:
+   [[MARK_COMPLETE:vow:<Exact Vow Name>]]       — mark a vow fulfilled
+   [[MARK_COMPLETE:combat:<Exact Foe Name>]]    — mark a fight won/ended
+   [[MARK_COMPLETE:journey:<Exact Journey Name>]] — mark a destination reached
+   [[ADD_PROGRESS:vow:<Exact Name>:<N>]]        — add N progress BOXES (1–10)
+   [[SET_PROGRESS:vow:<Exact Name>:<N>]]        — set the track to exactly N boxes
+RULES (critical):
+• Use the track's EXACT name from the LIVE GAME STATE (a close paraphrase is
+  matched fuzzily, but exact is safest). The <kind> MUST be vow, combat, journey,
+  or bond and must match the track.
+• Only emit MARK_COMPLETE when the track is genuinely finished — i.e. it shows
+  "10/10 boxes - ✅ READY TO…" AND the completion move ("Fulfill Your Vow" /
+  "End the Fight" / "Reach Your Destination") was rolled as a STRONG HIT, OR the
+  narrative has reached a natural, earned conclusion the player intends.
+• NEVER mark a "NOT YET FULL" track complete on your own narrative judgement.
+• On a Weak Hit or Miss of a completion move, do NOT mark complete — narrate the
+  complication and leave the track open.
+• These directives are an ALTERNATIVE to [[EFFECT: complete_vow]] etc.; do not
+  emit both for the same track in one reply.`);
+  }
+
   // (v0.10.25) Assets & experience guidance. The live game state may now list
   // the character's "Assets" (companions, paths, talents, rituals) and their
   // "Experience"/"Legacies". This tells the Skald how to weave that truth into
@@ -4503,7 +4531,57 @@ const Integration = {
       if (parsed) effects.push(parsed);
     }
     clean = text.replace(re, "").trim();
+
+    // ---- v0.10.27 — explicit progress-track WRITE directives ----
+    // A second, deliberately distinct syntax the AI uses to drive precise
+    // track writes when it KNOWS the exact track:
+    //   [[MARK_COMPLETE:vow:The Truth of the Star-Fall]]
+    //   [[MARK_COMPLETE:combat:Bog Rot]]
+    //   [[MARK_COMPLETE:journey:The Long Road North]]
+    //   [[ADD_PROGRESS:vow:The Truth of the Star-Fall:2]]   (add 2 boxes)
+    //   [[SET_PROGRESS:vow:The Truth of the Star-Fall:8]]   (set to 8 boxes)
+    // Colon-separated and verb-led (no "EFFECT:" prefix) so it never collides
+    // with the established [[EFFECT: ...]] grammar above.
+    const wr = /\[\[\s*(MARK_COMPLETE|ADD_PROGRESS|SET_PROGRESS)\s*:\s*([^\]]+?)\s*\]\]/gi;
+    let w;
+    while ((w = wr.exec(text)) !== null) {
+      const parsed = this._parseWriteDirective(w[1], w[2]);
+      if (parsed) effects.push(parsed);
+    }
+    clean = clean.replace(wr, "").trim();
+
     return { effects, clean };
+  },
+
+  /**
+   * Parse a v0.10.27 progress-track write directive body. `verb` is one of
+   * MARK_COMPLETE / ADD_PROGRESS / SET_PROGRESS; `body` is the colon-delimited
+   * tail "<kind>:<Name>[:<number>]". Returns a normalized effect object or null
+   * when malformed. Track KIND is validated to vow|journey|combat|bond.
+   */
+  _parseWriteDirective(verb, body) {
+    const V = String(verb || "").toUpperCase();
+    const parts = String(body || "").split(":").map(s => s.trim());
+    if (parts.length < 2) return null;
+    const kind = parts[0].toLowerCase();
+    if (!["vow", "journey", "combat", "bond"].includes(kind)) return null;
+
+    if (V === "MARK_COMPLETE") {
+      // [[MARK_COMPLETE:kind:Name]] — Name may itself contain colons.
+      const name = parts.slice(1).join(":").trim();
+      if (!name) return null;
+      return { kind: "mark_complete", trackKind: kind, name };
+    }
+    // ADD_PROGRESS / SET_PROGRESS need a trailing integer box count.
+    if (parts.length < 3) return null;
+    const numTok = parts[parts.length - 1];
+    const num = parseInt(numTok, 10);
+    if (!Number.isFinite(num)) return null;
+    const name = parts.slice(1, parts.length - 1).join(":").trim();
+    if (!name) return null;
+    if (V === "ADD_PROGRESS") return { kind: "add_progress", trackKind: kind, name, boxes: num };
+    if (V === "SET_PROGRESS") return { kind: "set_progress", trackKind: kind, name, boxes: num };
+    return null;
   },
 
   _parseOneEffect(body) {
@@ -5104,6 +5182,26 @@ const Integration = {
   },
 
   /**
+   * Console audit log for an AI-driven progress-track WRITE directive
+   * (v0.10.27). Records every attempt — success or failure — so a GM can trace
+   * exactly what the Skald changed and why. Never throws.
+   * @param {string}  verb     "MARK_COMPLETE" | "ADD_PROGRESS" | "SET_PROGRESS"
+   * @param {object}  eff      the parsed effect ({trackKind, name, boxes?})
+   * @param {boolean} ok       whether the write succeeded
+   * @param {string}  [detail] human-readable outcome / error
+   */
+  _auditWrite(verb, eff, ok, detail = "") {
+    try {
+      const tag = ok ? "✓" : "✗";
+      const box = (eff?.boxes != null) ? `:${eff.boxes}` : "";
+      console.log(
+        `${LOG_PREFIX} [track-write ${tag}] ${verb} ${eff?.trackKind ?? "?"}:"${eff?.name ?? ""}"${box}`
+        + (detail ? ` — ${detail}` : "")
+      );
+    } catch (_) { /* audit logging must never break a write */ }
+  },
+
+  /**
    * Inspect a freshly-created (or updated) ChatMessage. If it is an
    * Ironsworn move roll (or our own manual move roll), parse the outcome
    * and feed it to the AI for narration + optional mechanical effects.
@@ -5458,6 +5556,12 @@ Narrate this milestone briefly and evocatively as the Skald (1–3 sentences), f
       catch (e) { console.warn(LOG_PREFIX, "_autoJourneyFlow failed", e); }
       try { const m = await this._autoMilestoneFlow(parsed, actor); if (m) autoParts.push(m); }
       catch (e) { console.warn(LOG_PREFIX, "_autoMilestoneFlow failed", e); }
+      // (v0.10.27) Roll-result integration for the COMPLETION moves
+      // ("Fulfill Your Vow" / "End the Fight" / "Reach Your Destination"):
+      // strong hit auto-finishes the targeted track; weak/miss leave it open
+      // and only steer the narration toward consequences.
+      try { const fin = await this._autoCompletionFlow(parsed, actor); if (fin) autoParts.push(fin); }
+      catch (e) { console.warn(LOG_PREFIX, "_autoCompletionFlow failed", e); }
       autoSummary = autoParts.join("; ");
     }
 
@@ -5590,6 +5694,88 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
   },
 
   /**
+   * (v0.10.27 — roll-result integration) Classify a progress-COMPLETION move
+   * and the track KIND it resolves:
+   *   "Fulfill Your Vow"      → vow
+   *   "End the Fight"         → combat
+   *   "Reach Your Destination"→ journey
+   * Returns the kind string, or null when `moveName` is not a completion move.
+   */
+  _completionMoveKind(moveName) {
+    const n = String(moveName || "").toLowerCase();
+    if (/\bfulfill (?:your|the|this) vow\b/.test(n)) return "vow";
+    if (/\bend the fight\b/.test(n)) return "combat";
+    if (/\breach (?:your|the|this) destination\b/.test(n)) return "journey";
+    return null;
+  },
+
+  /**
+   * (v0.10.27) Deterministically integrate the OUTCOME of a progress-completion
+   * move with the relevant track:
+   *   • STRONG HIT → the track is finished. Auto-complete the correct track,
+   *     resolved via the story-arc flags (active vow / active combat) with a
+   *     graceful fallback to the last-rolled / newest-open track of that kind.
+   *   • WEAK HIT / MISS → the track is NOT completed; we only return a note so
+   *     the narration prompt describes the complication / consequence and the
+   *     track stays open for another attempt.
+   * Returns a short human-readable summary (for the prompt + GM whisper), or ""
+   * when the move isn't a completion move / nothing applied. Never throws.
+   */
+  async _autoCompletionFlow(parsed, actor) {
+    if (!actor) return "";
+    const kind = this._completionMoveKind(parsed?.moveName);
+    if (!kind) return "";
+
+    const out    = String(parsed?.outcome || "").toLowerCase();
+    const strong = out.includes("strong");
+    const weak   = out.includes("weak");
+
+    // Resolve the target track, preferring the explicit story-arc flags.
+    let target = null;
+    if (kind === "vow") {
+      const av = IronswornController.getActiveVow(actor);
+      target = (av && actor.items?.get?.(av.id))
+            || IronswornController.resolveCompletionTrack(actor, "", "vow");
+    } else if (kind === "combat") {
+      const ac = IronswornController.getActiveCombat(actor);
+      target = ac && actor.items?.get?.(ac.id);
+    } else { // journey
+      target = IronswornController.resolveCompletionTrack(actor, "", "journey");
+    }
+
+    if (!strong) {
+      // Weak hit or miss — explicitly DO NOT complete. Provide narration guidance.
+      const label = kind === "combat" ? "fight" : kind;
+      const name  = target?.name ? ` “${target.name}”` : "";
+      return weak
+        ? `${label}${name} NOT yet finished (weak hit) — narrate partial success at a cost; the track stays open`
+        : `${label}${name} NOT finished (miss) — narrate a serious setback/complication; the track stays open`;
+    }
+
+    // Strong hit — complete the track.
+    if (!target) {
+      return `no open ${kind} track to complete (strong hit on ${parsed.moveName})`;
+    }
+    let r;
+    if (kind === "combat") {
+      r = await IronswornController.completeTrack(actor, target.id);
+      if (r?.ok) { try { await IronswornController.clearActiveCombat(actor); } catch (_) {} }
+    } else {
+      r = await IronswornController.completeTrackSmart(actor, target.id, kind);
+      if (r?.ok && kind === "vow") { try { await IronswornController.setActiveVow(actor, null); } catch (_) {} }
+    }
+    if (r?.ok) {
+      const verb = kind === "vow" ? "fulfilled vow" : kind === "combat" ? "won the fight" : "reached destination";
+      this._notifyCombat(`🏆 ${verb}: ${r.name}`);
+      try { await Chat.postSystem(`<em>🤖 Skald marked “${escapeHtml(r.name)}” complete (strong hit on ${escapeHtml(parsed.moveName)}).</em>`, { gmWhisper: true }); } catch (_) {}
+      this._auditWrite("ROLL_COMPLETE", { trackKind: kind, name: r.name }, true, `strong hit on ${parsed.moveName}`);
+      return `${verb} “${r.name}” (strong hit — auto-completed)`;
+    }
+    this._auditWrite("ROLL_COMPLETE", { trackKind: kind, name: target?.name }, false, r?.error);
+    return "";
+  },
+
+  /**
    * Is this the "Reach a Milestone" move?  No dice — just marks progress on
    * the active vow by its rank.
    */
@@ -5691,13 +5877,26 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
     const combat    = this._isCombatMove(parsed?.moveName);
     const journey   = this._isJourneyMove(parsed?.moveName);
     const milestone = this._isMilestoneMove(parsed?.moveName);
-    if (!combat && !journey && !milestone) return effects;
+    // (v0.10.27) Did _autoCompletionFlow already finish a track this turn? Only
+    // a STRONG hit on a completion move auto-completes; in that case drop any
+    // AI-emitted completion directive to avoid a confusing double-completion
+    // notification. (On weak/miss nothing was completed, so we leave the
+    // effects alone — though the prompt steers the AI away from completing.)
+    const autoCompleted = this._completionMoveKind(parsed?.moveName)
+      && /auto-completed/.test(String(autoSummary || ""));
+    if (!combat && !journey && !milestone && !autoCompleted) return effects;
     return (effects || []).filter(e => {
       if (combat && e.kind === "initiative") { this._dbg("→ dropping redundant initiative effect (auto-applied)"); return false; }
       if (e.kind === "progress")             { this._dbg("→ dropping redundant progress effect (auto-applied)"); return false; }
       // The journey track is opened deterministically by _autoJourneyFlow, so
       // drop any AI-emitted create_journey to avoid a duplicate track.
       if (journey && e.kind === "create_journey") { this._dbg("→ dropping redundant create_journey effect (auto-applied)"); return false; }
+      // A completion move already auto-finished the track — drop redundant
+      // completion directives (both the legacy complete_*/end_combat effects
+      // and the new MARK_COMPLETE write directive).
+      if (autoCompleted && (e.kind === "complete_track" || e.kind === "end_combat" || e.kind === "mark_complete")) {
+        this._dbg("→ dropping redundant completion effect (auto-completed on strong hit)"); return false;
+      }
       return true;
     });
   },
@@ -5715,7 +5914,10 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
   // first — markProgress() resolves the track by its title. This is separate
   // from the post-roll path (_narrateOutcome), which applies effects directly
   // and filters auto-applied progress, so there is no double-marking risk.
-  _TRACK_LIFECYCLE_KINDS: ["create_journey", "create_vow", "create_combat", "complete_track", "end_combat", "progress"],
+  // (v0.10.27) The explicit write directives (mark_complete / add_progress /
+  // set_progress) are track-lifecycle operations too, so the conversational
+  // channels apply them without needing a dice roll first.
+  _TRACK_LIFECYCLE_KINDS: ["create_journey", "create_vow", "create_combat", "complete_track", "end_combat", "progress", "mark_complete", "add_progress", "set_progress"],
 
   /**
    * (v0.10.6) Parse a conversational reply for [[EFFECT:…]] directives and
@@ -5884,12 +6086,29 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
                   this._notifyCombat(`🏳 Closed stale combat: ${tidy.closed.join(", ")}`);
                 }
               }
+              // Opportunistic, idempotent legacy repair: migrate any pre-existing
+              // combat tracks still stored with the broken subtype "foe" (which
+              // rendered the raw "IRONSWORN.ITEM.SubtypeFoe" key on the character
+              // sheet) to subtype "progress". Runs once per reply, on a write path
+              // only. Safe no-op when nothing needs fixing.
+              try {
+                const repair = await IronswornController.normalizeCombatTrackSubtypes(actor);
+                if (repair?.fixed?.length) {
+                  this._dbg(`→ migrated ${repair.fixed.length} legacy combat track label(s): ${repair.fixed.join(", ")}`);
+                }
+              } catch (e) {
+                console.warn(LOG_PREFIX, "normalizeCombatTrackSubtypes failed", e);
+              }
             }
             r = await IronswornController.createProgressTrack(actor, eff.name, "combat", rank);
             if (r?.ok) {
               const tag = source === "compendium" ? " [from compendium]" : source === "custom" ? " [custom]" : "";
               applied.push(`⚔ began combat “${eff.name}” [${rank}]${tag}`);
               this._notifyCombat(`⚔ Combat track created: ${eff.name} (${rank}${source === "compendium" ? ", official" : ""})`);
+              // Phase 2 (story-arc tracking): a freshly-started fight is the
+              // active combat — remember it so context markers and roll
+              // integration target the right foe. Best-effort.
+              try { await IronswornController.setActiveCombat(actor, r.id); } catch (_) {}
               // Optional GM advisory: a REGULAR foe (not flagged as an
               // important/unique narrative foe) that isn't in the official foe
               // compendia is likely an invented name. Whisper a gentle heads-up
@@ -5959,6 +6178,9 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
             if (r?.ok) {
               applied.push(`ended combat “${r.name}”`);
               this._notifyCombat(`🏆 Combat ended: ${r.name}`);
+              // Phase 2 (story-arc tracking): the fight is over — clear the
+              // active-combat flag so stale state never lingers. Best-effort.
+              try { await IronswornController.clearActiveCombat(actor); } catch (_) {}
             }
             break;
           }
@@ -5981,6 +6203,78 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
                 `<strong>Could not mark complete:</strong> ${escapeHtml(r.error)}`,
                 { gmWhisper: true }
               );
+            }
+            break;
+          }
+
+          /* ---- v0.10.27 explicit progress-track WRITE directives ---- */
+          case "mark_complete": {
+            // [[MARK_COMPLETE:kind:Name]] — close a specific, named track. Fuzzy
+            // name match constrained to the directive's kind, so a slight
+            // paraphrase still resolves but we never close the wrong KIND.
+            const track = IronswornController.findTrackFuzzy(actor, eff.name, eff.trackKind);
+            if (!track) {
+              this._auditWrite("MARK_COMPLETE", eff, false, `no ${eff.trackKind} track matching "${eff.name}"`);
+              await Chat.postSystem(
+                `<strong>🤖 Skald could not mark complete:</strong> no ${escapeHtml(eff.trackKind)} track matching “${escapeHtml(eff.name)}”.`,
+                { gmWhisper: true }
+              );
+              break;
+            }
+            if (foundry.utils.getProperty(track, "system.completed")) {
+              this._auditWrite("MARK_COMPLETE", eff, true, `"${track.name}" already complete (no-op)`);
+              break; // idempotent — nothing to do, no noisy notification
+            }
+            r = (eff.trackKind === "combat")
+              ? await IronswornController.completeTrack(actor, track.id)
+              : await IronswornController.completeTrackSmart(actor, track.id, eff.trackKind);
+            if (r?.ok) {
+              if (eff.trackKind === "combat") { try { await IronswornController.clearActiveCombat(actor); } catch (_) {} }
+              applied.push(`completed “${r.name}”`);
+              this._auditWrite("MARK_COMPLETE", eff, true, `completed "${r.name}"`);
+              await Chat.postSystem(`<em>🤖 Skald marked “${escapeHtml(r.name)}” complete.</em>`, { gmWhisper: true });
+            } else {
+              this._auditWrite("MARK_COMPLETE", eff, false, r?.error);
+            }
+            break;
+          }
+          case "add_progress": {
+            // [[ADD_PROGRESS:kind:Name:N]] — add N boxes (N×4 ticks).
+            const track = IronswornController.findTrackFuzzy(actor, eff.name, eff.trackKind);
+            if (!track) {
+              this._auditWrite("ADD_PROGRESS", eff, false, `no ${eff.trackKind} track matching "${eff.name}"`);
+              await Chat.postSystem(
+                `<strong>🤖 Skald could not add progress:</strong> no ${escapeHtml(eff.trackKind)} track matching “${escapeHtml(eff.name)}”.`,
+                { gmWhisper: true }
+              );
+              break;
+            }
+            r = await IronswornController.markProgress(actor, track.id, Math.round(Number(eff.boxes) || 0) * 4);
+            if (r?.ok) {
+              applied.push(`+${eff.boxes} progress on “${r.track}” (${r.boxes}/10)`);
+              this._auditWrite("ADD_PROGRESS", eff, true, `"${r.track}" now ${r.boxes}/10`);
+            } else {
+              this._auditWrite("ADD_PROGRESS", eff, false, r?.error);
+            }
+            break;
+          }
+          case "set_progress": {
+            // [[SET_PROGRESS:kind:Name:N]] — set track to exactly N boxes.
+            const track = IronswornController.findTrackFuzzy(actor, eff.name, eff.trackKind);
+            if (!track) {
+              this._auditWrite("SET_PROGRESS", eff, false, `no ${eff.trackKind} track matching "${eff.name}"`);
+              await Chat.postSystem(
+                `<strong>🤖 Skald could not set progress:</strong> no ${escapeHtml(eff.trackKind)} track matching “${escapeHtml(eff.name)}”.`,
+                { gmWhisper: true }
+              );
+              break;
+            }
+            r = await IronswornController.setProgress(actor, track.id, eff.boxes);
+            if (r?.ok) {
+              applied.push(`set “${r.track}” to ${r.boxes}/10`);
+              this._auditWrite("SET_PROGRESS", eff, true, `"${r.track}" set to ${r.boxes}/10`);
+            } else {
+              this._auditWrite("SET_PROGRESS", eff, false, r?.error);
             }
             break;
           }
