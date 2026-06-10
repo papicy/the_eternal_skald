@@ -950,6 +950,17 @@ const Settings = {
       default: true
     });
 
+    /* ---- Player move declarations (v0.10.33) ---- */
+
+    game.settings.register(MODULE_ID, "interceptMoveDeclarations", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.interceptMoveDeclarations.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.interceptMoveDeclarations.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true
+    });
+
     game.settings.register(MODULE_ID, "autoNarrateXp", {
       name: game.i18n.localize("ETERNAL_SKALD.settings.autoNarrateXp.name"),
       hint: game.i18n.localize("ETERNAL_SKALD.settings.autoNarrateXp.hint"),
@@ -4054,6 +4065,33 @@ const Commands = {
     if (!args) {
       return Chat.postSystem(game.i18n.localize("ETERNAL_SKALD.errors.emptySkald"));
     }
+
+    // ── Player move declaration (v0.10.33) ──────────────────────────────
+    // Moves are the PLAYER's mechanical choice, not the AI's interpretation.
+    // If the player simply NAMES an official Ironsworn move (e.g. "!Strike",
+    // "!Face Danger", "!I want to Secure an Advantage +iron"), we open that
+    // move's roll dialog and STOP — we do NOT generate a narrative
+    // continuation. The story resumes only AFTER the dice resolve, via the
+    // existing post-roll auto-narration (Integration.onIronswornRoll →
+    // _narrateOutcome). Gated by a setting (default ON) and only when the
+    // Ironsworn integration is active (otherwise there is no dialog to open,
+    // so we fall through to ordinary narration). Defensive: detection never
+    // throws and any failure simply falls back to narration.
+    try {
+      if ((Settings.get("interceptMoveDeclarations") ?? true) && Integration.active()) {
+        const decl = IronswornController.detectMoveDeclaration?.(args);
+        if (decl?.move?.name) {
+          console.log(`${LOG_PREFIX} [skald] move declaration detected: "${decl.move.name}"${decl.stat ? ` +${decl.stat}` : ""} (confidence=${decl.confidence}) — opening roll dialog, suppressing narration`);
+          // doTriggerMove records intent (for post-roll narration) and opens
+          // the system's official pre-roll dialog (progress/milestone-aware).
+          await Integration.doTriggerMove(decl.move.name, decl.stat || undefined);
+          return; // STOP — player drives the roll; no AI narration here.
+        }
+      }
+    } catch (e) {
+      console.warn(LOG_PREFIX, "[skald] move-declaration interception failed — falling back to narration", e);
+    }
+
     return runConversation("general", args, {
       task: "Respond to the user as the Skald. If they ask a rules question, answer clearly; if they invite narration, narrate. If the fiction calls for a dice roll, name the appropriate Ironsworn move naturally inside your narration prose (written exactly as it appears in the move list) so it reads as part of the story — do NOT use a [[MOVE:…]] directive or a separate suggestion line.",
       allowMoves: true,

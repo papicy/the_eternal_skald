@@ -2672,6 +2672,125 @@ export const IronswornController = {
     return MOVE_CATALOG.find(m => cleaned && m.name.toLowerCase().includes(cleaned)) ?? null;
   },
 
+  /**
+   * Decide whether a free-form player message is a MOVE DECLARATION — i.e. the
+   * player naming an official Ironsworn move they wish to make right now (e.g.
+   * "Face Danger", "I want to Strike", "Secure an Advantage +iron") — as
+   * opposed to a narrative request, rules question, or conversational prompt.
+   *
+   * This powers the "player agency" rule (v0.10.33): a declared move is the
+   * PLAYER's mechanical choice, so it should open the move's roll dialog and
+   * STOP — the story only continues AFTER the dice resolve (handled by the
+   * existing post-roll auto-narration). It must NOT trigger AI narrative.
+   *
+   * The matcher is deliberately CONSERVATIVE to avoid hijacking genuine
+   * narration requests:
+   *   • Anything containing "?" or starting with an interrogative / narration
+   *     verb (what/how/should/tell/describe/continue …) is never a declaration.
+   *   • An optional trailing stat ("+iron", "with wits", "using edge") is
+   *     parsed and validated against the move's rollable stats.
+   *   • Leading intention phrases ("I want to", "let me", "roll", "make a" …)
+   *     are stripped — but exact-match is checked at every strip level first,
+   *     so a move whose own name starts with such a word ("Make Camp") is not
+   *     accidentally gutted.
+   *   • EXACT name matches (after stripping) are accepted for ANY move.
+   *   • PREFIX matches ("Secure an Advantage over the bandit") are accepted
+   *     ONLY for multi-word move names with a short, non-conjunction trailing
+   *     target — single-word moves (Strike, Heal, Clash…) require an exact
+   *     match so common verbs used narratively are not misread.
+   *
+   * Pure & defensive: never throws, returns `null` on no/low confidence.
+   *
+   * @param {string} text  The player's free-form prompt (the part after "!").
+   * @returns {{move: object, stat: string, confidence: "exact"|"prefix"}|null}
+   */
+  detectMoveDeclaration(text) {
+    try {
+      if (!text || typeof text !== "string") return null;
+      let norm = text.trim();
+      if (!norm) return null;
+      // Questions / narration requests are never move declarations.
+      if (norm.includes("?")) return null;
+      norm = norm.toLowerCase().replace(/\s+/g, " ").trim();
+      // Drop surrounding quotes.
+      norm = norm.replace(/^["'“”‘’`]+|["'“”‘’`]+$/g, "").trim();
+      if (!norm) return null;
+      // Reject clear interrogatives & narration-seeking verbs up front. We
+      // deliberately omit auxiliary verbs (do/can/should/will…) here because
+      // they double as imperative intention words ("do a Strike") and are
+      // handled by the LEAD stripping below; genuine questions almost always
+      // carry a "?" (already rejected) or a leading interrogative kept here.
+      const NARRATION_LEAD = /^(what|how|why|where|who|when|which|whose|tell|describe|narrate|explain|continue|go on|and then|then what|give|show|help|suggest)\b/;
+      if (NARRATION_LEAD.test(norm)) return null;
+
+      // Parse an optional trailing stat ("+iron" / "with iron" / "using wits").
+      // No leading \b before "+": a preceding space is a non-word/non-word
+      // boundary, so "\b\+" would never match "danger +iron".
+      let stat = "";
+      const statMatch = norm.match(/(?:\+\s*|\bwith\s+|\busing\s+)(edge|heart|iron|shadow|wits)\b\.?$/);
+      if (statMatch) {
+        stat = statMatch[1];
+        norm = norm.slice(0, statMatch.index).trim();
+      }
+
+      // Build progressively-stripped candidate strings. Exact match is tested
+      // against EARLIER (less-stripped) candidates first so a move whose name
+      // legitimately begins with an intention word is matched before that word
+      // is stripped away.
+      const LEAD = /^(?:i(?:'?m)? going to|i am going to|i'?m gonna|i'?m about to|going to|gonna|i want to|i'?d like to|i would like to|i wish to|i need to|let me|lets|let's|i'?ll|i will|i'?d|i shall|i|please|can i|may i|time to|now i|roll(?: the| a)?|make(?: the| a)?|do(?: the| a)?|use(?: the| a)?|trigger(?: the| a)?|attempt(?: to)?|try(?: to| and)?|invoke)\s+/;
+      const candidates = [];
+      const seen = new Set();
+      const tidy = (c) => String(c)
+        .replace(/\s+move$/, "")        // trailing "… move"
+        .replace(/[.!,;:]+$/, "")        // trailing punctuation
+        .trim();
+      const pushCand = (c) => {
+        const v = tidy(c);
+        if (v && !seen.has(v)) { seen.add(v); candidates.push(v); }
+      };
+      pushCand(norm);
+      let cur = norm;
+      for (let i = 0; i < 2; i++) {
+        const next = cur.replace(LEAD, "").trim();
+        if (next === cur) break;
+        cur = next;
+        pushCand(cur);
+      }
+
+      const pickStat = (m) => (stat && Array.isArray(m.stats) && m.stats.includes(stat)) ? stat : "";
+
+      // 1. EXACT match (any move), least-stripped candidate first.
+      for (const cand of candidates) {
+        for (const m of MOVE_CATALOG) {
+          if (cand === m.name.toLowerCase()) {
+            return { move: m, stat: pickStat(m), confidence: "exact" };
+          }
+        }
+      }
+
+      // 2. PREFIX match — multi-word moves only, short non-conjunction target.
+      const CONNECTOR = /^(and|then|because|while|as|so|but|or)\b/;
+      for (const cand of candidates) {
+        for (const m of MOVE_CATALOG) {
+          const lc = m.name.toLowerCase();
+          if (!lc.includes(" ")) continue;            // single-word → exact only
+          if (cand.startsWith(lc + " ")) {
+            const rest = cand.slice(lc.length).trim();
+            if (CONNECTOR.test(rest)) continue;        // looks like narration
+            if (rest.split(/\s+/).length <= 4) {
+              return { move: m, stat: pickStat(m), confidence: "prefix" };
+            }
+          }
+        }
+      }
+
+      return null;
+    } catch (e) {
+      warn("detectMoveDeclaration failed:", e?.message ?? e);
+      return null;
+    }
+  },
+
   /** Choose the first Item type the system actually registers. */
   _pickItemType(candidates) {
     const registered = Object.keys(CONFIG?.Item?.dataModels ?? {});
