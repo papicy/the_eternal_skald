@@ -1038,6 +1038,27 @@ const Settings = {
       default: true
     });
 
+    /* ---- Full sheet modification (v0.10.36 — Phase 2) ----
+     * Gate for the AI's direct character-sheet WRITES: impacts/conditions
+     * and base stats. Progress/momentum/harm/supply remain governed by
+     * aiAppliesEffects above; this controls only the heavier sheet edits so
+     * a table that wants narration-only condition tracking can opt out.
+     * Effect application already runs GM-side (the narration pipeline is
+     * GM-gated), so this is an additional, explicit safety switch. */
+    game.settings.register(MODULE_ID, "aiModifiesSheet", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.aiModifiesSheet.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.aiModifiesSheet.hint"),
+      scope: "world",
+      config: true,
+      type: String,
+      choices: {
+        "off":      "Off — never change impacts or stats",
+        "impacts":  "Impacts only — toggle conditions, never edit stats",
+        "full":     "Full — impacts and base stats"
+      },
+      default: "impacts"
+    });
+
     /* ---- Combat automation (v0.3.0) ---- */
 
     game.settings.register(MODULE_ID, "autoCreateCombatTracks", {
@@ -2132,6 +2153,19 @@ hit / miss / match):
         state). With no tick/rank suffix it marks one tick-set by the track's
         rank. Prefer this over a bare "progress" when you know the track name.
    [[EFFECT: oracle <Oracle Name>]] (ask the system to roll an oracle)
+   [[EFFECT: toggle_impact <condition>]]   (flip a condition/impact on or off)
+   [[EFFECT: set_impact <condition> <on|off>]]  (set a condition explicitly)
+        Mark or clear a CONDITION / IMPACT on the active character when the
+        fiction inflicts or heals one. Valid conditions: wounded, shaken,
+        unprepared, encumbered, maimed, corrupted, cursed, tormented,
+        battered, doomed, permanently harmed, traumatized, indebted.
+        e.g. a brutal miss in combat → [[EFFECT: set_impact wounded on]];
+        a long rest that mends the wound → [[EFFECT: set_impact wounded off]].
+        Only touch impacts the fiction clearly justifies — never pile them on.
+   [[EFFECT: set_stat <edge|heart|iron|shadow|wits> <0-5>]]
+        RARE. Permanently set a base stat (only on a major character-defining
+        beat, and only if the table has enabled full sheet edits). Most play
+        never changes a stat — prefer momentum/progress/impacts instead.
 Outcome semantics: STRONG HIT = you get what you want, often +momentum.
 WEAK HIT = you succeed at a cost (lose supply/momentum, partial info).
 MISS = you fail and "pay the price" (harm, stress, lost ground, a twist).
@@ -5367,6 +5401,46 @@ const Integration = {
     if (firstWord === "harm")   { const n = parseInt(body.slice(4), 10); return Number.isFinite(n) ? { kind: "harm",   value: Math.abs(n) } : null; }
     if (firstWord === "stress") { const n = parseInt(body.slice(6), 10); return Number.isFinite(n) ? { kind: "stress", value: Math.abs(n) } : null; }
     if (firstWord === "supply") { const n = parseInt(body.slice(6), 10); return Number.isFinite(n) ? { kind: "supply", value: n } : null; }
+
+    // ---- Impact / condition toggles (v0.10.36 — Phase 2) ----
+    // [[EFFECT: toggle_impact <type>]]        — flip a condition on/off
+    // [[EFFECT: set_impact <type> <on|off>]]  — set explicitly
+    // [[EFFECT: clear_impact <type>]]         — clear a condition
+    // <type> may be loose ("wounded", "permanently harmed", "in debt") —
+    // the controller canonicalizes it. Multi-word types are supported.
+    if (firstWord === "toggle_impact" || lc.startsWith("toggle impact")) {
+      const rest = body.replace(/^toggle[_\s]impact/i, "").trim();
+      return rest ? { kind: "toggle_impact", impact: rest } : null;
+    }
+    if (firstWord === "clear_impact" || lc.startsWith("clear impact")) {
+      const rest = body.replace(/^clear[_\s]impact/i, "").trim();
+      return rest ? { kind: "set_impact", impact: rest, on: false } : null;
+    }
+    if (firstWord === "set_impact" || lc.startsWith("set impact")) {
+      const rest = body.replace(/^set[_\s]impact/i, "").trim();
+      // Trailing on/off|true/false|clear toggles the desired state; default ON.
+      const tm = rest.match(/\b(on|off|true|false|set|clear|add|remove)\s*$/i);
+      let on = true;
+      let name = rest;
+      if (tm) {
+        const word = tm[1].toLowerCase();
+        on = ["on", "true", "set", "add"].includes(word);
+        name = rest.slice(0, tm.index).trim();
+      }
+      return name ? { kind: "set_impact", impact: name, on } : null;
+    }
+
+    // ---- Base-stat set (v0.10.36 — Phase 2) ----
+    // [[EFFECT: set_stat <edge|heart|iron|shadow|wits> <0-5>]]
+    if (firstWord === "set_stat" || lc.startsWith("set stat")) {
+      const rest = body.replace(/^set[_\s]stat/i, "").trim();
+      const sm = rest.match(/^([a-z]+)\D*([0-9]+)/i);
+      if (!sm) return null;
+      const stat = sm[1].toLowerCase();
+      const value = parseInt(sm[2], 10);
+      if (!Number.isFinite(value)) return null;
+      return { kind: "set_stat", stat, value };
+    }
     // "progress <Track Name> <+N | rank>" and its by-title alias
     // "mark_progress <Track Title> [+N | rank]" / 'mark_progress "Track Title"'.
     // mark_progress is meant for advancing a NAMED vow/journey from the
@@ -6985,6 +7059,51 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
             r = await IronswornController.adjustSupply(actor, eff.value);
             if (r?.ok) applied.push(`supply ${eff.value >= 0 ? "+" : ""}${eff.value}`);
             break;
+          case "toggle_impact":
+          case "set_impact": {
+            // (v0.10.36 — Phase 2) Toggle/set a condition/impact. Gated by the
+            // aiModifiesSheet setting ("impacts" or "full" permit it). Runs
+            // GM-side via actor.update(); bounded + idempotent in the controller.
+            const sheetMode = Settings.get("aiModifiesSheet") ?? "impacts";
+            if (sheetMode === "off") {
+              this._auditWrite("TOGGLE_IMPACT", { name: eff.impact }, false, "disabled (aiModifiesSheet=off)");
+              break;
+            }
+            if (!actor) { await this._warnNoActor("change a condition", eff.impact); break; }
+            r = (eff.kind === "toggle_impact")
+              ? await IronswornController.toggleImpact(actor, eff.impact)
+              : await IronswornController.setImpact(actor, eff.impact, eff.on);
+            if (r?.ok && !r.noop) {
+              const verb = r.state ? "marked" : "cleared";
+              applied.push(`${verb} ${r.impact}`);
+              this._auditWrite("TOGGLE_IMPACT", { name: r.impact }, true, `${verb} (${r.state})`);
+            } else if (r?.noop) {
+              this._auditWrite("TOGGLE_IMPACT", { name: r.impact }, true, "no-op (already in state)");
+            } else {
+              this._auditWrite("TOGGLE_IMPACT", { name: eff.impact }, false, r?.error);
+            }
+            break;
+          }
+          case "set_stat": {
+            // (v0.10.36 — Phase 2) Set a base stat (0–5). Only permitted when
+            // aiModifiesSheet is "full" — stat edits are rare and heavy.
+            const sheetMode = Settings.get("aiModifiesSheet") ?? "impacts";
+            if (sheetMode !== "full") {
+              this._auditWrite("SET_STAT", { name: eff.stat, boxes: eff.value }, false, `disabled (aiModifiesSheet=${sheetMode})`);
+              break;
+            }
+            if (!actor) { await this._warnNoActor("change a stat", eff.stat); break; }
+            r = await IronswornController.setStat(actor, eff.stat, eff.value);
+            if (r?.ok && !r.noop) {
+              applied.push(`${r.stat} ${r.from}→${r.to}`);
+              this._auditWrite("SET_STAT", { name: r.stat, boxes: r.to }, true, `${r.from}→${r.to}`);
+            } else if (r?.noop) {
+              this._auditWrite("SET_STAT", { name: r.stat, boxes: r.to }, true, "no-op (unchanged)");
+            } else {
+              this._auditWrite("SET_STAT", { name: eff.stat, boxes: eff.value }, false, r?.error);
+            }
+            break;
+          }
           case "progress":
             r = eff.byRank
               ? await IronswornController.markProgressByRank(actor, eff.track)

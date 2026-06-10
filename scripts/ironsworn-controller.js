@@ -207,10 +207,48 @@ function dsRulesPackage(dsid) {
 /* The five Ironsworn stats + the standard condition meters. */
 const STAT_KEYS  = ["edge", "heart", "iron", "shadow", "wits"];
 const METER_KEYS = ["health", "spirit", "supply", "momentum"];
+
+/* (v0.10.36 — Phase 2) The COMPLETE set of impact / debility flags the
+ * foundry-ironsworn character data model carries under `system.debility.*`.
+ * These are booleans on the character. The list mirrors template.json
+ * exactly (classic conditions + Starforged/Sundered impacts), so the AI
+ * snapshot and the toggle write path cover every condition the sheet shows.
+ * `custom1`/`custom2` are the two user-defined slots (with paired *name
+ * string fields) and are read but not written by the AI toggle path. */
 const DEBILITY_KEYS = [
   "wounded", "shaken", "unprepared", "encumbered", "maimed",
-  "corrupted", "cursed", "tormented", "battered", "doomed"
+  "corrupted", "cursed", "tormented", "battered", "doomed",
+  "permanentlyharmed", "traumatized", "indebted"
 ];
+
+/* Canonical impact aliases → the real `system.debility.<key>`. Lets the AI
+ * (and players) name an impact loosely ("harmed", "permanently harmed",
+ * "in debt") and still hit the correct flag. Keys are normalized to lower
+ * case with spaces/underscores/hyphens stripped before lookup. */
+const IMPACT_ALIASES = Object.freeze({
+  harmed:            "wounded",
+  injured:           "wounded",
+  hurt:              "wounded",
+  rattled:           "shaken",
+  unready:           "unprepared",
+  burdened:          "encumbered",
+  overloaded:        "encumbered",
+  crippled:          "maimed",
+  permanentlyharmed: "permanentlyharmed",
+  permaharmed:       "permanentlyharmed",
+  traumatised:       "traumatized",
+  indebt:            "indebted",
+  debt:              "indebted",
+  bruised:           "battered"
+});
+
+/** Normalize an impact name/alias to its canonical debility key, or null. */
+function canonicalImpactKey(name) {
+  const k = String(name ?? "").toLowerCase().replace(/[\s_-]+/g, "");
+  if (DEBILITY_KEYS.includes(k)) return k;
+  if (IMPACT_ALIASES[k]) return IMPACT_ALIASES[k];
+  return null;
+}
 
 /* =====================================================================
  *  THE CONTROLLER
@@ -333,7 +371,9 @@ export const IronswornController = {
     return out;
   },
 
-  /** Active debilities (conditions/banes/burdens) as a list of keys. */
+  /** Active debilities (conditions/banes/burdens/impacts) as a list of keys.
+   *  Custom impact slots (custom1/custom2) are surfaced under their
+   *  player-defined label when set, falling back to the slot key. */
   getDebilities(actor) {
     if (!actor) return [];
     const active = [];
@@ -341,14 +381,55 @@ export const IronswornController = {
       const v = foundry.utils.getProperty(actor, `system.debility.${key}`);
       if (v === true) active.push(key);
     }
-    // Some data models nest condition flags differently — best effort.
+    // Custom impact slots — surface by their authored name when enabled.
     const debilityObj = foundry.utils.getProperty(actor, "system.debility");
     if (debilityObj && typeof debilityObj === "object") {
+      for (const slot of ["custom1", "custom2"]) {
+        if (debilityObj[slot] === true) {
+          const label = String(debilityObj[`${slot}name`] ?? "").trim() || slot;
+          if (!active.includes(label)) active.push(label);
+        }
+      }
+      // Any other true flag not already covered (forward-compatible).
       for (const [k, v] of Object.entries(debilityObj)) {
-        if (v === true && !active.includes(k)) active.push(k);
+        if (v === true && !/name$/i.test(k) && !active.includes(k) &&
+            !["custom1", "custom2"].includes(k)) {
+          active.push(k);
+        }
       }
     }
     return active;
+  },
+
+  /**
+   * (v0.10.36 — Phase 2) Read the character's BONDS. foundry-ironsworn stores
+   * bonds inside a single embedded Item of `type === "bondset"`, whose
+   * `system.bonds` is an array of `{ name, notes }`. The character's
+   * `system.legacies.bonds` ProgressTicks counter (Starforged) is reported
+   * separately by {@link getExperience}; this returns the narrative bond
+   * entries the player has forged. READ-ONLY, synchronous, null-guarded.
+   *
+   * @param {Actor} actor
+   * @param {{limit?:number}} [opts]
+   * @returns {Array<{name:string, notes:string}>} possibly empty, never null.
+   */
+  getBonds(actor, { limit = 20 } = {}) {
+    if (!actor?.items) return [];
+    const out = [];
+    for (const item of actor.items) {
+      if (item?.type !== "bondset") continue;
+      const bonds = foundry.utils.getProperty(item, "system.bonds");
+      if (!Array.isArray(bonds)) continue;
+      for (const b of bonds) {
+        const name = String(b?.name ?? "").trim();
+        if (!name) continue;
+        // Strip HTML from notes so the AI snapshot stays plain text.
+        const notes = String(b?.notes ?? "").replace(/<[^>]*>/g, "").trim();
+        out.push({ name, notes });
+        if (out.length >= limit) return out;
+      }
+    }
+    return out;
   },
 
   /**
@@ -387,18 +468,33 @@ export const IronswornController = {
       const abilities = foundry.utils.getProperty(item, "system.abilities");
       const list = Array.isArray(abilities) ? abilities : [];
       const unlocked = list.filter(a => a?.enabled === true).length;
+      // (v0.10.36 — Phase 2) Surface the TEXT of each enabled ability so the
+      // AI knows what the asset actually lets the character DO, not just how
+      // many boxes are ticked. HTML is stripped and each line trimmed to keep
+      // the snapshot token-efficient.
+      const enabledAbilities = list
+        .filter(a => a?.enabled === true)
+        .map(a => String(a?.description ?? "").replace(/<[^>]*>/g, "").trim())
+        .filter(Boolean)
+        .map(d => (d.length > 220 ? d.slice(0, 217) + "…" : d));
       const track = foundry.utils.getProperty(item, "system.track") ?? null;
       const hasTrack = track && typeof track === "object" && track.enabled === true;
+      // The asset condition meter is stored as `current` in template.json;
+      // older data used `value`. Accept either so both schemas read cleanly.
+      const trackVal = (hasTrack && typeof track.current === "number") ? track.current
+                     : (hasTrack && typeof track.value === "number")   ? track.value
+                     : null;
       out.push({
         id: item.id,
         name: item.name,
         category: foundry.utils.getProperty(item, "system.category") ?? null,
         unlocked,
         total: list.length,
+        abilities: enabledAbilities,
         track: hasTrack
           ? {
               name: track.name || "track",
-              value: typeof track.value === "number" ? track.value : null,
+              value: trackVal,
               max: typeof track.max === "number" ? track.max : null
             }
           : null
@@ -1103,7 +1199,13 @@ export const IronswornController = {
 
     const meters = this.getMeters(actor);
     const meterStr = METER_KEYS
-      .map(k => meters[k] ? `${k} ${meters[k].value}` : null)
+      .map(k => {
+        const m = meters[k];
+        if (!m) return null;
+        // Show value/max so the AI respects the meter's ceiling (health/
+        // spirit/supply cap at 5; momentum at its momentumMax, default 10).
+        return (typeof m.max === "number") ? `${k} ${m.value}/${m.max}` : `${k} ${m.value}`;
+      })
       .filter(Boolean)
       .join(", ");
     if (meterStr) lines.push(`Meters: ${meterStr}`);
@@ -1185,6 +1287,23 @@ export const IronswornController = {
           ? `; ${a.track.name} ${a.track.value ?? "?"}${a.track.max != null ? `/${a.track.max}` : ""}`
           : "";
         lines.push(`  - ${a.name}${cat}${prog}${track}`);
+        // (v0.10.36 — Phase 2) List the enabled ability text so the AI knows
+        // the concrete capabilities this asset grants the character.
+        if (Array.isArray(a.abilities)) {
+          for (const ab of a.abilities) lines.push(`      • ${ab}`);
+        }
+      }
+    }
+
+    // (v0.10.36 — Phase 2) BONDS — the narrative connections the character has
+    // forged (foundry-ironsworn "bondset" item). Surfaced so the AI can honour
+    // existing relationships instead of inventing or contradicting them.
+    const bonds = this.getBonds(actor);
+    if (bonds.length) {
+      lines.push("Bonds:");
+      for (const b of bonds) {
+        const note = b.notes ? ` — ${b.notes.length > 160 ? b.notes.slice(0, 157) + "…" : b.notes}` : "";
+        lines.push(`  - ${b.name}${note}`);
       }
     }
 
@@ -1479,6 +1598,102 @@ export const IronswornController = {
     if (!meter) return { ok: false, error: "No supply meter found." };
     const next = absolute ? amount : meter.value + amount;
     return this._tryUpdateMeter(actor, "supply", Math.max(meter.min ?? 0, Math.min(meter.max ?? 5, next)));
+  },
+
+  /* =================================================================
+   *  STAT & IMPACT WRITES — Phase 2 (Full Sheet Modification)
+   *  -----------------------------------------------------------------
+   *  Safe, bounded, Document-API writes for the remaining mutable parts
+   *  of the character sheet: the five base stats and the impact /
+   *  debility flags. Everything funnels through actor.update() (never
+   *  direct mutation) so the system stays the source of truth and fires
+   *  its own hooks. Both methods are idempotent and fully guarded.
+   * ================================================================= */
+
+  /** Minimum/maximum a base stat (edge/heart/iron/shadow/wits) may hold.
+   *  Ironsworn character creation distributes 3/2/2/1/1, but the sheet's
+   *  number input allows 0–5, so we clamp to that conservative range. */
+  STAT_MIN: 0,
+  STAT_MAX: 5,
+
+  /** The complete list of canonical impact / debility keys (read-only). */
+  impactKeys() { return DEBILITY_KEYS.slice(); },
+
+  /** Resolve a loose impact name/alias to its canonical key, or null. */
+  resolveImpactKey(name) { return canonicalImpactKey(name); },
+
+  /**
+   * Set a base stat to an ABSOLUTE value (clamped 0–5). Stats are rarely
+   * changed in play, so this is deliberately an explicit set rather than a
+   * delta; callers wanting a relative change read getStat() first. Only
+   * writes when the path already exists and is numeric, so an unexpected
+   * data model degrades to a clear error rather than creating junk fields.
+   *
+   * @param {Actor}  actor
+   * @param {string} stat   one of edge|heart|iron|shadow|wits
+   * @param {number} value  desired value (clamped to 0–5)
+   * @returns {Promise<{ok:boolean, stat?:string, from?:number, to?:number, error?:string}>}
+   */
+  async setStat(actor, stat, value) {
+    if (!actor) return { ok: false, error: "No actor." };
+    const key = String(stat ?? "").toLowerCase().trim();
+    if (!STAT_KEYS.includes(key)) return { ok: false, error: `Unknown stat "${stat}".` };
+    const cur = this.getStat(actor, key);
+    if (typeof cur !== "number") return { ok: false, error: `Stat "${key}" not present on this character.` };
+    const n = Number(value);
+    if (!Number.isFinite(n)) return { ok: false, error: `Non-numeric value for "${key}".` };
+    const to = Math.max(this.STAT_MIN, Math.min(this.STAT_MAX, Math.round(n)));
+    if (to === cur) return { ok: true, stat: key, from: cur, to, noop: true };
+    try {
+      await actor.update({ [`system.${key}`]: to });
+      dbg(`setStat: ${key} ${cur} -> ${to}`);
+      return { ok: true, stat: key, from: cur, to };
+    } catch (e) {
+      return { ok: false, error: e?.message ?? String(e) };
+    }
+  },
+
+  /**
+   * Set an impact / debility flag ON or OFF. Accepts loose names/aliases
+   * ("harmed", "permanently harmed", "in debt") via canonicalImpactKey.
+   * Idempotent — a no-op when the flag is already in the requested state.
+   * Custom impact slots are read-only here (they carry a paired name field
+   * the player owns), so attempts to toggle them are rejected cleanly.
+   *
+   * @param {Actor}   actor
+   * @param {string}  impact  impact name or alias
+   * @param {boolean} on      true to set, false to clear
+   * @returns {Promise<{ok:boolean, impact?:string, state?:boolean, error?:string, noop?:boolean}>}
+   */
+  async setImpact(actor, impact, on) {
+    if (!actor) return { ok: false, error: "No actor." };
+    const key = canonicalImpactKey(impact);
+    if (!key) return { ok: false, error: `Unknown impact "${impact}".` };
+    const path = `system.debility.${key}`;
+    const cur = foundry.utils.getProperty(actor, path);
+    // Only write when the flag actually exists on the data model.
+    if (typeof cur !== "boolean") return { ok: false, error: `Impact "${key}" not present on this character.` };
+    const want = !!on;
+    if (cur === want) return { ok: true, impact: key, state: want, noop: true };
+    try {
+      await actor.update({ [path]: want });
+      dbg(`setImpact: ${key} -> ${want}`);
+      return { ok: true, impact: key, state: want };
+    } catch (e) {
+      return { ok: false, error: e?.message ?? String(e) };
+    }
+  },
+
+  /**
+   * Toggle an impact / debility flag (reads current state, flips it).
+   * Thin wrapper over setImpact for the AI's [[EFFECT: toggle_impact <type>]].
+   */
+  async toggleImpact(actor, impact) {
+    if (!actor) return { ok: false, error: "No actor." };
+    const key = canonicalImpactKey(impact);
+    if (!key) return { ok: false, error: `Unknown impact "${impact}".` };
+    const cur = foundry.utils.getProperty(actor, `system.debility.${key}`);
+    return this.setImpact(actor, key, !(cur === true));
   },
 
   /**
