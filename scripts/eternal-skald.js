@@ -111,6 +111,585 @@ const PROVIDER_PRESETS = {
   custom:     { endpoint: null }
 };
 
+/* ===================================================================== */
+/*  §1b  VISION-CAPABLE MODEL CATALOGUE  (v0.10.31)                        */
+/* ===================================================================== */
+/**
+ * Curated catalogue of vision-capable (image→text) models, embedded so the
+ * AI Model / Vision Model dropdowns can be populated and FILTERED by the
+ * selected AI Provider (see {@link PROVIDER_PRESETS}). Generated from the
+ * project's vision-model research (prices in USD per 1M input tokens; FREE
+ * models are price 0). This data is purely additive — it drives dropdown
+ * choices only and never changes how a request is sent (the {@link Client}
+ * still posts the chosen `modelName` verbatim), so existing custom model
+ * names keep working unchanged.
+ *
+ * Two source lists:
+ *   • {@link OPENROUTER_VISION_MODELS} — full `vendor/model` ids for the
+ *     OpenRouter aggregator (also the source for per-vendor OpenAI / Google
+ *     native lists, with the vendor prefix stripped).
+ *   • {@link ABACUS_VISION_MODELS} — bare ids for the Abacus AI RouteLLM
+ *     endpoint (the Skald's default provider).
+ *
+ * @see getModelsForProvider
+ * @see buildModelChoices
+ */
+const OPENROUTER_VISION_MODELS = [
+  { id: "nex-agi/nex-n2-pro:free", name: "Nex AGI: Nex-N2-Pro (free)", vendor: "nex-agi", price: 0.0 },
+  { id: "nvidia/nemotron-3.5-content-safety:free", name: "NVIDIA: Nemotron 3.5 Content Safety (free)", vendor: "nvidia", price: 0.0 },
+  { id: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", name: "NVIDIA: Nemotron 3 Nano Omni (free)", vendor: "nvidia", price: 0.0 },
+  { id: "moonshotai/kimi-k2.6:free", name: "MoonshotAI: Kimi K2.6 (free)", vendor: "moonshotai", price: 0.0 },
+  { id: "google/gemma-4-26b-a4b-it:free", name: "Google: Gemma 4 26B A4B  (free)", vendor: "google", price: 0.0 },
+  { id: "google/gemma-4-31b-it:free", name: "Google: Gemma 4 31B (free)", vendor: "google", price: 0.0 },
+  { id: "google/lyria-3-pro-preview", name: "Google: Lyria 3 Pro Preview", vendor: "google", price: 0.0 },
+  { id: "google/lyria-3-clip-preview", name: "Google: Lyria 3 Clip Preview", vendor: "google", price: 0.0 },
+  { id: "nvidia/nemotron-nano-12b-v2-vl:free", name: "NVIDIA: Nemotron Nano 12B 2 VL (free)", vendor: "nvidia", price: 0.0 },
+  { id: "google/gemma-3-4b-it", name: "Google: Gemma 3 4B", vendor: "google", price: 0.05 },
+  { id: "google/gemma-3-12b-it", name: "Google: Gemma 3 12B", vendor: "google", price: 0.05 },
+  { id: "openai/gpt-5-nano", name: "OpenAI: GPT-5 Nano", vendor: "openai", price: 0.05 },
+  { id: "amazon/nova-lite-v1", name: "Amazon: Nova Lite 1.0", vendor: "amazon", price: 0.06 },
+  { id: "google/gemma-4-26b-a4b-it", name: "Google: Gemma 4 26B A4B", vendor: "google", price: 0.06 },
+  { id: "qwen/qwen3.5-flash-02-23", name: "Qwen: Qwen3.5-Flash", vendor: "qwen", price: 0.07 },
+  { id: "mistralai/mistral-small-3.2-24b-instruct", name: "Mistral: Mistral Small 3.2 24B", vendor: "mistralai", price: 0.07 },
+  { id: "bytedance-seed/seed-1.6-flash", name: "ByteDance Seed: Seed 1.6 Flash", vendor: "bytedance-seed", price: 0.07 },
+  { id: "google/gemma-3-27b-it", name: "Google: Gemma 3 27B", vendor: "google", price: 0.08 },
+  { id: "qwen/qwen3-vl-8b-instruct", name: "Qwen: Qwen3 VL 8B Instruct", vendor: "qwen", price: 0.08 },
+  { id: "rekaai/reka-edge", name: "Reka Edge", vendor: "rekaai", price: 0.1 },
+  { id: "mistralai/ministral-3b-2512", name: "Mistral: Ministral 3 3B 2512", vendor: "mistralai", price: 0.1 },
+  { id: "qwen/qwen3.5-9b", name: "Qwen: Qwen3.5-9B", vendor: "qwen", price: 0.1 },
+  { id: "bytedance/ui-tars-1.5-7b", name: "ByteDance: UI-TARS 7B", vendor: "bytedance", price: 0.1 },
+  { id: "meta-llama/llama-4-scout", name: "Meta: Llama 4 Scout", vendor: "meta-llama", price: 0.1 },
+  { id: "bytedance-seed/seed-2.0-mini", name: "ByteDance Seed: Seed-2.0-Mini", vendor: "bytedance-seed", price: 0.1 },
+  { id: "google/gemini-2.5-flash-lite-preview-09-2025", name: "Google: Gemini 2.5 Flash Lite Preview 09-2025", vendor: "google", price: 0.1 },
+  { id: "google/gemini-2.5-flash-lite", name: "Google: Gemini 2.5 Flash Lite", vendor: "google", price: 0.1 },
+  { id: "openai/gpt-4.1-nano", name: "OpenAI: GPT-4.1 Nano", vendor: "openai", price: 0.1 },
+  { id: "qwen/qwen3-vl-32b-instruct", name: "Qwen: Qwen3 VL 32B Instruct", vendor: "qwen", price: 0.1 },
+  { id: "qwen/qwen3-vl-8b-thinking", name: "Qwen: Qwen3 VL 8B Thinking", vendor: "qwen", price: 0.12 },
+  { id: "google/gemma-4-31b-it", name: "Google: Gemma 4 31B", vendor: "google", price: 0.12 },
+  { id: "qwen/qwen3-vl-30b-a3b-instruct", name: "Qwen: Qwen3 VL 30B A3B Instruct", vendor: "qwen", price: 0.13 },
+  { id: "qwen/qwen3-vl-30b-a3b-thinking", name: "Qwen: Qwen3 VL 30B A3B Thinking", vendor: "qwen", price: 0.13 },
+  { id: "xiaomi/mimo-v2.5", name: "Xiaomi: MiMo-V2.5", vendor: "xiaomi", price: 0.14 },
+  { id: "qwen/qwen3.6-35b-a3b", name: "Qwen: Qwen3.6 35B A3B", vendor: "qwen", price: 0.14 },
+  { id: "qwen/qwen3.5-35b-a3b", name: "Qwen: Qwen3.5-35B-A3B", vendor: "qwen", price: 0.14 },
+  { id: "mistralai/ministral-8b-2512", name: "Mistral: Ministral 3 8B 2512", vendor: "mistralai", price: 0.15 },
+  { id: "mistralai/mistral-small-2603", name: "Mistral: Mistral Small 4", vendor: "mistralai", price: 0.15 },
+  { id: "meta-llama/llama-4-maverick", name: "Meta: Llama 4 Maverick", vendor: "meta-llama", price: 0.15 },
+  { id: "openai/gpt-4o-mini-2024-07-18", name: "OpenAI: GPT-4o-mini (2024-07-18)", vendor: "openai", price: 0.15 },
+  { id: "openai/gpt-4o-mini", name: "OpenAI: GPT-4o-mini", vendor: "openai", price: 0.15 },
+  { id: "perceptron/perceptron-mk1", name: "Perceptron: Perceptron Mk1", vendor: "perceptron", price: 0.15 },
+  { id: "meta-llama/llama-guard-4-12b", name: "Meta: Llama Guard 4 12B", vendor: "meta-llama", price: 0.18 },
+  { id: "qwen/qwen3.6-flash", name: "Qwen: Qwen3.6 Flash", vendor: "qwen", price: 0.19 },
+  { id: "qwen/qwen3.5-27b", name: "Qwen: Qwen3.5-27B", vendor: "qwen", price: 0.2 },
+  { id: "mistralai/ministral-14b-2512", name: "Mistral: Ministral 3 14B 2512", vendor: "mistralai", price: 0.2 },
+  { id: "qwen/qwen3-vl-235b-a22b-instruct", name: "Qwen: Qwen3 VL 235B A22B Instruct", vendor: "qwen", price: 0.2 },
+  { id: "minimax/minimax-01", name: "MiniMax: MiniMax-01", vendor: "minimax", price: 0.2 },
+  { id: "stepfun/step-3.7-flash", name: "StepFun: Step 3.7 Flash", vendor: "stepfun", price: 0.2 },
+  { id: "openai/gpt-5.4-nano", name: "OpenAI: GPT-5.4 Nano", vendor: "openai", price: 0.2 },
+  { id: "qwen/qwen2.5-vl-72b-instruct", name: "Qwen: Qwen2.5 VL 72B Instruct", vendor: "qwen", price: 0.25 },
+  { id: "anthropic/claude-3-haiku", name: "Anthropic: Claude 3 Haiku", vendor: "anthropic", price: 0.25 },
+  { id: "google/gemini-3.1-flash-lite", name: "Google: Gemini 3.1 Flash Lite", vendor: "google", price: 0.25 },
+  { id: "google/gemini-3.1-flash-lite-preview", name: "Google: Gemini 3.1 Flash Lite Preview", vendor: "google", price: 0.25 },
+  { id: "bytedance-seed/seed-2.0-lite", name: "ByteDance Seed: Seed-2.0-Lite", vendor: "bytedance-seed", price: 0.25 },
+  { id: "bytedance-seed/seed-1.6", name: "ByteDance Seed: Seed 1.6", vendor: "bytedance-seed", price: 0.25 },
+  { id: "openai/gpt-5.1-codex-mini", name: "OpenAI: GPT-5.1-Codex-Mini", vendor: "openai", price: 0.25 },
+  { id: "openai/gpt-5-mini", name: "OpenAI: GPT-5 Mini", vendor: "openai", price: 0.25 },
+  { id: "qwen/qwen3.5-plus-02-15", name: "Qwen: Qwen3.5 Plus 2026-02-15", vendor: "qwen", price: 0.26 },
+  { id: "qwen/qwen3.5-122b-a10b", name: "Qwen: Qwen3.5-122B-A10B", vendor: "qwen", price: 0.26 },
+  { id: "qwen/qwen3-vl-235b-a22b-thinking", name: "Qwen: Qwen3 VL 235B A22B Thinking", vendor: "qwen", price: 0.26 },
+  { id: "qwen/qwen3.6-27b", name: "Qwen: Qwen3.6 27B", vendor: "qwen", price: 0.29 },
+  { id: "z-ai/glm-4.6v", name: "Z.ai: GLM 4.6V", vendor: "z-ai", price: 0.3 },
+  { id: "minimax/minimax-m3", name: "MiniMax: MiniMax M3", vendor: "minimax", price: 0.3 },
+  { id: "qwen/qwen3.5-plus-20260420", name: "Qwen: Qwen3.5 Plus 2026-04-20", vendor: "qwen", price: 0.3 },
+  { id: "amazon/nova-2-lite-v1", name: "Amazon: Nova 2 Lite", vendor: "amazon", price: 0.3 },
+  { id: "google/gemini-2.5-flash-image", name: "Google: Nano Banana (Gemini 2.5 Flash Image)", vendor: "google", price: 0.3 },
+  { id: "google/gemini-2.5-flash", name: "Google: Gemini 2.5 Flash", vendor: "google", price: 0.3 },
+  { id: "qwen/qwen3.6-plus", name: "Qwen: Qwen3.6 Plus", vendor: "qwen", price: 0.33 },
+  { id: "meta-llama/llama-3.2-11b-vision-instruct", name: "Meta: Llama 3.2 11B Vision Instruct", vendor: "meta-llama", price: 0.34 },
+  { id: "mistralai/mistral-small-3.1-24b-instruct", name: "Mistral: Mistral Small 3.1 24B", vendor: "mistralai", price: 0.35 },
+  { id: "qwen/qwen3.5-397b-a17b", name: "Qwen: Qwen3.5 397B A17B", vendor: "qwen", price: 0.39 },
+  { id: "qwen/qwen3.7-plus", name: "Qwen: Qwen3.7 Plus", vendor: "qwen", price: 0.4 },
+  { id: "openai/gpt-4.1-mini", name: "OpenAI: GPT-4.1 Mini", vendor: "openai", price: 0.4 },
+  { id: "moonshotai/kimi-k2.5", name: "MoonshotAI: Kimi K2.5", vendor: "moonshotai", price: 0.4 },
+  { id: "mistralai/mistral-medium-3.1", name: "Mistral: Mistral Medium 3.1", vendor: "mistralai", price: 0.4 },
+  { id: "mistralai/mistral-medium-3", name: "Mistral: Mistral Medium 3", vendor: "mistralai", price: 0.4 },
+  { id: "baidu/ernie-4.5-vl-424b-a47b", name: "Baidu: ERNIE 4.5 VL 424B A47B", vendor: "baidu", price: 0.42 },
+  { id: "mistralai/mistral-large-2512", name: "Mistral: Mistral Large 3 2512", vendor: "mistralai", price: 0.5 },
+  { id: "google/gemini-3.1-flash-image-preview", name: "Google: Nano Banana 2 (Gemini 3.1 Flash Image Preview)", vendor: "google", price: 0.5 },
+  { id: "google/gemini-3-flash-preview", name: "Google: Gemini 3 Flash Preview", vendor: "google", price: 0.5 },
+  { id: "z-ai/glm-4.5v", name: "Z.ai: GLM 4.5V", vendor: "z-ai", price: 0.6 },
+  { id: "moonshotai/kimi-k2.6", name: "MoonshotAI: Kimi K2.6", vendor: "moonshotai", price: 0.68 },
+  { id: "openai/gpt-5.4-mini", name: "OpenAI: GPT-5.4 Mini", vendor: "openai", price: 0.75 },
+  { id: "amazon/nova-pro-v1", name: "Amazon: Nova Pro 1.0", vendor: "amazon", price: 0.8 },
+  { id: "anthropic/claude-3.5-haiku", name: "Anthropic: Claude 3.5 Haiku", vendor: "anthropic", price: 0.8 },
+  { id: "perplexity/sonar", name: "Perplexity: Sonar", vendor: "perplexity", price: 1.0 },
+  { id: "x-ai/grok-build-0.1", name: "xAI: Grok Build 0.1", vendor: "x-ai", price: 1.0 },
+  { id: "anthropic/claude-haiku-4.5", name: "Anthropic: Claude Haiku 4.5", vendor: "anthropic", price: 1.0 },
+  { id: "openai/o4-mini-high", name: "OpenAI: o4 Mini High", vendor: "openai", price: 1.1 },
+  { id: "openai/o4-mini", name: "OpenAI: o4 Mini", vendor: "openai", price: 1.1 },
+  { id: "x-ai/grok-4.3", name: "xAI: Grok 4.3", vendor: "x-ai", price: 1.25 },
+  { id: "x-ai/grok-4.20", name: "xAI: Grok 4.20", vendor: "x-ai", price: 1.25 },
+  { id: "openai/gpt-5.1-codex-max", name: "OpenAI: GPT-5.1-Codex-Max", vendor: "openai", price: 1.25 },
+  { id: "openai/gpt-5.1", name: "OpenAI: GPT-5.1", vendor: "openai", price: 1.25 },
+  { id: "openai/gpt-5.1-chat", name: "OpenAI: GPT-5.1 Chat", vendor: "openai", price: 1.25 },
+  { id: "openai/gpt-5.1-codex", name: "OpenAI: GPT-5.1-Codex", vendor: "openai", price: 1.25 },
+  { id: "openai/gpt-5-codex", name: "OpenAI: GPT-5 Codex", vendor: "openai", price: 1.25 },
+  { id: "openai/gpt-5-chat", name: "OpenAI: GPT-5 Chat", vendor: "openai", price: 1.25 },
+  { id: "openai/gpt-5", name: "OpenAI: GPT-5", vendor: "openai", price: 1.25 },
+  { id: "google/gemini-2.5-pro", name: "Google: Gemini 2.5 Pro", vendor: "google", price: 1.25 },
+  { id: "google/gemini-2.5-pro-preview", name: "Google: Gemini 2.5 Pro Preview 06-05", vendor: "google", price: 1.25 },
+  { id: "google/gemini-2.5-pro-preview-05-06", name: "Google: Gemini 2.5 Pro Preview 05-06", vendor: "google", price: 1.25 },
+  { id: "mistralai/mistral-medium-3-5", name: "Mistral: Mistral Medium 3.5", vendor: "mistralai", price: 1.5 },
+  { id: "google/gemini-3.5-flash", name: "Google: Gemini 3.5 Flash", vendor: "google", price: 1.5 },
+  { id: "openai/gpt-5.3-chat", name: "OpenAI: GPT-5.3 Chat", vendor: "openai", price: 1.75 },
+  { id: "openai/gpt-5.3-codex", name: "OpenAI: GPT-5.3-Codex", vendor: "openai", price: 1.75 },
+  { id: "openai/gpt-5.2-codex", name: "OpenAI: GPT-5.2-Codex", vendor: "openai", price: 1.75 },
+  { id: "openai/gpt-5.2-chat", name: "OpenAI: GPT-5.2 Chat", vendor: "openai", price: 1.75 },
+  { id: "openai/gpt-5.2", name: "OpenAI: GPT-5.2", vendor: "openai", price: 1.75 },
+  { id: "x-ai/grok-4.20-multi-agent", name: "xAI: Grok 4.20 Multi-Agent", vendor: "x-ai", price: 2.0 },
+  { id: "openai/o4-mini-deep-research", name: "OpenAI: o4 Mini Deep Research", vendor: "openai", price: 2.0 },
+  { id: "openai/o3", name: "OpenAI: o3", vendor: "openai", price: 2.0 },
+  { id: "openai/gpt-4.1", name: "OpenAI: GPT-4.1", vendor: "openai", price: 2.0 },
+  { id: "perplexity/sonar-reasoning-pro", name: "Perplexity: Sonar Reasoning Pro", vendor: "perplexity", price: 2.0 },
+  { id: "google/gemini-3.1-pro-preview-customtools", name: "Google: Gemini 3.1 Pro Preview Custom Tools", vendor: "google", price: 2.0 },
+  { id: "google/gemini-3.1-pro-preview", name: "Google: Gemini 3.1 Pro Preview", vendor: "google", price: 2.0 },
+  { id: "google/gemini-3-pro-image-preview", name: "Google: Nano Banana Pro (Gemini 3 Pro Image Preview)", vendor: "google", price: 2.0 },
+  { id: "openai/gpt-5-image-mini", name: "OpenAI: GPT-5 Image Mini", vendor: "openai", price: 2.5 },
+  { id: "openai/gpt-4o-2024-11-20", name: "OpenAI: GPT-4o (2024-11-20)", vendor: "openai", price: 2.5 },
+  { id: "openai/gpt-4o-2024-08-06", name: "OpenAI: GPT-4o (2024-08-06)", vendor: "openai", price: 2.5 },
+  { id: "openai/gpt-4o", name: "OpenAI: GPT-4o", vendor: "openai", price: 2.5 },
+  { id: "amazon/nova-premier-v1", name: "Amazon: Nova Premier 1.0", vendor: "amazon", price: 2.5 },
+  { id: "openai/gpt-5.4", name: "OpenAI: GPT-5.4", vendor: "openai", price: 2.5 },
+  { id: "anthropic/claude-sonnet-4.6", name: "Anthropic: Claude Sonnet 4.6", vendor: "anthropic", price: 3.0 },
+  { id: "perplexity/sonar-pro-search", name: "Perplexity: Sonar Pro Search", vendor: "perplexity", price: 3.0 },
+  { id: "anthropic/claude-sonnet-4.5", name: "Anthropic: Claude Sonnet 4.5", vendor: "anthropic", price: 3.0 },
+  { id: "anthropic/claude-sonnet-4", name: "Anthropic: Claude Sonnet 4", vendor: "anthropic", price: 3.0 },
+  { id: "perplexity/sonar-pro", name: "Perplexity: Sonar Pro", vendor: "perplexity", price: 3.0 },
+  { id: "openai/gpt-4o-2024-05-13", name: "OpenAI: GPT-4o (2024-05-13)", vendor: "openai", price: 5.0 },
+  { id: "anthropic/claude-opus-4.8", name: "Anthropic: Claude Opus 4.8", vendor: "anthropic", price: 5.0 },
+  { id: "anthropic/claude-opus-4.7", name: "Anthropic: Claude Opus 4.7", vendor: "anthropic", price: 5.0 },
+  { id: "anthropic/claude-opus-4.6", name: "Anthropic: Claude Opus 4.6", vendor: "anthropic", price: 5.0 },
+  { id: "anthropic/claude-opus-4.5", name: "Anthropic: Claude Opus 4.5", vendor: "anthropic", price: 5.0 },
+  { id: "openai/gpt-chat-latest", name: "OpenAI: GPT Chat Latest", vendor: "openai", price: 5.0 },
+  { id: "openai/gpt-5.5", name: "OpenAI: GPT-5.5", vendor: "openai", price: 5.0 },
+  { id: "openai/gpt-5.4-image-2", name: "OpenAI: GPT-5.4 Image 2", vendor: "openai", price: 8.0 },
+  { id: "openai/gpt-5-image", name: "OpenAI: GPT-5 Image", vendor: "openai", price: 10.0 },
+  { id: "openai/gpt-4-turbo", name: "OpenAI: GPT-4 Turbo", vendor: "openai", price: 10.0 },
+  { id: "openai/o3-deep-research", name: "OpenAI: o3 Deep Research", vendor: "openai", price: 10.0 },
+  { id: "anthropic/claude-fable-5", name: "Anthropic: Claude Fable 5", vendor: "anthropic", price: 10.0 },
+  { id: "anthropic/claude-opus-4.8-fast", name: "Anthropic: Claude Opus 4.8 (Fast)", vendor: "anthropic", price: 10.0 },
+  { id: "openai/o1", name: "OpenAI: o1", vendor: "openai", price: 15.0 },
+  { id: "anthropic/claude-opus-4.1", name: "Anthropic: Claude Opus 4.1", vendor: "anthropic", price: 15.0 },
+  { id: "anthropic/claude-opus-4", name: "Anthropic: Claude Opus 4", vendor: "anthropic", price: 15.0 },
+  { id: "openai/gpt-5-pro", name: "OpenAI: GPT-5 Pro", vendor: "openai", price: 15.0 },
+  { id: "openai/o3-pro", name: "OpenAI: o3 Pro", vendor: "openai", price: 20.0 },
+  { id: "openai/gpt-5.2-pro", name: "OpenAI: GPT-5.2 Pro", vendor: "openai", price: 21.0 },
+  { id: "anthropic/claude-opus-4.7-fast", name: "Anthropic: Claude Opus 4.7 (Fast)", vendor: "anthropic", price: 30.0 },
+  { id: "anthropic/claude-opus-4.6-fast", name: "Anthropic: Claude Opus 4.6 (Fast)", vendor: "anthropic", price: 30.0 },
+  { id: "openai/gpt-5.5-pro", name: "OpenAI: GPT-5.5 Pro", vendor: "openai", price: 30.0 },
+  { id: "openai/gpt-5.4-pro", name: "OpenAI: GPT-5.4 Pro", vendor: "openai", price: 30.0 },
+  { id: "openai/o1-pro", name: "OpenAI: o1-pro", vendor: "openai", price: 150.0 }
+];
+
+const ABACUS_VISION_MODELS = [
+  { id: "nano_banana", name: "Nano Banana", price: 0.0 },
+  { id: "nano_banana_pro", name: "Nano Banana Pro", price: 0.0 },
+  { id: "nano_banana2", name: "Nano Banana 2", price: 0.0 },
+  { id: "gpt-5-nano", name: "GPT-5 Nano", price: 0.05 },
+  { id: "gpt-4.1-nano", name: "GPT-4.1 Nano", price: 0.1 },
+  { id: "google/gemma-4-31b-it", name: "Gemma 4 31B IT", price: 0.14 },
+  { id: "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8", name: "Llama 4 Maverick", price: 0.14 },
+  { id: "gpt-4o-mini", name: "GPT-4o Mini", price: 0.15 },
+  { id: "gpt-5.4-nano", name: "GPT-5.4 Nano", price: 0.2 },
+  { id: "gemini-3.1-flash-lite", name: "Gemini 3.1 Flash Lite", price: 0.25 },
+  { id: "gpt-5-mini", name: "GPT-5 Mini", price: 0.25 },
+  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", price: 0.3 },
+  { id: "gemini-2.5-flash-image", name: "Nano Banana (Gemini 2.5 Flash Image)", price: 0.3 },
+  { id: "gpt-4.1-mini", name: "GPT-4.1 Mini", price: 0.4 },
+  { id: "gemini-3.1-flash-image-preview", name: "Nano Banana 2 (Gemini 3.1 Flash Image)", price: 0.5 },
+  { id: "gemini-3-flash-preview", name: "Gemini 3 Flash", price: 0.5 },
+  { id: "gpt-5.4-mini", name: "GPT-5.4 Mini", price: 0.75 },
+  { id: "kimi-k2.6", name: "Kimi K2.6", price: 0.95 },
+  { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5", price: 1.0 },
+  { id: "o4-mini", name: "o4 Mini", price: 1.1 },
+  { id: "grok-4.3", name: "Grok 4.3", price: 1.25 },
+  { id: "gpt-5", name: "GPT-5", price: 1.25 },
+  { id: "gpt-5-codex", name: "GPT-5 Codex", price: 1.25 },
+  { id: "gpt-5.1", name: "GPT-5.1", price: 1.25 },
+  { id: "gpt-5.1-codex", name: "GPT-5.1 Codex", price: 1.25 },
+  { id: "gpt-5.1-chat-latest", name: "GPT-5.1 Instant", price: 1.25 },
+  { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", price: 1.25 },
+  { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash", price: 1.5 },
+  { id: "gpt-5.2", name: "GPT-5.2", price: 1.75 },
+  { id: "gpt-5.2-chat-latest", name: "GPT-5.2 Instant", price: 1.75 },
+  { id: "gpt-5.2-codex", name: "GPT-5.2 Codex", price: 1.75 },
+  { id: "gpt-5.3-chat-latest", name: "GPT-5.3 Instant", price: 1.75 },
+  { id: "gpt-5.3-codex", name: "GPT-5.3 Codex", price: 1.75 },
+  { id: "gpt-5.3-codex-xhigh", name: "GPT-5.3 Codex XHigh", price: 1.75 },
+  { id: "grok-4.20-beta-0309-non-reasoning", name: "Grok 4.2", price: 2.0 },
+  { id: "o3", name: "o3", price: 2.0 },
+  { id: "gpt-4.1", name: "GPT-4.1", price: 2.0 },
+  { id: "gemini-3-pro-image-preview", name: "Nano Banana (Gemini 3 Pro Image)", price: 2.0 },
+  { id: "gemini-3.1-pro-preview", name: "Gemini 3.1 Pro", price: 2.0 },
+  { id: "gpt-4o", name: "GPT-4o", price: 2.5 },
+  { id: "gpt-5.4", name: "GPT-5.4", price: 2.5 },
+  { id: "route-llm", name: "RouteLLM", price: 3.0 },
+  { id: "claude-sonnet-4-5-20250929", name: "Claude Sonnet 4.5", price: 3.0 },
+  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", price: 3.0 },
+  { id: "claude-opus-4-5-20251101", name: "Claude Opus 4.5", price: 5.0 },
+  { id: "claude-opus-4-6", name: "Claude Opus 4.6", price: 5.0 },
+  { id: "claude-opus-4-7", name: "Claude Opus 4.7", price: 5.0 },
+  { id: "claude-opus-4-7-xhigh", name: "Claude Opus 4.7 XHigh", price: 5.0 },
+  { id: "claude-opus-4-8", name: "Claude Opus 4.8", price: 5.0 },
+  { id: "claude-opus-4-8-xhigh", name: "Claude Opus 4.8 XHigh", price: 5.0 },
+  { id: "gpt-5.5", name: "GPT-5.5", price: 5.0 },
+  { id: "chat-latest", name: "GPT-5.5 Instant", price: 5.0 },
+  { id: "claude-fable-5", name: "Claude Fable 5", price: 10.0 },
+  { id: "claude-fable-5-xhigh", name: "Claude Fable 5 XHigh", price: 10.0 },
+  { id: "claude-opus-4-1-20250805", name: "Claude Opus 4.1", price: 15.0 },
+  { id: "o3-pro", name: "o3 Pro", price: 20.0 }
+];
+
+/**
+ * (v0.10.31) Live OpenRouter vision-model list, lazily fetched from the
+ * public `/models` endpoint at runtime (see {@link fetchOpenRouterVisionModels}).
+ * `null` until a successful fetch completes; the static
+ * {@link OPENROUTER_VISION_MODELS} list is always used as a safe fallback so
+ * the dropdowns work fully offline. Never throws.
+ * @type {Array<{id:string,name:string,vendor:string,price:number}>|null}
+ */
+let OPENROUTER_LIVE_MODELS = null;
+
+/**
+ * (v0.10.31) Maps an AI Provider preset key (a key of {@link PROVIDER_PRESETS})
+ * to a human-friendly label used when no per-model vendor is known.
+ * @type {Record<string,string>}
+ */
+const PROVIDER_LABELS = {
+  abacus:     "Abacus.AI",
+  openai:     "OpenAI",
+  openrouter: "OpenRouter",
+  google:     "Google",
+  custom:     "Custom"
+};
+
+/**
+ * (v0.10.31) Format a per-1M price for display: FREE for 0, else `$X.XX`.
+ * @param {number} price
+ * @returns {string}
+ */
+function formatModelPrice(price) {
+  const p = Number(price);
+  if (!Number.isFinite(p) || p <= 0) return "FREE";
+  return `$${p.toFixed(2)}`;
+}
+
+/**
+ * (v0.10.31) Build the dropdown label for a model in the required format:
+ *   "Model Name ($X.XX/1M) - Provider"
+ * (FREE models show "(FREE/1M)"). When the model's display name carries a
+ * "Vendor: Model" prefix (as OpenRouter names do), the vendor is split out and
+ * used as the trailing Provider; otherwise `fallbackProviderLabel` is used.
+ *
+ * @param {{id:string,name:string,vendor?:string,price:number}} model
+ * @param {string} fallbackProviderLabel
+ * @returns {string}
+ */
+function formatModelLabel(model, fallbackProviderLabel) {
+  let modelName = String(model?.name ?? model?.id ?? "").trim();
+  let vendorDisp = fallbackProviderLabel || "";
+  const colon = modelName.indexOf(": ");
+  if (colon > 0 && colon < 40) {
+    vendorDisp = modelName.slice(0, colon).trim();
+    modelName = modelName.slice(colon + 2).trim();
+  } else if (model?.vendor) {
+    vendorDisp = titleCaseVendor(model.vendor);
+  }
+  const priceStr = formatModelPrice(model?.price);
+  const tail = vendorDisp ? ` - ${vendorDisp}` : "";
+  return `${modelName} (${priceStr}/1M)${tail}`;
+}
+
+/**
+ * (v0.10.31) Best-effort prettifier for a raw OpenRouter vendor slug
+ * (e.g. "x-ai" → "xAI", "meta-llama" → "Meta Llama"). Falls back to a simple
+ * title-case. Never throws.
+ * @param {string} vendor
+ * @returns {string}
+ */
+function titleCaseVendor(vendor) {
+  const v = String(vendor || "").trim();
+  if (!v) return "";
+  const special = {
+    "openai": "OpenAI", "x-ai": "xAI", "z-ai": "Z.AI", "meta-llama": "Meta",
+    "mistralai": "Mistral", "moonshotai": "MoonshotAI", "bytedance-seed": "ByteDance",
+    "nex-agi": "Nex AGI", "rekaai": "Reka", "minimax": "MiniMax", "stepfun": "StepFun"
+  };
+  if (special[v]) return special[v];
+  return v.split(/[-_/]/).map(s => s ? s[0].toUpperCase() + s.slice(1) : s).join(" ");
+}
+
+/**
+ * (v0.10.31) Return the curated, price-sorted (FREE first, then ascending)
+ * list of vision models appropriate for a given AI Provider preset.
+ *
+ *   • abacus     → the Abacus AI RouteLLM catalogue (bare ids).
+ *   • openrouter → the full OpenRouter catalogue (live list if fetched, else
+ *                  the embedded static list); ids keep their `vendor/model`
+ *                  form as OpenRouter expects.
+ *   • openai     → OpenRouter models whose vendor is OpenAI, with the
+ *                  `openai/` prefix stripped (the native OpenAI endpoint wants
+ *                  bare model names).
+ *   • google     → OpenRouter models whose vendor is Google, `google/` prefix
+ *                  stripped (native Google OpenAI-compatible endpoint).
+ *   • custom / unknown → the union of every catalogue, so a self-hosted or
+ *                  gateway endpoint can pick anything.
+ *
+ * Always returns a fresh, sorted array; never throws.
+ *
+ * @param {string} preset - a key of {@link PROVIDER_PRESETS}
+ * @returns {Array<{id:string,name:string,vendor?:string,price:number}>}
+ */
+function getModelsForProvider(preset) {
+  const sortByPrice = (a, b) => {
+    const pa = Number(a.price) || 0, pb = Number(b.price) || 0;
+    if (pa !== pb) return pa - pb;            // FREE (0) first, then ascending
+    return String(a.name).localeCompare(String(b.name));
+  };
+  const openrouter = Array.isArray(OPENROUTER_LIVE_MODELS) && OPENROUTER_LIVE_MODELS.length
+    ? OPENROUTER_LIVE_MODELS
+    : OPENROUTER_VISION_MODELS;
+
+  let list;
+  switch (preset) {
+    case "abacus":
+      list = ABACUS_VISION_MODELS.map(m => ({ ...m }));
+      break;
+    case "openrouter":
+      list = openrouter.map(m => ({ ...m }));
+      break;
+    case "openai":
+      list = openrouter
+        .filter(m => m.vendor === "openai")
+        .map(m => ({ ...m, id: m.id.replace(/^openai\//, "") }));
+      break;
+    case "google":
+      list = openrouter
+        .filter(m => m.vendor === "google")
+        .map(m => ({ ...m, id: m.id.replace(/^google\//, "") }));
+      break;
+    case "custom":
+    default: {
+      // Union of everything, de-duplicated by id (OpenRouter first).
+      const seen = new Set();
+      list = [];
+      for (const m of [...openrouter, ...ABACUS_VISION_MODELS]) {
+        if (seen.has(m.id)) continue;
+        seen.add(m.id);
+        list.push({ ...m });
+      }
+      break;
+    }
+  }
+  return list.sort(sortByPrice);
+}
+
+/**
+ * (v0.10.31) Is `model` present in the curated vision-model catalogue (the
+ * Abacus list, the OpenRouter static/live list, or one of those with its
+ * vendor prefix stripped)? Used by {@link Client._modelSupportsVision} so any
+ * model the dropdowns offer is treated as genuinely vision-capable. Matching
+ * is case-insensitive and tolerant of the `vendor/` prefix being present or
+ * absent (e.g. "gpt-4o" matches "openai/gpt-4o"). Never throws.
+ *
+ * @param {string} model
+ * @returns {boolean}
+ */
+function isCatalogueVisionModel(model) {
+  const id = String(model || "").trim().toLowerCase();
+  if (!id) return false;
+  const openrouter = Array.isArray(OPENROUTER_LIVE_MODELS) && OPENROUTER_LIVE_MODELS.length
+    ? OPENROUTER_LIVE_MODELS
+    : OPENROUTER_VISION_MODELS;
+  for (const m of [...openrouter, ...ABACUS_VISION_MODELS]) {
+    const cid = String(m.id || "").toLowerCase();
+    if (!cid) continue;
+    if (cid === id) return true;
+    // Tolerate vendor prefix being stripped (openai/gpt-4o ↔ gpt-4o).
+    const slash = cid.indexOf("/");
+    if (slash > 0 && cid.slice(slash + 1) === id) return true;
+  }
+  return false;
+}
+
+/**
+ * (v0.10.31) Build a Foundry settings `choices` object (id → label) for a
+ * model dropdown, filtered to the given provider and sorted FREE-first then by
+ * ascending price. Two backwards-compatibility guarantees:
+ *
+ *   1. If `currentValue` is a model the user already configured that is NOT in
+ *      the filtered catalogue (e.g. a hand-typed custom id from before this
+ *      version), it is preserved as a selectable "(current)" entry at the top
+ *      so upgrading never silently drops or changes their model.
+ *   2. When `includeInherit` is true (the Vision Model setting), an "inherit"
+ *      pseudo-choice is added first.
+ *
+ * @param {string} preset
+ * @param {string} [currentValue]
+ * @param {{includeInherit?: boolean}} [opts]
+ * @returns {Record<string,string>}
+ */
+function buildModelChoices(preset, currentValue, opts = {}) {
+  const choices = {};
+  const fallbackLabel = PROVIDER_LABELS[preset] || PROVIDER_LABELS.custom;
+
+  if (opts.includeInherit) {
+    try {
+      choices.inherit = game.i18n.localize("ETERNAL_SKALD.settings.visionModel.choices.inherit");
+    } catch (_) { choices.inherit = "Inherit main model"; }
+  }
+
+  const models = getModelsForProvider(preset);
+  const ids = new Set(models.map(m => m.id));
+
+  // Preserve a pre-existing custom value that isn't in the catalogue.
+  const cur = (currentValue == null ? "" : String(currentValue)).trim();
+  if (cur && cur !== "inherit" && !ids.has(cur)) {
+    choices[cur] = `${cur} (current)`;
+  }
+
+  for (const m of models) {
+    choices[m.id] = formatModelLabel(m, fallbackLabel);
+  }
+  return choices;
+}
+
+/**
+ * (v0.10.31) OpenRouter API integration: fetch the live model catalogue from
+ * the public `https://openrouter.ai/api/v1/models` endpoint, keep only
+ * vision-capable models (image in their input modalities), normalise them to
+ * the Skald's `{id,name,vendor,price}` shape, sort FREE-first by price, and
+ * cache the result in {@link OPENROUTER_LIVE_MODELS}.
+ *
+ * Purely additive and fully defensive: this endpoint needs no API key, the
+ * call is best-effort, and ANY failure (network/CORS/parse) leaves the static
+ * {@link OPENROUTER_VISION_MODELS} list in place. Safe to call on `ready`.
+ *
+ * @returns {Promise<boolean>} true if the live list was refreshed
+ */
+async function fetchOpenRouterVisionModels() {
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/models", {
+      method: "GET",
+      headers: { "Accept": "application/json" }
+    });
+    if (!res || !res.ok) return false;
+    const json = await res.json();
+    const data = Array.isArray(json?.data) ? json.data : [];
+    if (!data.length) return false;
+
+    const mapped = [];
+    for (const m of data) {
+      const id = m?.id;
+      if (!id) continue;
+      const inputs = m?.architecture?.input_modalities
+        || m?.architecture?.modality
+        || [];
+      const inputsStr = Array.isArray(inputs) ? inputs.join("+") : String(inputs || "");
+      if (!/image/i.test(inputsStr)) continue;          // vision-capable only
+      // Pricing is a per-token string ("0.0000005"); convert to per-1M USD.
+      const promptPrice = parseFloat(m?.pricing?.prompt);
+      const price = Number.isFinite(promptPrice) ? promptPrice * 1e6 : 0;
+      const vendor = String(id).split("/")[0] || "";
+      mapped.push({
+        id,
+        name: m?.name || id,
+        vendor,
+        price: Number.isFinite(price) ? Number(price.toFixed(4)) : 0
+      });
+    }
+    if (!mapped.length) return false;
+    OPENROUTER_LIVE_MODELS = mapped;
+    console.log(LOG_PREFIX, `OpenRouter live model list loaded (${mapped.length} vision models).`);
+    return true;
+  } catch (e) {
+    console.warn(LOG_PREFIX, "fetchOpenRouterVisionModels failed (using static list):", e?.message || e);
+    return false;
+  }
+}
+
+/**
+ * (v0.10.31) Re-populate the AI Model and Vision Model <select> dropdowns in an
+ * open Settings Config form to match the AI Provider currently chosen *in that
+ * form* (not yet saved), and keep them in sync live as the provider is changed.
+ *
+ * This is what makes the dropdowns FILTER by provider: Foundry computes a
+ * setting's `choices` once at registration, so we rebuild the option lists on
+ * render and bind a `change` listener to the provider <select>. Fully
+ * defensive — any failure leaves the statically-registered choices intact.
+ *
+ * @param {HTMLElement|jQuery} root - the rendered settings form element
+ */
+function refreshModelDropdowns(root) {
+  try {
+    const el = root?.[0] ?? root;                       // accept jQuery or HTMLElement
+    if (!el || !el.querySelector) return;
+    const q = (sel) => el.querySelector(sel);
+    const providerSel = q(`[name="${MODULE_ID}.providerPreset"]`);
+    const modelSel    = q(`[name="${MODULE_ID}.modelName"]`);
+    const visionSel   = q(`[name="${MODULE_ID}.visionModel"]`);
+    if (!providerSel && !modelSel && !visionSel) return;
+
+    const rebuild = () => {
+      const preset = providerSel?.value || Settings.get("providerPreset") || "abacus";
+      if (modelSel) {
+        const cur = modelSel.value || Settings.get("modelName");
+        populateSelect(modelSel, buildModelChoices(preset, cur), cur);
+      }
+      if (visionSel) {
+        const cur = visionSel.value || Settings.get("visionModel");
+        populateSelect(visionSel, buildModelChoices(preset, cur, { includeInherit: true }), cur);
+      }
+    };
+
+    rebuild();
+    if (providerSel && !providerSel.dataset.skaldBound) {
+      providerSel.dataset.skaldBound = "1";
+      providerSel.addEventListener("change", rebuild);
+    }
+  } catch (e) {
+    console.warn(LOG_PREFIX, "refreshModelDropdowns failed:", e?.message || e);
+  }
+}
+
+/**
+ * (v0.10.31) Replace the <option>s of a <select> with `choices` (value→label),
+ * preserving `selectedValue` if present (added as a temporary option if the
+ * value is not among the choices, so a custom selection is never lost).
+ * @param {HTMLSelectElement} sel
+ * @param {Record<string,string>} choices
+ * @param {string} selectedValue
+ */
+function populateSelect(sel, choices, selectedValue) {
+  if (!sel || sel.tagName !== "SELECT") return;
+  const want = (selectedValue == null ? "" : String(selectedValue));
+  const keys = Object.keys(choices);
+  sel.innerHTML = "";
+  for (const value of keys) {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = choices[value];
+    sel.appendChild(opt);
+  }
+  if (want && !keys.includes(want)) {
+    const opt = document.createElement("option");
+    opt.value = want;
+    opt.textContent = `${want} (current)`;
+    sel.insertBefore(opt, sel.firstChild);
+  }
+  if (want) sel.value = want;
+}
+
+
 /**
  * The ONE endpoint this client talks to. It's a relative URL so it
  * resolves same-origin against whatever host/port/protocol Foundry is
@@ -245,14 +824,28 @@ const Settings = {
       default: ""
     });
 
-    game.settings.register(MODULE_ID, "modelName", {
-      name: game.i18n.localize("ETERNAL_SKALD.settings.modelName.name"),
-      hint: game.i18n.localize("ETERNAL_SKALD.settings.modelName.hint"),
-      scope: "world",
-      config: true,
-      type: String,
-      default: DEFAULT_MODEL
-    });
+    // (v0.10.31) AI Model is now a provider-FILTERED dropdown instead of a
+    // free-text field. Its `choices` are computed from the curated vision-model
+    // catalogue for the currently-selected provider, sorted FREE-first then by
+    // ascending price, labelled "Model Name ($X.XX/1M) - Provider". The list is
+    // re-filtered live when the provider changes (see refreshModelDropdowns,
+    // bound from the renderSettingsConfig hook). Backwards-compatible: any
+    // previously-saved custom model id is preserved as a "(current)" choice,
+    // and the setting type stays String so the Client sends it verbatim.
+    {
+      const _provider = Settings.get("providerPreset") || "abacus";
+      const _current  = Settings.get("modelName");
+      const _curVal   = (_current == null || _current === "") ? DEFAULT_MODEL : _current;
+      game.settings.register(MODULE_ID, "modelName", {
+        name: game.i18n.localize("ETERNAL_SKALD.settings.modelName.name"),
+        hint: game.i18n.localize("ETERNAL_SKALD.settings.modelName.hint"),
+        scope: "world",
+        config: true,
+        type: String,
+        choices: buildModelChoices(_provider, _curVal),
+        default: DEFAULT_MODEL
+      });
+    }
 
     game.settings.register(MODULE_ID, "apiEndpoint", {
       name: game.i18n.localize("ETERNAL_SKALD.settings.apiEndpoint.name"),
@@ -702,24 +1295,27 @@ const Settings = {
      * vision-capable, the Skald degrades gracefully (a GM-only notice) rather
      * than wasting a call.
      */
-    game.settings.register(MODULE_ID, "visionModel", {
-      name: game.i18n.localize("ETERNAL_SKALD.settings.visionModel.name"),
-      hint: game.i18n.localize("ETERNAL_SKALD.settings.visionModel.hint"),
-      scope: "world",
-      config: true,
-      type: String,
-      choices: {
-        inherit:                  game.i18n.localize("ETERNAL_SKALD.settings.visionModel.choices.inherit"),
-        "gemini-3-flash-preview": "gemini-3-flash-preview",
-        "gemini-2.5-pro":         "gemini-2.5-pro ★",
-        "gemini-2.5-flash":       "gemini-2.5-flash",
-        "gemini-2.0-flash":       "gemini-2.0-flash ★",
-        "gpt-4o":                 "gpt-4o ★",
-        "gpt-4o-mini":            "gpt-4o-mini (basic vision)",
-        "claude-3-5-sonnet":      "claude-3-5-sonnet ★"
-      },
-      default: "inherit"
-    });
+    // (v0.10.31) Vision Model is now filtered by provider exactly like the AI
+    // Model setting (same curated catalogue, same FREE-first price sort, same
+    // "Model Name ($X.XX/1M) - Provider" labels), with an extra "inherit"
+    // pseudo-choice kept first (the default — reuse the main narration model).
+    // Re-filtered live when the provider changes via refreshModelDropdowns.
+    // Backwards-compatible: a previously-saved custom/explicit vision model id
+    // (e.g. the old hardcoded "claude-3-5-sonnet") is preserved as "(current)".
+    {
+      const _provider = Settings.get("providerPreset") || "abacus";
+      const _current  = Settings.get("visionModel");
+      const _curVal   = (_current == null || _current === "") ? "inherit" : _current;
+      game.settings.register(MODULE_ID, "visionModel", {
+        name: game.i18n.localize("ETERNAL_SKALD.settings.visionModel.name"),
+        hint: game.i18n.localize("ETERNAL_SKALD.settings.visionModel.hint"),
+        scope: "world",
+        config: true,
+        type: String,
+        choices: buildModelChoices(_provider, _curVal, { includeInherit: true }),
+        default: "inherit"
+      });
+    }
 
     /* ---- Map Analysis Quality (v0.10.24) ----
      * Controls how thoroughly the Skald reads a map.
@@ -1744,6 +2340,12 @@ const Client = {
   _modelSupportsVision(model) {
     const m = String(model || "").toLowerCase();
     if (!m) return false;
+    // (v0.10.31) Authoritative check first: any model in the curated
+    // vision-model catalogue (incl. the live OpenRouter list) is, by
+    // definition, vision-capable. This avoids false negatives for families the
+    // name heuristic below doesn't know (e.g. kimi, seed, nemotron, gemma,
+    // nano_banana, minimax) now that the dropdowns offer them directly.
+    try { if (isCatalogueVisionModel(model)) return true; } catch (_) { /* fall through to heuristic */ }
     // Explicit "vision"/"-vl"/multimodal markers anywhere in the name.
     if (/(vision|multimodal|-vl\b|\bvl-|llava)/.test(m)) return true;
     // OpenAI GPT-4o + GPT-4 Turbo + reasoning o-series (all multimodal).
@@ -9164,6 +9766,19 @@ Hooks.once("init", () => {
   console.log(`${LOG_PREFIX} Chat-command hooks (chatMessage + preCreateChatMessage) registered for: ${Object.values(COMMANDS).join(", ")}`);
 });
 
+/* === HOOK: renderSettingsConfig (v0.10.31) ============================
+ * Foundry computes a setting's `choices` ONCE at registration, so the AI
+ * Model / Vision Model dropdowns are re-populated here every time the
+ * Settings Config window opens, filtered to the AI Provider currently
+ * chosen *in that form*, and re-filtered live whenever the provider
+ * <select> changes (see refreshModelDropdowns). Fully defensive — any
+ * failure leaves the statically-registered choices intact.
+ * ==================================================================== */
+Hooks.on("renderSettingsConfig", (app, html) => {
+  try { refreshModelDropdowns(html); }
+  catch (e) { console.warn(LOG_PREFIX, "renderSettingsConfig dropdown refresh failed:", e?.message || e); }
+});
+
 // --- ready: welcome banner & global API ------------------------------
 console.log("The Eternal Skald | Registering Hooks.once('ready') …");
 Hooks.once("ready", async () => {
@@ -9532,6 +10147,11 @@ Hooks.once("ready", () => {
   try { EntityLinker.applyCustomStyles(); } catch (_) { /* defensive */ }
   // (v0.9.3) Repair installs still pinned to the broken v0.9.2 Abacus AI URL.
   try { migrateLegacyAbacusEndpoint(); } catch (_) { /* defensive */ }
+  // (v0.10.31) Best-effort refresh of the OpenRouter vision-model catalogue
+  // from its public /models endpoint. No API key needed; any failure leaves
+  // the embedded static list in place. The freshened list is picked up the
+  // next time the Settings Config window is opened.
+  try { fetchOpenRouterVisionModels(); } catch (_) { /* defensive */ }
 });
 
 // --- Asset index priming (v0.7.0) ------------------------------------
