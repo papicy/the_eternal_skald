@@ -2911,6 +2911,402 @@ export const IronswornController = {
   },
 
   /* =================================================================
+   *  COMPENDIUM CREATION  (v0.10.37 — Phase 3)
+   *  -----------------------------------------------------------------
+   *  Bring real content out of the official foundry-ironsworn compendia
+   *  and into play: add an ASSET to the active character, spawn a FOE
+   *  ACTOR from the foe-actor packs, add an arbitrary compendium ITEM to
+   *  a character, and create a blank PLAYER CHARACTER. Every creation:
+   *    • verifies the source exists (fuzzy compendium lookup) first,
+   *    • goes through the Foundry Document API (Actor.create /
+   *      actor.createEmbeddedDocuments) — never a raw data mutation,
+   *    • is idempotent where it sensibly can be (assets/items dedupe by
+   *      name on the actor), and
+   *    • returns a structured {ok,…} result with a `suggestion` when a
+   *      name is close but not matched, so callers can advise the GM.
+   *  All async + fully defensive; they degrade to {ok:false} on any error.
+   * ================================================================= */
+
+  /**
+   * Default base stats for a freshly-created Ironsworn character. The
+   * canonical starting array is 3/2/2/1/1 distributed across the five
+   * stats; we assign a balanced, rules-legal default the GM can re-arrange.
+   */
+  DEFAULT_CHARACTER_STATS: Object.freeze({ edge: 2, heart: 1, iron: 2, shadow: 1, wits: 3 }),
+
+  /**
+   * Clone a compendium Document's data into a plain object suitable for
+   * creation, stripping identity/ownership fields so the new copy gets a
+   * fresh id and sane defaults. Never throws.
+   */
+  _cleanForCreate(doc) {
+    let data;
+    try { data = typeof doc?.toObject === "function" ? doc.toObject() : foundry.utils.deepClone(doc); }
+    catch (_) { data = {}; }
+    for (const k of ["_id", "_stats", "_key", "ownership", "folder", "sort"]) {
+      try { delete data[k]; } catch (_) {}
+    }
+    // Embedded items (e.g. a foe actor's progress track) also carry _ids
+    // that must be dropped so they are re-created cleanly.
+    if (Array.isArray(data.items)) {
+      data.items = data.items.map(it => {
+        const c = { ...it };
+        for (const k of ["_id", "_stats", "_key", "ownership", "folder"]) { try { delete c[k]; } catch (_) {} }
+        return c;
+      });
+    }
+    return data;
+  },
+
+  /** Case-insensitive: does `actor` already own an Item of this name (+ optional type)? */
+  _actorHasItemNamed(actor, name, type = null) {
+    const lc = String(name ?? "").toLowerCase().trim();
+    if (!lc || !actor?.items) return false;
+    for (const it of actor.items) {
+      if (type && it?.type !== type) continue;
+      if (String(it?.name ?? "").toLowerCase().trim() === lc) return true;
+    }
+    return false;
+  },
+
+  /**
+   * Add an ASSET from the asset compendia to the active character. Looks the
+   * asset up by name (fuzzy), then creates a copy of it as an embedded Item
+   * on the actor via the Document API. Idempotent: if the actor already owns
+   * an asset of that name it is a no-op (unless `allowDuplicate`).
+   *
+   * @param {Actor}  actor
+   * @param {string} assetName
+   * @param {{allowDuplicate?:boolean}} [opts]
+   * @returns {Promise<{ok:boolean, name?:string, matchedName?:string, uuid?:string, match?:string, id?:string, noop?:boolean, suggestion?:string, error?:string}>}
+   */
+  async addAssetToActor(actor, assetName, { allowDuplicate = false } = {}) {
+    if (!actor) return { ok: false, error: "No active character." };
+    if (!this.isActive()) return { ok: false, error: "Ironsworn system not active." };
+    if (!assetName) return { ok: false, error: "No asset name given." };
+
+    let lookup;
+    try { lookup = await this.lookupAssetInCompendium(assetName); }
+    catch (e) { return { ok: false, error: e?.message ?? String(e) }; }
+    if (!lookup?.found || !lookup.uuid) {
+      return { ok: false, error: `Asset "${assetName}" not found in the compendia.`, suggestion: lookup?.suggestion };
+    }
+
+    if (!allowDuplicate && this._actorHasItemNamed(actor, lookup.name, "asset")) {
+      dbg(`addAssetToActor: "${lookup.name}" already owned — no-op`);
+      return { ok: true, noop: true, name: lookup.name, matchedName: lookup.name, uuid: lookup.uuid, match: lookup.match };
+    }
+
+    let doc;
+    try { doc = await fromUuid(lookup.uuid); }
+    catch (e) { return { ok: false, error: `Could not load asset "${lookup.name}": ${e?.message ?? e}` }; }
+    if (!doc) return { ok: false, error: `Could not load asset "${lookup.name}".` };
+
+    const data = this._cleanForCreate(doc);
+    try {
+      const [created] = await actor.createEmbeddedDocuments("Item", [data]);
+      dbg(`addAssetToActor: added "${lookup.name}" to "${actor.name}" (id=${created?.id})`);
+      return { ok: true, name: created?.name ?? lookup.name, matchedName: lookup.name, uuid: lookup.uuid, match: lookup.match, id: created?.id };
+    } catch (e) {
+      warn("addAssetToActor failed:", e?.message ?? e);
+      return { ok: false, error: e?.message ?? String(e) };
+    }
+  },
+
+  /**
+   * Add an arbitrary compendium ITEM (asset, move, delve theme/domain, …) to
+   * a character by name. Searches every Item compendium pack (newest-style
+   * `documentName === "Item"`), excluding the foe/encounter packs (those are
+   * NPC catalogue entries, not character items). Idempotent by name.
+   *
+   * @param {Actor}  actor
+   * @param {string} itemName
+   * @param {{allowDuplicate?:boolean, types?:string[]}} [opts]  optional Item-type filter
+   * @returns {Promise<{ok:boolean, name?:string, matchedName?:string, type?:string, packId?:string, match?:string, id?:string, noop?:boolean, suggestion?:string, error?:string}>}
+   */
+  async addItemToActor(actor, itemName, { allowDuplicate = false, types = null } = {}) {
+    if (!actor) return { ok: false, error: "No active character." };
+    if (!this.isActive()) return { ok: false, error: "Ironsworn system not active." };
+    if (!itemName) return { ok: false, error: "No item name given." };
+
+    // Build a candidate list across Item packs (excluding foe/encounter packs).
+    const lc = String(itemName).toLowerCase().trim();
+    const norm = this._normName(itemName);
+    const typeSet = Array.isArray(types) && types.length ? new Set(types) : null;
+    let exact = null, normHit = null, sub = null, suggestion = null, bestDist = Infinity;
+
+    for (const pack of (game?.packs ?? [])) {
+      try {
+        if (pack.documentName !== "Item") continue;
+        const id = String(pack.metadata?.id ?? pack.collection ?? "");
+        const label = String(pack.metadata?.label ?? pack.title ?? "");
+        if (/foe|encounter|bestiar|monster/i.test(id) || /foe|encounter|bestiar|monster/i.test(label)) continue;
+        const index = await pack.getIndex({ fields: ["type"] });
+        for (const e of (index?.contents ?? index ?? [])) {
+          const name = (e?.name ?? "").trim();
+          if (!name) continue;
+          if (typeSet && e.type && !typeSet.has(e.type)) continue;
+          const eLc = name.toLowerCase();
+          const eNorm = this._normName(name);
+          const cand = { name, type: e.type, uuid: e.uuid ?? `Compendium.${id}.${e._id}`, packId: id, _id: e._id };
+          if (eLc === lc && !exact) exact = cand;
+          if (eNorm === norm && !normHit) normHit = cand;
+          if (!sub && norm && eNorm && (eNorm.includes(norm) || norm.includes(eNorm))) sub = cand;
+          if (norm.length >= 4) {
+            const d = this._editDistance(norm, eNorm);
+            if (d < bestDist) { bestDist = d; suggestion = name; }
+          }
+        }
+      } catch (e) { warn(`addItemToActor: index "${pack?.metadata?.id}" failed:`, e?.message ?? e); }
+      if (exact) break;   // exact wins immediately
+    }
+
+    const hit = exact || normHit || sub;
+    if (!hit) {
+      const tol = Math.min(3, Math.max(2, Math.floor(norm.length * 0.25)));
+      return { ok: false, error: `Item "${itemName}" not found in the compendia.`, suggestion: (bestDist <= tol + 2 ? suggestion : undefined) };
+    }
+
+    if (!allowDuplicate && this._actorHasItemNamed(actor, hit.name)) {
+      dbg(`addItemToActor: "${hit.name}" already owned — no-op`);
+      return { ok: true, noop: true, name: hit.name, matchedName: hit.name, type: hit.type, packId: hit.packId };
+    }
+
+    let doc;
+    try { doc = await fromUuid(hit.uuid); }
+    catch (e) { return { ok: false, error: `Could not load item "${hit.name}": ${e?.message ?? e}` }; }
+    if (!doc) return { ok: false, error: `Could not load item "${hit.name}".` };
+
+    const data = this._cleanForCreate(doc);
+    try {
+      const [created] = await actor.createEmbeddedDocuments("Item", [data]);
+      dbg(`addItemToActor: added "${hit.name}" (${hit.type}) to "${actor.name}" (id=${created?.id})`);
+      return { ok: true, name: created?.name ?? hit.name, matchedName: hit.name, type: created?.type ?? hit.type, packId: hit.packId, id: created?.id };
+    } catch (e) {
+      warn("addItemToActor failed:", e?.message ?? e);
+      return { ok: false, error: e?.message ?? String(e) };
+    }
+  },
+
+  /* ---- Foe ACTOR compendia (distinct from the foe-ITEM rank index) ----
+   * The official packs foe-actors-is / foe-actors-delve / foe-actors-sf hold
+   * ready-made foe ACTORS (type "foe") with an embedded progress track. We
+   * index them by name so the Skald can spawn a real, stat-bearing foe actor
+   * into the world rather than only a bare progress track on the PC sheet. */
+
+  /** In-memory cache of the merged foe-actor index. Cleared on world reload. */
+  _foeActorIndexCache: null,
+
+  /** Drop the cached foe-actor index. */
+  clearFoeActorCache() { this._foeActorIndexCache = null; dbg("clearFoeActorCache: cleared"); },
+
+  /** Actor compendium packs that look like foe/bestiary catalogs. */
+  _foeActorPacks() {
+    const out = [];
+    for (const pack of (game?.packs ?? [])) {
+      try {
+        if (pack.documentName !== "Actor") continue;
+        const id = String(pack.metadata?.id ?? pack.collection ?? "");
+        const label = String(pack.metadata?.label ?? pack.title ?? "");
+        if (/foe|encounter|bestiar|monster|npc/i.test(id) || /foe|encounter|bestiar|monster|npc/i.test(label)) out.push(pack);
+      } catch (_) {}
+    }
+    return out;
+  },
+
+  /**
+   * Build (and cache) a flat index of every foe actor: [{name, lc, uuid, packId, _id}].
+   * Skips folder-only entries. Never throws — returns [] on failure.
+   * @returns {Promise<Array<{name:string, lc:string, uuid:string, packId:string, _id:string}>>}
+   */
+  async _buildFoeActorIndex() {
+    if (Array.isArray(this._foeActorIndexCache)) return this._foeActorIndexCache;
+    const entries = [];
+    for (const pack of this._foeActorPacks()) {
+      try {
+        const index = await pack.getIndex({ fields: ["type"] });
+        const packId = String(pack.metadata?.id ?? pack.collection ?? "");
+        for (const e of (index?.contents ?? index ?? [])) {
+          const name = (e?.name ?? "").trim();
+          if (!name) continue;
+          // Folders surface as entries without a usable actor type; skip them.
+          if (e.type && e.type !== "foe" && e.type !== "npc") continue;
+          entries.push({ name, lc: name.toLowerCase(), uuid: e.uuid ?? `Compendium.${packId}.${e._id}`, packId, _id: e._id });
+        }
+      } catch (e) {
+        warn(`_buildFoeActorIndex: failed to index "${pack?.metadata?.id}":`, e?.message ?? e);
+      }
+    }
+    this._foeActorIndexCache = entries;
+    dbg(`_buildFoeActorIndex: indexed ${entries.length} foe actor(s) from ${this._foeActorPacks().length} pack(s)`);
+    return entries;
+  },
+
+  /**
+   * Fuzzy-look up a foe actor by name in the foe-actor compendia. Mirrors
+   * lookupAssetInCompendium's matching ladder. Async.
+   * @param {string} foeName
+   * @returns {Promise<{found:boolean, name:string|null, uuid?:string, packId?:string, match?:string, suggestion?:string}>}
+   */
+  async lookupFoeActorInCompendium(foeName) {
+    const result = { found: false, name: foeName ?? null };
+    if (!foeName || !this.isActive()) return result;
+    let index;
+    try { index = await this._buildFoeActorIndex(); }
+    catch (e) { warn("lookupFoeActorInCompendium failed:", e?.message ?? e); return result; }
+    if (!index.length) return result;
+
+    const lc = String(foeName).toLowerCase().trim();
+    const norm = this._normName(foeName);
+    let hit = index.find(e => e.lc === lc); let match = hit ? "exact" : null;
+    if (!hit) { hit = index.find(e => this._normName(e.name) === norm); if (hit) match = "normalized"; }
+    if (!hit && norm) {
+      const subs = index.filter(e => { const en = this._normName(e.name); return en && (en.includes(norm) || norm.includes(en)); });
+      if (subs.length) {
+        subs.sort((a, b) => Math.abs(this._normName(a.name).length - norm.length) - Math.abs(this._normName(b.name).length - norm.length));
+        hit = subs[0]; match = "substring";
+      }
+    }
+    if (!hit && norm.length >= 4) {
+      let best = null, bestDist = Infinity;
+      for (const e of index) { const d = this._editDistance(norm, this._normName(e.name)); if (d < bestDist) { bestDist = d; best = e; } }
+      const tol = Math.min(3, Math.max(2, Math.floor(norm.length * 0.25)));
+      if (best && bestDist <= tol) { hit = best; match = "fuzzy"; }
+      else if (best && bestDist <= tol + 2) result.suggestion = best.name;
+    }
+    if (hit) {
+      dbg(`lookupFoeActorInCompendium: "${foeName}" → "${hit.name}" via ${match} (${hit.packId})`);
+      return { found: true, name: hit.name, uuid: hit.uuid, packId: hit.packId, match };
+    }
+    return result;
+  },
+
+  /**
+   * Create a FOE ACTOR in the world. Preference order:
+   *   1. A real foe actor copied from the foe-actor compendia (carries the
+   *      rulebook's rank, features, drives, tactics and progress track).
+   *   2. If not found, a minimal custom foe actor (type "foe") with a single
+   *      embedded progress track at the requested/fuzzy-looked-up/default rank
+   *      — so an important narrative antagonist can still be spawned.
+   *
+   * @param {string} foeName
+   * @param {{rank?:string, important?:boolean, folder?:string}} [opts]
+   * @returns {Promise<{ok:boolean, name?:string, actorId?:string, uuid?:string, source?:"compendium"|"custom", rank?:string, match?:string, suggestion?:string, error?:string}>}
+   */
+  async createFoeActor(foeName, { rank = null, important = false, folder = null } = {}) {
+    if (!this.isActive()) return { ok: false, error: "Ironsworn system not active." };
+    if (!foeName) return { ok: false, error: "No foe name given." };
+    if (typeof Actor === "undefined" || typeof Actor.create !== "function") {
+      return { ok: false, error: "Actor.create is unavailable." };
+    }
+
+    // 1) Try a real foe actor from the compendia.
+    let lookup = null;
+    try { lookup = await this.lookupFoeActorInCompendium(foeName); }
+    catch (_) { /* fall through to custom */ }
+
+    if (lookup?.found && lookup.uuid) {
+      try {
+        const doc = await fromUuid(lookup.uuid);
+        if (doc) {
+          const data = this._cleanForCreate(doc);
+          if (folder) data.folder = folder;
+          const created = await Actor.create(data);
+          // The rulebook rank lives on the embedded progress item.
+          let foundRank = null;
+          try {
+            const prog = created?.items?.find?.(it => it.type === "progress");
+            const rn = prog ? foundry.utils.getProperty(prog, "system.rank") : null;
+            foundRank = rn != null ? this.normalizeRank(rn, null) : null;
+          } catch (_) {}
+          dbg(`createFoeActor: spawned "${lookup.name}" from compendium (id=${created?.id})`);
+          return { ok: true, name: created?.name ?? lookup.name, actorId: created?.id, uuid: created?.uuid, source: "compendium", rank: foundRank, match: lookup.match };
+        }
+      } catch (e) {
+        warn("createFoeActor: compendium copy failed, will try custom:", e?.message ?? e);
+      }
+    }
+
+    // 2) Custom foe actor with a fresh progress track.
+    const rankWord = this.normalizeRank(rank || "dangerous");
+    const rankNum = RANK_TO_NUM[rankWord] ?? RANK_TO_NUM.dangerous;
+    const itemType = this._pickItemType(["progress"]);
+    const data = {
+      name: foeName,
+      type: "foe",
+      system: {},
+      items: [{
+        name: foeName,
+        type: itemType,
+        system: { subtype: "progress", rank: rankNum, current: 0, completed: false, hasTrack: true },
+        flags: { [ES_SCOPE]: { trackKind: "foe", createdBy: "eternal-skald" } }
+      }],
+      flags: { [ES_SCOPE]: { createdBy: "eternal-skald", custom: true } }
+    };
+    if (folder) data.folder = folder;
+    try {
+      const created = await Actor.create(data);
+      dbg(`createFoeActor: created custom foe "${foeName}" [${rankWord}] (id=${created?.id})`);
+      return { ok: true, name: created?.name ?? foeName, actorId: created?.id, uuid: created?.uuid, source: "custom", rank: rankWord, suggestion: lookup?.suggestion };
+    } catch (e) {
+      warn("createFoeActor failed:", e?.message ?? e);
+      return { ok: false, error: e?.message ?? String(e) };
+    }
+  },
+
+  /**
+   * Create a blank PLAYER CHARACTER actor (type "character") with sensible,
+   * rules-legal default stats and full meters. Optionally seed starting assets
+   * by name. Returns the new actor's id.
+   *
+   * @param {string} name
+   * @param {{stats?:object, assets?:string[], folder?:string}} [opts]
+   * @returns {Promise<{ok:boolean, name?:string, actorId?:string, uuid?:string, assetsAdded?:string[], error?:string}>}
+   */
+  async createCharacter(name, { stats = null, assets = null, folder = null } = {}) {
+    if (!this.isActive()) return { ok: false, error: "Ironsworn system not active." };
+    if (!name) return { ok: false, error: "No character name given." };
+    if (typeof Actor === "undefined" || typeof Actor.create !== "function") {
+      return { ok: false, error: "Actor.create is unavailable." };
+    }
+
+    // Merge caller stats over the defaults, clamping each to STAT_MIN–STAT_MAX.
+    const s = { ...this.DEFAULT_CHARACTER_STATS };
+    if (stats && typeof stats === "object") {
+      for (const k of Object.keys(this.DEFAULT_CHARACTER_STATS)) {
+        const v = Number(stats[k]);
+        if (Number.isFinite(v)) s[k] = Math.max(this.STAT_MIN, Math.min(this.STAT_MAX, Math.round(v)));
+      }
+    }
+    const data = {
+      name,
+      type: "character",
+      system: {
+        edge: s.edge, heart: s.heart, iron: s.iron, shadow: s.shadow, wits: s.wits,
+        health: 5, spirit: 5, supply: 5,
+        momentum: 2, momentumReset: 2, momentumMax: 10
+      },
+      flags: { [ES_SCOPE]: { createdBy: "eternal-skald" } }
+    };
+    if (folder) data.folder = folder;
+
+    let actor;
+    try { actor = await Actor.create(data); }
+    catch (e) { warn("createCharacter failed:", e?.message ?? e); return { ok: false, error: e?.message ?? String(e) }; }
+    if (!actor) return { ok: false, error: "Actor.create returned nothing." };
+
+    const assetsAdded = [];
+    if (Array.isArray(assets) && assets.length) {
+      for (const a of assets) {
+        try { const r = await this.addAssetToActor(actor, a); if (r?.ok && !r.noop) assetsAdded.push(r.name); }
+        catch (_) {}
+      }
+    }
+    dbg(`createCharacter: created "${name}" (id=${actor.id})${assetsAdded.length ? `, assets: ${assetsAdded.join(", ")}` : ""}`);
+    return { ok: true, name: actor.name, actorId: actor.id, uuid: actor.uuid, assetsAdded };
+  },
+
+  /* =================================================================
    *  INTERNAL HELPERS
    * ================================================================= */
 
