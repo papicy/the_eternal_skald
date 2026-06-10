@@ -139,6 +139,46 @@ const MOVE_BY_ID = new Map(MOVE_CATALOG.map(m => [m.id, m]));
 const MOVE_BY_NAME = new Map(MOVE_CATALOG.map(m => [m.name.toLowerCase(), m]));
 
 /* ---------------------------------------------------------------------
+ *  MOVE TRIGGERS (v0.10.34)
+ *  ---------------------------------------------------------------------
+ *  Documented, plain-language trigger text for the moves a player is most
+ *  likely to invoke through free-form ACTION prose (e.g. "I explore the
+ *  cave"). This data GROUNDS the AI action classifier (see
+ *  `buildActionClassifierPrompt`): the model is shown each move name with the
+ *  fictional condition that triggers it, so it can map natural-language
+ *  actions to the correct move rather than guessing. Keyed by move name
+ *  (matching MOVE_CATALOG). Moves omitted here are still rollable by name —
+ *  this list only steers the action→move interpretation. Additive & frozen;
+ *  changing it never alters the deterministic `detectMoveDeclaration` path.
+ * ------------------------------------------------------------------- */
+const MOVE_TRIGGERS = Object.freeze({
+  "Face Danger":          "You attempt something risky or react to an imminent threat — act under pressure, evade, resist, withstand, or push through danger when no more specific move applies.",
+  "Secure an Advantage":  "You assess a situation, make preparations, scout, take aim, set a trap, or manoeuvre to gain leverage or position before acting.",
+  "Gather Information":   "You search, explore, investigate, study, ask around, or examine something to uncover facts, clues, or insight.",
+  "Heal":                 "You treat a physical injury or ailment, your own or another's.",
+  "Resupply":             "You hunt, forage, or scavenge in the wild to restock your supplies.",
+  "Make Camp":            "You rest, recover, and tend to needs while out in the wilds during a journey.",
+  "Undertake a Journey":  "You travel across the wilds toward a destination over meaningful distance or time.",
+  "Reach Your Destination": "You arrive at the end of a journey (rolls the journey progress track).",
+  "Enter the Fray":       "You enter into combat or a dangerous encounter erupts — the first move when a fight begins.",
+  "Strike":               "You attack an enemy in combat while you have the initiative or advantage.",
+  "Clash":                "You fight back, trade blows, or counter-attack when an enemy has the initiative.",
+  "Battle":               "You fight an entire combat abstractly, resolving the whole conflict with a single roll.",
+  "Endure Harm":          "You suffer physical injury, or push onward despite your wounds.",
+  "Endure Stress":        "You suffer mental or emotional shock, or push onward despite despair.",
+  "Swear an Iron Vow":    "You commit to a quest, swear a solemn promise, or pledge yourself to a cause.",
+  "Reach a Milestone":    "You take a significant step that brings you closer to fulfilling a vow.",
+  "Fulfill Your Vow":     "You complete the final step of a quest you vowed to achieve (rolls the vow progress).",
+  "Compel":               "You try to persuade, charm, bargain with, intimidate, threaten, or coerce another character.",
+  "Sojourn":              "You rest and recover within a community or settlement.",
+  "Draw the Circle":      "You challenge someone to a formal duel.",
+  "Forge a Bond":         "You solidify a lasting bond or relationship with a person, community, or place.",
+  "Test Your Bond":       "You put an existing bond to the test under strain or conflict.",
+  "Delve the Depths":     "You explore deeper into a dangerous site, dungeon, or hostile region.",
+  "Ask the Oracle":       "You pose a yes/no or open question about the world or fiction to chance (often better served by the !oracle command)."
+});
+
+/* ---------------------------------------------------------------------
  *  MOVE COMPENDIUM MAP (mirrors foundry-ironsworn's COMPENDIUM_KEY_MAP)
  *  ---------------------------------------------------------------------
  *  The official system stores every move as an `sfmove` Item inside one of
@@ -2788,6 +2828,182 @@ export const IronswornController = {
     } catch (e) {
       warn("detectMoveDeclaration failed:", e?.message ?? e);
       return null;
+    }
+  },
+
+  /* ===================================================================
+   *  INTELLIGENT ACTION → MOVE MAPPING (v0.10.34)
+   *  -------------------------------------------------------------------
+   *  These three PURE helpers power the hybrid action classifier. They
+   *  contain NO Foundry/AI calls (so they unit-test in plain node); the
+   *  actual `Client.chat` call lives in eternal-skald.js, which feeds the
+   *  prompt from `buildActionClassifierPrompt`, then runs the model's reply
+   *  through `parseActionClassification` and `decideActionRouting`.
+   * =================================================================== */
+
+  /** The five rollable action stats, exposed for prompt/validation reuse. */
+  ACTION_STATS: Object.freeze(["edge", "heart", "iron", "shadow", "wits"]),
+
+  /**
+   * Build the system + user messages for the action classifier. The model is
+   * asked to decide whether the player's message is a mechanical ACTION (and
+   * if so, which Ironsworn move[s] it triggers), a QUESTION seeking guidance,
+   * or pure ROLEPLAY — and to answer with STRICT JSON only. The move list is
+   * grounded with the documented triggers in MOVE_TRIGGERS so the mapping is
+   * rules-accurate rather than guessed.
+   *
+   * Pure: returns plain strings; never touches Foundry or the network.
+   *
+   * @param {string} text  The player's free-form message (after "!").
+   * @param {object} [opts]
+   * @param {string} [opts.sceneContext]  Optional short fiction/combat context
+   *   to help disambiguate (e.g. "In combat", "Exploring a delve site").
+   * @returns {{system: string, user: string}}
+   */
+  buildActionClassifierPrompt(text, { sceneContext = "" } = {}) {
+    const lines = [];
+    for (const m of MOVE_CATALOG) {
+      const trig = MOVE_TRIGGERS[m.name];
+      if (!trig) continue; // only the action-relevant, documented moves
+      const stats = (m.stats || []).filter(s => this.ACTION_STATS.includes(s));
+      const statHint = stats.length ? ` [stats: ${stats.join(", ")}]` : "";
+      lines.push(`- ${m.name}${statHint}: ${trig}`);
+    }
+    const moveList = lines.join("\n");
+
+    const system =
+      "You are a strict classifier for an Ironsworn tabletop RPG assistant. " +
+      "Given a player's chat message, decide which ONE of three intents it is:\n" +
+      '  • "action"   — the player describes doing something in the fiction that ' +
+      "triggers an Ironsworn move (e.g. \"I search the ruins\", \"I attack the wolf\").\n" +
+      '  • "question" — the player asks for guidance, rules, or what to do ' +
+      "(e.g. \"what should I do?\", \"which move fits?\").\n" +
+      '  • "roleplay" — pure dialogue, description, or narration with NO ' +
+      "mechanical action (e.g. \"I tell the jarl my name\", \"I admire the view\").\n\n" +
+      "If and only if the intent is \"action\", identify the most likely move(s) " +
+      "from the list below, most likely first. If two or more moves genuinely fit " +
+      "(true ambiguity), list them all. Use ONLY exact move names from this list. " +
+      "Pick a stat only if the action clearly implies one; otherwise leave it empty.\n\n" +
+      "MOVES AND THEIR TRIGGERS:\n" + moveList + "\n\n" +
+      "Respond with STRICT JSON ONLY (no prose, no code fence), shaped exactly:\n" +
+      '{"type":"action|question|roleplay",' +
+      '"moves":[{"name":"<exact move name>","stat":"<edge|heart|iron|shadow|wits or empty>","confidence":"high|medium|low"}],' +
+      '"reason":"<one short clause>"}\n' +
+      'For "question" or "roleplay", return an empty "moves" array. ' +
+      "Be conservative: if the message is mostly description or you are unsure an " +
+      'action triggers a move, prefer "roleplay" or a "low" confidence.';
+
+    const ctx = sceneContext ? `Current scene context: ${sceneContext}\n\n` : "";
+    const user = `${ctx}Player message:\n"""${String(text ?? "").trim()}"""`;
+
+    return { system, user };
+  },
+
+  /**
+   * Defensively parse the classifier's reply into a normalised object. Tolerates
+   * code fences and surrounding prose by extracting the first JSON object. Every
+   * candidate move is validated against the REAL catalog (invalid names dropped)
+   * and its stat validated against that move's rollable stats (invalid → empty).
+   *
+   * Pure & never throws. Returns null when nothing usable could be parsed.
+   *
+   * @param {string} raw  The model's text reply.
+   * @returns {{type:"action"|"question"|"roleplay",
+   *            moves:Array<{move:object,name:string,stat:string,confidence:string}>,
+   *            reason:string}|null}
+   */
+  parseActionClassification(raw) {
+    try {
+      if (!raw || typeof raw !== "string") return null;
+      let s = raw.trim();
+      // Strip a ```json … ``` fence if present.
+      s = s.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+      // Extract the first {...} block if the model added stray prose.
+      if (s[0] !== "{") {
+        const a = s.indexOf("{");
+        const b = s.lastIndexOf("}");
+        if (a === -1 || b === -1 || b <= a) return null;
+        s = s.slice(a, b + 1);
+      }
+      const obj = JSON.parse(s);
+      if (!obj || typeof obj !== "object") return null;
+
+      let type = String(obj.type || "").toLowerCase().trim();
+      if (!["action", "question", "roleplay"].includes(type)) {
+        // Unknown/missing type → treat as non-actionable (safe default).
+        type = "roleplay";
+      }
+
+      const out = [];
+      const seen = new Set();
+      const rawMoves = Array.isArray(obj.moves) ? obj.moves : [];
+      for (const entry of rawMoves) {
+        if (!entry) continue;
+        const nm = typeof entry === "string" ? entry : entry.name;
+        const move = this._resolveMove(nm);
+        if (!move) continue;                          // not a real move → drop
+        if (seen.has(move.name)) continue;            // de-dupe
+        seen.add(move.name);
+        let stat = String(entry.stat || "").toLowerCase().trim();
+        if (!Array.isArray(move.stats) || !move.stats.includes(stat)) stat = "";
+        let confidence = String(entry.confidence || "").toLowerCase().trim();
+        if (!["high", "medium", "low"].includes(confidence)) confidence = "medium";
+        out.push({ move, name: move.name, stat, confidence });
+      }
+
+      return {
+        type,
+        moves: out,
+        reason: typeof obj.reason === "string" ? obj.reason.trim() : ""
+      };
+    } catch (e) {
+      warn("parseActionClassification failed:", e?.message ?? e);
+      return null;
+    }
+  },
+
+  /**
+   * Decide what to DO with a parsed classification. Pure routing logic, kept
+   * separate from the AI call so it can be unit-tested exhaustively.
+   *
+   * Routing:
+   *   • non-action (question/roleplay) or no valid move        → "narrate"
+   *   • ≥ 2 valid candidate moves (ambiguous)                  → "confirm"
+   *   • exactly 1 move:
+   *       – confidence "low"                                   → "narrate"
+   *       – confidence "medium", OR alwaysConfirm set          → "confirm"
+   *       – confidence "high"                                  → "roll"
+   *
+   * @param {object|null} parsed  Output of parseActionClassification.
+   * @param {object} [opts]
+   * @param {boolean} [opts.alwaysConfirm=false]  Force a confirmation card even
+   *   for a single high-confidence match (player-agency / cautious GMs).
+   * @returns {{action:"roll"|"confirm"|"narrate",
+   *            move?:object, stat?:string,
+   *            candidates?:Array<{move:object,name:string,stat:string,confidence:string}>,
+   *            reason?:string}}
+   */
+  decideActionRouting(parsed, { alwaysConfirm = false } = {}) {
+    const NARRATE = { action: "narrate" };
+    try {
+      if (!parsed || parsed.type !== "action") return NARRATE;
+      const moves = Array.isArray(parsed.moves) ? parsed.moves : [];
+      if (moves.length === 0) return NARRATE;
+
+      if (moves.length >= 2) {
+        return { action: "confirm", candidates: moves, reason: parsed.reason || "" };
+      }
+
+      const only = moves[0];
+      if (only.confidence === "low") return NARRATE;
+      if (alwaysConfirm || only.confidence === "medium") {
+        return { action: "confirm", candidates: [only], reason: parsed.reason || "" };
+      }
+      // single high-confidence match
+      return { action: "roll", move: only.move, stat: only.stat, reason: parsed.reason || "" };
+    } catch (e) {
+      warn("decideActionRouting failed:", e?.message ?? e);
+      return NARRATE;
     }
   },
 
