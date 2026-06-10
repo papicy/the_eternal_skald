@@ -1626,6 +1626,44 @@ supply directives here; those are applied automatically after dice rolls.`);
     if (foeGuidance) parts.push(foeGuidance);
   }
 
+  // (v0.10.26 — Phase 1) PROGRESS-TRACK COMPLETION RULES. The live game state
+  // now labels every track FULL / NOT YET FULL and marks the ACTIVE combat and
+  // the [STORY FOCUS] vow. These rules stop the Skald from concluding a track
+  // (offering Fulfill Your Vow / End the Fight / Reach Your Destination) before
+  // its track is actually full, which was the main cause of premature endings.
+  // Added whenever moves or track effects are in play.
+  if (allowMoves || allowFollowups || allowEffects || allowTrackEffects) {
+    parts.push(`\
+PROGRESS-TRACK COMPLETION — A HARD RULE (read carefully):
+In the LIVE GAME STATE each progress track is labelled with its fullness:
+"X/10 boxes - NOT YET FULL" or "10/10 boxes - ✅ READY TO FULFILL/END/REACH".
+
+⛔ You must NEVER offer or suggest a completion move — "Fulfill Your Vow",
+"End the Fight", or "Reach Your Destination" — for a track that is "NOT YET
+FULL". A track is completed ONLY when it reaches 10/10 boxes through play.
+• Keep the story moving: generate fresh obstacles, complications, and beats so
+  the character earns progress toward the goal. The system marks the boxes.
+• Only when a track shows "✅ READY TO FULFILL" (vow), "✅ READY TO END"
+  (combat), or "✅ READY TO REACH" (journey) should you offer that completion
+  move, then wait for the player to roll and narrate the result
+  (Strong Hit / Weak Hit / Miss).
+• Do NOT emit a [[EFFECT: complete_vow]], [[EFFECT: complete_journey]], or
+  [[EFFECT: end_combat]] directive for a track that is NOT YET FULL on your own
+  narrative judgement alone — wait until it is full and the completion move is
+  rolled.
+• THE ONE EXCEPTION: if the PLAYER explicitly asks to conclude early ("I want
+  to fulfill my vow now even though it isn't full"), you may honour that — the
+  player's stated choice always wins.
+
+MULTIPLE TRACKS — DON'T CONFLATE STORY ARCS:
+• When several vows or journeys are open, the one labelled [STORY FOCUS] is the
+  current narrative priority. Apply progress and effects to the contextually
+  relevant track, and name explicitly which vow/journey you mean.
+• ACTIVE COMBAT: only ONE fight is active at a time. The track marked
+  "⚔️ ACTIVE COMBAT" is the current foe — all combat progress applies to that
+  enemy only. Do not start narrating a second simultaneous fight.`);
+  }
+
   // (v0.10.25) Assets & experience guidance. The live game state may now list
   // the character's "Assets" (companions, paths, talents, rituals) and their
   // "Experience"/"Legacies". This tells the Skald how to weave that truth into
