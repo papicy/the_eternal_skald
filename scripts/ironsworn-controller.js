@@ -3307,6 +3307,120 @@ export const IronswornController = {
   },
 
   /* =================================================================
+   *  ASSET BONUS ADVISORY (v0.10.38 — Phase 4)
+   *
+   *  Ironsworn assets are free-form *descriptive text*: there is no
+   *  structured "bonus" field, and Foundry's roll dialogs expose no
+   *  public API for injecting external modifiers. Rather than fragile
+   *  automatic injection (which would break the roll system the moment
+   *  the dialog markup changes), the Skald *advises*. It scans the
+   *  active character's ENABLED asset abilities for roll-bonus wording
+   *  (e.g. "add +1", "+2 when …", "take +1") and — when a bonus plausibly
+   *  applies to the move being made — surfaces a non-blocking chat
+   *  suggestion. The player decides whether to apply it. Full player
+   *  agency, zero roll-system risk.
+   *
+   *  This method is PURE: it takes the asset snapshot (as produced by
+   *  {@link getAssets}) plus the move name/stat and returns the matched
+   *  bonuses. No Foundry calls, no chat, no side-effects — so it is fully
+   *  unit-testable in plain Node.
+   * ================================================================= */
+
+  /** Stopwords stripped before move↔asset keyword matching. */
+  _BONUS_STOPWORDS: new Set([
+    "the", "a", "an", "and", "or", "of", "to", "in", "on", "at", "for", "with",
+    "when", "if", "you", "your", "yours", "may", "add", "take", "gain", "this",
+    "that", "roll", "move", "moves", "make", "making", "made", "action",
+    "instead", "also", "can", "could", "using", "use", "used", "while",
+    "against", "into", "from", "but", "not", "do", "does", "it", "its", "as",
+    "by", "be", "are", "is", "any", "all", "one", "two", "each", "per", "then"
+  ]),
+
+  /** Tokenise a phrase into meaningful (≥3-char, non-stopword) keywords. */
+  _bonusTokens(s) {
+    return String(s ?? "")
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter(t => t.length >= 3 && !this._BONUS_STOPWORDS.has(t));
+  },
+
+  /** Extract the sentence/clause of `text` that contains character `idx`. */
+  _bonusSentence(text, idx) {
+    const breaks = [".", "!", "?", ";", "•"];
+    let start = -1;
+    for (const ch of breaks) {
+      const p = text.lastIndexOf(ch, Math.max(0, idx - 1));
+      if (p > start) start = p;
+    }
+    let end = text.length;
+    for (const ch of breaks) {
+      const e = text.indexOf(ch, idx);
+      if (e !== -1 && e < end) end = e;
+    }
+    let s = text.slice(start + 1, end + 1).trim();
+    if (s.length > 200) s = s.slice(0, 197) + "…";
+    return s;
+  },
+
+  /**
+   * Scan a character's enabled asset abilities for roll bonuses that
+   * plausibly apply to the move being made.
+   *
+   * @param {Array<{name:string,abilities?:string[]}>} assets
+   *        Asset snapshot from {@link getAssets}.
+   * @param {string} moveName              The move being declared.
+   * @param {object} [opts]
+   * @param {string} [opts.stat=""]        The stat being rolled (optional).
+   * @param {number} [opts.maxResults=4]   Cap on suggestions returned.
+   * @returns {Array<{asset:string,bonus:number,condition:string,relevance:number}>}
+   *   Sorted by relevance (desc); never null. Empty when nothing applies.
+   */
+  detectAssetBonuses(assets, moveName, { stat = "", maxResults = 4 } = {}) {
+    const out = [];
+    if (!Array.isArray(assets) || !assets.length) return out;
+    const moveTokens = this._bonusTokens(moveName);
+    const statTok = String(stat ?? "").toLowerCase().trim();
+    if (!moveTokens.length && !statTok) return out;
+    const seen = new Set();
+    for (const asset of assets) {
+      const abilities = Array.isArray(asset?.abilities) ? asset.abilities : [];
+      for (const raw of abilities) {
+        const text = String(raw ?? "")
+          .replace(/<[^>]*>/g, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (!text) continue;
+        const lc = text.toLowerCase();
+        const re = /\+(\d+)\b/g;
+        let m;
+        while ((m = re.exec(text)) !== null) {
+          const bonus = parseInt(m[1], 10);
+          if (!Number.isFinite(bonus) || bonus <= 0 || bonus > 9) continue;
+          const condition = this._bonusSentence(text, m.index);
+          const condLc = condition.toLowerCase();
+          // A bonus is "relevant" when the move's keywords appear near it.
+          // Matches inside the bonus's own sentence count double; matches
+          // elsewhere in the ability count single. A stat match adds one.
+          let relevance = 0;
+          for (const t of moveTokens) {
+            if (condLc.includes(t)) relevance += 2;
+            else if (lc.includes(t)) relevance += 1;
+          }
+          if (statTok && (condLc.includes(statTok) || lc.includes(statTok))) relevance += 1;
+          if (relevance <= 0) continue;
+          const key = `${asset?.name ?? ""}|${bonus}|${condition}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          out.push({ asset: asset?.name ?? "(asset)", bonus, condition, relevance });
+        }
+      }
+    }
+    out.sort((a, b) => (b.relevance - a.relevance) || (b.bonus - a.bonus));
+    return out.slice(0, Math.max(1, maxResults));
+  },
+
+  /* =================================================================
    *  INTERNAL HELPERS
    * ================================================================= */
 
