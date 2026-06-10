@@ -71,6 +71,10 @@
         "name": "Auto-Narrate Move Outcomes",
         "hint": "When a move is rolled through the Ironsworn system, the Skald automatically narrates the result (strong hit / weak hit / miss) in saga style. Requires Ironsworn Rules Integration."
       },
+      "interceptMoveDeclarations": {
+        "name": "Player Move Declarations Open the Dialog",
+        "hint": "When a player simply NAMES an official Ironsworn move (e.g. \"!Strike\", \"!Face Danger\", \"!I want to Secure an Advantage +iron\"), open that move's roll dialog instead of generating AI narration. Moves stay the player's mechanical choice; the Skald continues the story only after the dice resolve. Questions and narration requests are unaffected. Requires Ironsworn Rules Integration. Turn OFF to treat every \"!\" message as a prompt to the Skald."
+      },
       "autoNarrateXp": {
         "name": "Auto-Narrate Experience Gains",
         "hint": "When the character earns experience (the Ironsworn XP counter rises, or a Starforged legacy track advances), the Skald automatically narrates the milestone in saga style. Requires Ironsworn Rules Integration. Observe-only: the Skald never writes or spends XP itself."
