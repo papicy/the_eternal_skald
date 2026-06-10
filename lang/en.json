@@ -71,6 +71,10 @@
         "name": "Auto-Narrate Move Outcomes",
         "hint": "When a move is rolled through the Ironsworn system, the Skald automatically narrates the result (strong hit / weak hit / miss) in saga style. Requires Ironsworn Rules Integration."
       },
+      "autoNarrateXp": {
+        "name": "Auto-Narrate Experience Gains",
+        "hint": "When the character earns experience (the Ironsworn XP counter rises, or a Starforged legacy track advances), the Skald automatically narrates the milestone in saga style. Requires Ironsworn Rules Integration. Observe-only: the Skald never writes or spends XP itself."
+      },
       "narrationDelay": {
         "name": "Narration Delay (ms)",
         "hint": "How long to wait after a roll before auto-narrating (allows dice animations to finish). Recommended: 2000ms for Dice So Nice, 500ms without."

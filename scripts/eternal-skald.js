@@ -357,6 +357,15 @@ const Settings = {
       default: true
     });
 
+    game.settings.register(MODULE_ID, "autoNarrateXp", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.autoNarrateXp.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.autoNarrateXp.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true
+    });
+
     game.settings.register(MODULE_ID, "narrationDelay", {
       name: game.i18n.localize("ETERNAL_SKALD.settings.narrationDelay.name"),
       hint: game.i18n.localize("ETERNAL_SKALD.settings.narrationDelay.hint"),
@@ -1616,6 +1625,23 @@ supply directives here; those are applied automatically after dice rolls.`);
     const foeGuidance = buildFoeGuidance();
     if (foeGuidance) parts.push(foeGuidance);
   }
+
+  // (v0.10.25) Assets & experience guidance. The live game state may now list
+  // the character's "Assets" (companions, paths, talents, rituals) and their
+  // "Experience"/"Legacies". This tells the Skald how to weave that truth into
+  // the fiction without ever touching the rules.
+  parts.push(`\
+ASSETS & EXPERIENCE (use what the sheet actually shows — never invent):
+• When the live game state lists "Assets", treat them as the character's real,
+  hard-earned capabilities (a companion, a path, a combat talent, a ritual…).
+  Reference them by their EXACT names and weave their flavour into the prose
+  when fitting — e.g. let a named companion act, or a known ritual colour a
+  scene. Do NOT invent assets the character does not own, and do NOT claim an
+  ability is unlocked beyond the "N/M abilities" shown.
+• When "Experience" or "Legacies" appear, you may acknowledge growth and
+  milestones in the fiction, but you NEVER award, spend, or compute experience
+  yourself — that is the player's and the system's domain. Simply honour the
+  numbers as already-true facts and let them inform the tone of the saga.`);
 
   if (context && typeof context === "string" && context.trim()) {
     parts.push(`LIVE GAME STATE (authoritative — read from the sheet):\n${context.trim()}`);
@@ -5109,6 +5135,74 @@ const Integration = {
     let ms = Settings.get("narrationDelay");
     if (typeof ms !== "number" || Number.isNaN(ms)) ms = 2000;
     return Math.max(0, Math.min(5000, ms));
+  },
+
+  /**
+   * (v0.10.25 — XP tracking) Narrate an experience milestone that the
+   * Ironsworn system has ALREADY recorded on the character sheet. This is a
+   * purely OBSERVE-ONLY reaction: the diff-watcher hook (see the
+   * `updateActor` registration near the bottom of this file) detects that the
+   * `system.xp` counter rose, or that a Starforged legacy track advanced, and
+   * hands us the pre-computed positive delta. We never compute, write, or
+   * spend XP ourselves — that stays entirely under the player's / system's
+   * control.
+   *
+   * Fully defensive: every guard fails safe and the narration is fire-and-
+   * forget, so an AI hiccup can never block the sheet update that triggered
+   * it.
+   *
+   * @param {Actor}  actor   the actor whose experience changed.
+   * @param {object} info
+   * @param {number} [info.xpDelta]    positive change in `system.xp`, if any.
+   * @param {number} [info.newXp]      the new total `system.xp`, if known.
+   * @param {Array<{name:string,delta:number}>} [info.legacyDeltas]
+   *        positive advances on named legacy tracks (Starforged), if any.
+   * @returns {Promise<void>}
+   */
+  async onXpGain(actor, info = {}) {
+    try {
+      if (!this.active()) return;
+      if (!actor) return;
+      if ((Settings.get("autoNarrateXp") ?? true) === false) return;
+
+      const parts = [];
+      if (typeof info.xpDelta === "number" && info.xpDelta > 0) {
+        const total = typeof info.newXp === "number" ? ` (now ${info.newXp} total)` : "";
+        parts.push(`earned ${info.xpDelta} experience${total}`);
+      }
+      if (Array.isArray(info.legacyDeltas)) {
+        for (const d of info.legacyDeltas) {
+          if (d && typeof d.delta === "number" && d.delta > 0) {
+            parts.push(`advanced their ${d.name} legacy by ${d.delta} tick${d.delta === 1 ? "" : "s"}`);
+          }
+        }
+      }
+      if (!parts.length) return; // nothing positive to celebrate
+
+      const summary = `${actor.name} has ${parts.join(" and ")}.`;
+      const ctx = this.gatherContext();
+      const task = `The hero has just gained experience — a moment of growth worth marking.
+What happened: ${summary}
+Narrate this milestone briefly and evocatively as the Skald (1–3 sentences), framing it as hard-won growth that flows from recent deeds. Do NOT invent specific mechanical rewards, do NOT tell the player how to spend the experience, and do NOT emit any [[EFFECT:…]] or [[MOVE:…]] directives — this is pure narration of growth the rules have already recorded.`;
+
+      const messages = [
+        { role: "system", content: buildSystemPrompt({ task, context: ctx, allowEffects: false, allowFollowups: false, allowJournal: true }) }
+      ];
+
+      const cardOpts = { variant: "lore", title: "A Milestone of Growth" };
+      const streaming = Settings.get("streamingEnabled") !== false;
+      let reply;
+      if (streaming) {
+        ({ reply } = await callSkaldStreaming(messages, { ...cardOpts, chatOpts: { temperature: 0.85, maxTokens: 220 } }));
+      } else {
+        reply = await Client.chat(messages, { temperature: 0.85, maxTokens: 220 });
+        await Chat.postSkald(formatMarkdown(stripDirectivesForDisplay(reply)), cardOpts);
+      }
+      // Fire-and-forget chronicle ingestion (never blocks/breaks play).
+      try { JournalSystem.ingestReply(reply, { channel: "lore" }); } catch (_) { /* defensive */ }
+    } catch (e) {
+      console.warn(LOG_PREFIX, "onXpGain narration failed", e?.message ?? e);
+    }
   },
 
   /**
@@ -8936,6 +9030,77 @@ for (const hook of [
 ]) {
   Hooks.on(hook, () => { try { EntityLinker.invalidate(); } catch (_) { /* defensive */ } });
 }
+
+/* === XP / legacy diff-watcher (v0.10.25) ============================
+ * OBSERVE-ONLY experience tracking. When the foundry-ironsworn system (or the
+ * player) records a gain on the sheet — the classic `system.xp` counter rises,
+ * or a Starforged legacy track advances — the Skald narrates the milestone.
+ *
+ * It NEVER writes, computes, or spends experience: it merely reacts to a
+ * change the rules have already committed, comparing against an in-memory
+ * baseline so only POSITIVE deltas are celebrated. The first sighting of an
+ * actor seeds that baseline silently (no narration on load / first edit).
+ *
+ * Registered as its OWN `updateActor` listener (separate from the linker-cache
+ * loop above) so each concern stays isolated and independently fail-safe.
+ *
+ * Guards (each cheap, fail-safe):
+ *   • Active GM only   — avoids duplicate narration across connected clients.
+ *   • AI Mode ON + Ironsworn integration active.
+ *   • The `changed` diff actually touched xp/legacies — otherwise we ignore
+ *     the update entirely (no work on unrelated sheet edits).
+ * ==================================================================== */
+const _esXpBaseline = new Map(); // actorId -> { xp:(number|null), legacies:(object|null) }
+Hooks.on("updateActor", (actor, changed /*, options, userId */) => {
+  try {
+    if (!game.user?.isGM) return;
+    if (game.users?.activeGM && game.users.activeGM.id !== game.user.id) return;
+    if (Settings.get("aiMode") === false) return;
+    if (!IronswornController?.isActive?.()) return;
+    if (!actor?.id) return;
+
+    // Cheap gate: only react when the committed diff touched experience data.
+    const sys = changed?.system;
+    const touchedXp = sys && Object.prototype.hasOwnProperty.call(sys, "xp");
+    const touchedLegacies = sys && Object.prototype.hasOwnProperty.call(sys, "legacies");
+    if (!touchedXp && !touchedLegacies) return;
+
+    const current = IronswornController.getExperience(actor);
+    const prev = _esXpBaseline.get(actor.id);
+    // Always refresh the baseline to the post-update state.
+    _esXpBaseline.set(actor.id, { xp: current.xp, legacies: current.legacies ? { ...current.legacies } : null });
+
+    // First sighting: seed silently, never narrate on load / first edit.
+    if (!prev) return;
+
+    const info = { legacyDeltas: [] };
+    if (typeof current.xp === "number" && typeof prev.xp === "number" && current.xp > prev.xp) {
+      info.xpDelta = current.xp - prev.xp;
+      info.newXp = current.xp;
+    }
+    if (current.legacies && prev.legacies) {
+      for (const key of ["quests", "bonds", "discoveries"]) {
+        const now = current.legacies[key];
+        const was = prev.legacies[key];
+        if (typeof now === "number" && typeof was === "number" && now > was) {
+          info.legacyDeltas.push({ name: key, delta: now - was });
+        }
+      }
+    }
+
+    const hasGain = (typeof info.xpDelta === "number" && info.xpDelta > 0) || info.legacyDeltas.length > 0;
+    if (!hasGain) return;
+
+    // Fire-and-forget, slightly delayed so any concurrent sheet re-render and
+    // dice animation settle first. Never blocks the actor update.
+    setTimeout(() => {
+      Integration.onXpGain(actor, info).catch(err =>
+        console.warn(LOG_PREFIX, "onXpGain failed", err?.message ?? err));
+    }, Integration._narrationDelayMs?.() ?? 2000);
+  } catch (err) {
+    console.warn(LOG_PREFIX, "updateActor XP watcher failed:", err?.message ?? err);
+  }
+});
 
 // A fresh world / reload starts with a clean index.
 Hooks.once("ready", () => {

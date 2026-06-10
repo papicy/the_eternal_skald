@@ -305,6 +305,103 @@ export const IronswornController = {
   },
 
   /**
+   * (v0.10.25 — asset tracking) Read the character's owned ASSET Items
+   * (companions, paths, combat talents, rituals, …) and summarise them in
+   * an AI-friendly, token-efficient shape. READ-ONLY and synchronous, so it
+   * mirrors {@link getProgressTracks} and is safe to call from the prompt
+   * builder on every turn.
+   *
+   * The foundry-ironsworn AssetModel stores each asset as an embedded Item of
+   * `type === "asset"`, whose `system` carries:
+   *   • `category`   — e.g. "Companion" | "Path" | "Combat Talent" | "Ritual".
+   *   • `abilities[]` — ordered list; each `{ name, enabled, description, … }`.
+   *                     The count of `enabled === true` entries says how far the
+   *                     asset is unlocked/upgraded.
+   *   • `track`       — optional asset condition meter `{ enabled, name,
+   *                     value, min, max }` (e.g. a companion's health).
+   *
+   * Every read is null-guarded via `foundry.utils.getProperty`, so an asset
+   * authored under an older/newer schema degrades to sensible defaults rather
+   * than throwing.
+   *
+   * @param {Actor}  actor                the actor to read (may be null).
+   * @param {object} [opts]
+   * @param {number} [opts.limit=12]      max assets to return (token budget).
+   * @returns {Array<{id:string,name:string,category:(string|null),
+   *   unlocked:number,total:number,
+   *   track:({name:string,value:(number|null),max:(number|null)}|null)}>}
+   *   A (possibly empty) array — never null.
+   */
+  getAssets(actor, { limit = 12 } = {}) {
+    if (!actor?.items) return [];
+    const out = [];
+    for (const item of actor.items) {
+      if (item?.type !== "asset") continue;
+      const abilities = foundry.utils.getProperty(item, "system.abilities");
+      const list = Array.isArray(abilities) ? abilities : [];
+      const unlocked = list.filter(a => a?.enabled === true).length;
+      const track = foundry.utils.getProperty(item, "system.track") ?? null;
+      const hasTrack = track && typeof track === "object" && track.enabled === true;
+      out.push({
+        id: item.id,
+        name: item.name,
+        category: foundry.utils.getProperty(item, "system.category") ?? null,
+        unlocked,
+        total: list.length,
+        track: hasTrack
+          ? {
+              name: track.name || "track",
+              value: typeof track.value === "number" ? track.value : null,
+              max: typeof track.max === "number" ? track.max : null
+            }
+          : null
+      });
+      if (out.length >= limit) break;
+    }
+    return out;
+  },
+
+  /**
+   * (v0.10.25 — XP tracking) Read the character's experience in a unified,
+   * model-agnostic shape, covering BOTH Ironsworn rulesets:
+   *   • Classic Ironsworn — a single integer counter at `system.xp`
+   *     (experience earned to date).
+   *   • Starforged — three legacy tracks under `system.legacies`
+   *     (`quests`, `bonds`, `discoveries`), each a ProgressTicks value, with a
+   *     paired `*XpSpent` counter recording XP already spent from that legacy.
+   *
+   * The two models are not mutually exclusive in data, so both are read and
+   * returned independently; callers decide what to surface. Fully null-guarded
+   * and never throws — absent fields come back as `null`.
+   *
+   * @param {Actor} actor   the actor to read (may be null).
+   * @returns {{xp:(number|null),
+   *   legacies:({quests:number,questsXpSpent:number,
+   *     bonds:number,bondsXpSpent:number,
+   *     discoveries:number,discoveriesXpSpent:number}|null)}}
+   */
+  getExperience(actor) {
+    if (!actor) return { xp: null, legacies: null };
+    const xpRaw = foundry.utils.getProperty(actor, "system.xp");
+    const xp = typeof xpRaw === "number" ? xpRaw : null;
+
+    const L = foundry.utils.getProperty(actor, "system.legacies");
+    const num = (v) => (typeof v === "number" ? v : 0);
+    const legacies = (L && typeof L === "object")
+      ? {
+          quests:             num(L.quests),
+          questsXpSpent:      num(L.questsXpSpent),
+          bonds:              num(L.bonds),
+          bondsXpSpent:       num(L.bondsXpSpent),
+          discoveries:        num(L.discoveries),
+          discoveriesXpSpent: num(L.discoveriesXpSpent)
+        }
+      : null;
+
+    return { xp, legacies };
+  },
+
+  /**
    * All progress-track Items on the actor. Ironsworn stores vows, bonds,
    * journeys and combat/progress tracks as embedded Items whose type
    * varies between data-model revisions, so we accept several type names
@@ -484,6 +581,33 @@ export const IronswornController = {
       if (openVows.length)     lines.push(`Open vows (reference by EXACT title): ${openVows.join(", ")}`);
       if (openJourneys.length) lines.push(`Open journeys (reference by EXACT title): ${openJourneys.join(", ")}`);
     }
+
+    // (v0.10.25) ASSETS — companions, paths, talents, rituals. Surfaced by
+    // EXACT name plus unlock progress and any condition meter, so the AI can
+    // reference what the character actually owns instead of inventing kit.
+    const assets = this.getAssets(actor);
+    if (assets.length) {
+      lines.push("Assets:");
+      for (const a of assets) {
+        const cat   = a.category ? ` (${a.category})` : "";
+        const prog  = a.total ? ` — ${a.unlocked}/${a.total} abilities` : "";
+        const track = a.track
+          ? `; ${a.track.name} ${a.track.value ?? "?"}${a.track.max != null ? `/${a.track.max}` : ""}`
+          : "";
+        lines.push(`  - ${a.name}${cat}${prog}${track}`);
+      }
+    }
+
+    // (v0.10.25) EXPERIENCE — classic Ironsworn `xp` counter and/or the
+    // Starforged legacy tracks. Either may be absent depending on ruleset, so
+    // each is surfaced only when present.
+    const xpInfo = this.getExperience(actor);
+    if (xpInfo.xp != null) lines.push(`Experience: ${xpInfo.xp} XP earned`);
+    if (xpInfo.legacies) {
+      const L = xpInfo.legacies;
+      lines.push(`Legacies (ticks): Quests ${L.quests}, Bonds ${L.bonds}, Discoveries ${L.discoveries}`);
+    }
+
     return lines.join("\n");
   },
 
