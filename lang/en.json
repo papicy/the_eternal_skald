@@ -75,6 +75,14 @@
         "name": "Auto-Narrate Experience Gains",
         "hint": "When the character earns experience (the Ironsworn XP counter rises, or a Starforged legacy track advances), the Skald automatically narrates the milestone in saga style. Requires Ironsworn Rules Integration. Observe-only: the Skald never writes or spends XP itself."
       },
+      "awardXpOnCompletion": {
+        "name": "Auto-Award XP on Vow Completion",
+        "hint": "When a vow (or other progress track) is marked complete — whether from the sheet, a fulfilled-vow roll, or the Skald — automatically award the rank-appropriate experience (Troublesome 1 … Epic 5). The award is recorded once per track (it can never grant twice). Requires Ironsworn Rules Integration. Turn OFF to record experience entirely by hand."
+      },
+      "weakHitHalfXp": {
+        "name": "Half XP on a Weak-Hit Completion",
+        "hint": "OPTIONAL rule. When a completion move resolves as a WEAK HIT, award half the rank's experience (rounded up) instead of the full amount. Off by default (full XP regardless of outcome). Only applies when the completion outcome is known."
+      },
       "narrationDelay": {
         "name": "Narration Delay (ms)",
         "hint": "How long to wait after a roll before auto-narrating (allows dice animations to finish). Recommended: 2000ms for Dice So Nice, 500ms without."

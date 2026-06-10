@@ -390,8 +390,47 @@ const TERMINOLOGY = {
 };
 
 /* ------------------------------------------------------------------ */
+/*  EXPERIENCE (XP) AWARDS                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Experience earned for FULFILLING a vow / progress track, keyed by the
+ * track's challenge rank. These are the canonical values from the Ironsworn
+ * SRD ("Earning Experience"): you mark experience equal to the rank of the
+ * vow you fulfil — Troublesome 1 … Epic 5. The same scale is used by the
+ * Skald's XP-granting controller (grantXp / xpForRank).
+ *
+ * NOTE: spending experience (Assets cost 3 XP, ability upgrades 2 XP) is NOT
+ * modelled here — Phase 1 only AWARDS experience.
+ */
+const RANK_XP = Object.freeze({
+  troublesome: 1, dangerous: 2, formidable: 3, extreme: 4, epic: 5
+});
+
+/* ------------------------------------------------------------------ */
 /*  HELPERS                                                            */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Experience earned for a vow/progress track of the given rank.
+ *
+ * @param {string|number} rank   a canonical rank word ("troublesome" …
+ *        "epic"), case-insensitive, or the numeric ChallengeRank 1–5 the
+ *        foundry-ironsworn data model stores.
+ * @param {{weakHit?: boolean}} [opts]  when `weakHit` is true the OPTIONAL
+ *        half-XP rule applies — the award is halved and rounded UP (so a
+ *        Troublesome weak hit still yields 1, never 0).
+ * @returns {number}  whole experience points (0 for an unknown rank).
+ */
+function xpForRank(rank, { weakHit = false } = {}) {
+  const NUM = { 1: "troublesome", 2: "dangerous", 3: "formidable", 4: "extreme", 5: "epic" };
+  let key;
+  if (typeof rank === "number") key = NUM[rank];
+  else key = String(rank ?? "").toLowerCase().trim();
+  const base = RANK_XP[key] ?? 0;
+  if (!base) return 0;
+  return weakHit ? Math.ceil(base / 2) : base;
+}
 
 /**
  * Roll a 1d100 result against an oracle table.
@@ -454,7 +493,12 @@ export const IronswornData = Object.freeze({
   moves: MOVES,
   assetCategories: ASSET_CATEGORIES,
   terminology: TERMINOLOGY,
-  rollOracle
+
+  /** Vow-rank → experience award table (Troublesome 1 … Epic 5). */
+  rankXp: RANK_XP,
+
+  rollOracle,
+  xpForRank
 });
 
 export default IronswornData;

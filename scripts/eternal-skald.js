@@ -959,6 +959,26 @@ const Settings = {
       default: true
     });
 
+    /* ---- Experience granting (v0.10.32 — Phase 1) ---- */
+
+    game.settings.register(MODULE_ID, "awardXpOnCompletion", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.awardXpOnCompletion.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.awardXpOnCompletion.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true
+    });
+
+    game.settings.register(MODULE_ID, "weakHitHalfXp", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.weakHitHalfXp.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.weakHitHalfXp.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: false
+    });
+
     game.settings.register(MODULE_ID, "narrationDelay", {
       name: game.i18n.localize("ETERNAL_SKALD.settings.narrationDelay.name"),
       hint: game.i18n.localize("ETERNAL_SKALD.settings.narrationDelay.hint"),
@@ -2143,6 +2163,21 @@ INITIATIVE state telling who is in control. You drive these with:
    [[EFFECT: end_combat <Foe Name>]]
         Mark a foe's combat track complete when they are defeated, flee,
         yield, or the fight otherwise ends.
+   [[EFFECT: grant_xp <amount> <reason>]]
+        Award the character a DISCRETIONARY amount of experience for a notable
+        milestone the rules don't auto-score (e.g. a dramatic story beat the
+        GM wants to reward). Use sparingly — vow XP is handled automatically
+        (see below). e.g. [[EFFECT: grant_xp 1 a daring escape]].
+   [[EFFECT: grant_xp_vow <rank>]]
+        Award the experience for a FULFILLED vow of the given rank
+        (troublesome 1, dangerous 2, formidable 3, extreme 4, epic 5). The
+        rank is optional — if omitted, the just-fulfilled vow's own rank is
+        used. NOTE: this is recorded ONCE per vow and reconciled with the
+        automatic award, so it can never grant twice.
+EXPERIENCE IS AUTOMATIC FOR VOWS. When a vow is marked complete (via
+[[EFFECT: complete_vow]] or the sheet), the client AUTOMATICALLY awards the
+rank-appropriate XP. So you normally do NOT need to emit grant_xp_vow — just
+complete the vow. Reserve grant_xp for special, off-track rewards.
 IMPORTANT — combat moves are AUTOMATED for you. When the resolved move is
 "Enter the Fray", "Strike", or "Clash", the client AUTOMATICALLY:
   • on a hit to Enter the Fray → grants initiative,
@@ -5293,6 +5328,28 @@ const Integration = {
       return name ? { kind: "oracle", name } : null;
     }
 
+    // ---- Experience awards (v0.10.32 — Phase 1) ----
+    // [[EFFECT: grant_xp <amount> <reason...>]]  — award N experience for a
+    //   discretionary milestone (the reason is free text, optional).
+    // [[EFFECT: grant_xp_vow <rank>]]            — award the rank's XP for a
+    //   fulfilled vow (troublesome 1 … epic 5). The rank is optional; when
+    //   omitted the active/just-rolled vow's own rank is used.
+    if (firstWord === "grant_xp_vow" || lc.startsWith("grant_xp_vow") || lc.startsWith("grant xp vow")) {
+      const rest = body.replace(/^grant[_\s]xp[_\s]vow/i, "").trim();
+      const tok = rest.split(/\s+/)[0]?.toLowerCase().replace(/[^a-z]/g, "") || "";
+      const rank = this._RANKS.includes(tok) ? tok : null;
+      return { kind: "grant_xp_vow", rank };
+    }
+    if (firstWord === "grant_xp" || lc.startsWith("grant_xp") || lc.startsWith("grant xp")) {
+      const rest = body.replace(/^grant[_\s]xp/i, "").trim();
+      const m2 = rest.match(/^([+]?\d+)\s*(.*)$/);
+      if (!m2) return null;
+      const amount = parseInt(m2[1], 10);
+      if (!Number.isFinite(amount) || amount <= 0) return null;
+      const reason = (m2[2] || "").replace(/^[:\-—|]+/, "").trim();
+      return { kind: "grant_xp", amount, reason };
+    }
+
     // ---- Combat / quest track directives (v0.3.0) ----
     // Accept underscores or spaces: "create_combat" or "create combat".
     const m = body.match(/^(create[_\s]combat|create[_\s]vow|create[_\s]journey|begin[_\s]journey|start[_\s]journey|undertake[_\s]journey|initiative|end[_\s]combat|complete[_\s]vow|fulfill[_\s]vow|end[_\s]vow|complete[_\s]track|complete[_\s]journey|end[_\s]journey)\b\s*(.*)$/i);
@@ -6669,6 +6726,47 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
             r = await IronswornController.rollOracle(eff.name);
             if (r) applied.push(`oracle “${eff.name}” → ${r}`);
             break;
+          case "grant_xp": {
+            // [[EFFECT: grant_xp <amount> <reason>]] — discretionary award.
+            if (!actor) { await this._warnNoActor("grant experience", ""); break; }
+            r = await IronswornController.grantXp(actor, eff.amount, { reason: eff.reason || "a hard-won milestone" });
+            if (r?.ok) {
+              applied.push(`+${r.amount} XP`);
+              this._auditWrite("GRANT_XP", { name: eff.reason || "", boxes: eff.amount }, true, `+${r.amount} XP (${r.mode})`);
+            } else {
+              this._auditWrite("GRANT_XP", { name: eff.reason || "", boxes: eff.amount }, false, r?.error);
+            }
+            break;
+          }
+          case "grant_xp_vow": {
+            // [[EFFECT: grant_xp_vow <rank>]] — award the rank's XP for the
+            // vow just fulfilled. Funnels through the idempotent grantVowXp so
+            // it can never double up with the automatic completion hook.
+            if (!actor) { await this._warnNoActor("grant vow experience", ""); break; }
+            const vow = IronswornController.resolveVowForXp(actor);
+            if (!vow) {
+              // No vow track to attach to — fall back to the rank's flat amount
+              // if a rank was supplied, else skip.
+              if (eff.rank) {
+                const amt = IronswornController.xpForRank(eff.rank);
+                r = amt > 0 ? await IronswornController.grantXp(actor, amt, { reason: `fulfilled a ${eff.rank} vow` }) : null;
+                if (r?.ok) applied.push(`+${r.amount} XP (vow)`);
+              }
+              this._auditWrite("GRANT_XP_VOW", { name: "", trackKind: "vow" }, !!r?.ok, r?.ok ? "no track, flat rank award" : "no vow to award");
+              break;
+            }
+            const weakHitHalf = (Settings.get("weakHitHalfXp") ?? false) === true;
+            r = await IronswornController.grantVowXp(actor, vow, { weakHitHalf, reason: eff.reason });
+            if (r?.ok && r.xp > 0) {
+              applied.push(`+${r.xp} XP for “${vow.name}”`);
+              this._auditWrite("GRANT_XP_VOW", { name: vow.name, trackKind: "vow", boxes: r.xp }, true, `+${r.xp} XP`);
+            } else if (r?.skipped) {
+              this._auditWrite("GRANT_XP_VOW", { name: vow.name, trackKind: "vow" }, true, `skipped (${r.skipped})`);
+            } else {
+              this._auditWrite("GRANT_XP_VOW", { name: vow.name, trackKind: "vow" }, false, r?.error);
+            }
+            break;
+          }
           case "create_combat": {
             if (!(Settings.get("autoCreateCombatTracks") ?? true)) {
               this._dbg("→ create_combat skipped: autoCreateCombatTracks disabled");
@@ -10137,6 +10235,69 @@ Hooks.on("updateActor", (actor, changed /*, options, userId */) => {
     }, Integration._narrationDelayMs?.() ?? 2000);
   } catch (err) {
     console.warn(LOG_PREFIX, "updateActor XP watcher failed:", err?.message ?? err);
+  }
+});
+
+/* === Automatic vow-completion XP award (v0.10.32 — Phase 1) =========
+ * The SINGLE automatic XP-granting point. When a vow progress-track Item is
+ * marked complete — from the character sheet, a fulfilled-vow roll, the
+ * auto-completion flow, or an AI complete_vow directive — this hook awards
+ * the rank-appropriate experience exactly ONCE (Troublesome 1 … Epic 5).
+ *
+ * Why a hook? `system.completed` flips true through MANY code paths; watching
+ * the committed change catches them all without threading XP logic through
+ * each one. Idempotency is enforced by IronswornController.grantVowXp(), which
+ * sets a per-track `xpAwarded` flag — so re-renders, repeated directives, or a
+ * manual + AI double-complete can never grant twice.
+ *
+ * XP is earned for VOWS only (the Ironsworn rule); journeys and combat tracks
+ * complete without an XP award. The optional weak-hit half-XP rule reads the
+ * outcome an emitting path may pass through the update options as
+ * `options.theEternalSkald.xpOutcome` ("weak"); absent options ⇒ full XP.
+ *
+ * Guards (each cheap, fail-safe):
+ *   • Active GM only          — avoids duplicate awards across clients.
+ *   • awardXpOnCompletion ON  — the master toggle (default ON).
+ *   • Ironsworn integration active.
+ *   • The committed diff actually set `system.completed` true.
+ *   • The Item is a VOW track (system.subtype === "vow" or our trackKind flag).
+ * ==================================================================== */
+Hooks.on("updateItem", (item, changed, options /*, userId */) => {
+  try {
+    if (!game.user?.isGM) return;
+    if (game.users?.activeGM && game.users.activeGM.id !== game.user.id) return;
+    if ((Settings.get("awardXpOnCompletion") ?? true) === false) return;
+    if (!IronswornController?.isActive?.()) return;
+
+    // Only react to a fresh transition to completed === true.
+    if (changed?.system?.completed !== true) return;
+
+    // The track must belong to a character actor.
+    const actor = item?.parent ?? item?.actor ?? null;
+    if (!actor?.id) return;
+
+    // VOWS only. Identify by the system subtype or our own trackKind flag —
+    // never award for journeys, combat, or generic progress tracks.
+    const subtype = foundry.utils.getProperty(item, "system.subtype");
+    const kind = item.getFlag?.(MODULE_ID, "trackKind")
+      ?? foundry.utils.getProperty(item, `flags.${MODULE_ID}.trackKind`);
+    const isVow = subtype === "vow" || kind === "vow";
+    if (!isVow) return;
+
+    // Outcome (for the optional half-XP rule) may be supplied by the emitting
+    // path through the document update options; default to a full (strong) award.
+    const outcome = options?.theEternalSkald?.xpOutcome ?? "strong";
+    const weakHitHalf = (Settings.get("weakHitHalfXp") ?? false) === true;
+
+    IronswornController.grantVowXp(actor, item, { outcome, weakHitHalf })
+      .then(res => {
+        if (res && res.ok === false && res.error) {
+          console.warn(LOG_PREFIX, "auto vow-XP award failed:", res.error);
+        }
+      })
+      .catch(err => console.warn(LOG_PREFIX, "auto vow-XP award threw:", err?.message ?? err));
+  } catch (err) {
+    console.warn(LOG_PREFIX, "updateItem vow-XP hook failed:", err?.message ?? err);
   }
 });
 
