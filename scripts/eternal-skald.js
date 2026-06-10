@@ -961,6 +961,26 @@ const Settings = {
       default: true
     });
 
+    /* ---- Intelligent action → move mapping (v0.10.34) ---- */
+
+    game.settings.register(MODULE_ID, "intelligentMoveDetection", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.intelligentMoveDetection.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.intelligentMoveDetection.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true
+    });
+
+    game.settings.register(MODULE_ID, "intelligentMoveConfirm", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.intelligentMoveConfirm.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.intelligentMoveConfirm.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: false
+    });
+
     game.settings.register(MODULE_ID, "autoNarrateXp", {
       name: game.i18n.localize("ETERNAL_SKALD.settings.autoNarrateXp.name"),
       hint: game.i18n.localize("ETERNAL_SKALD.settings.autoNarrateXp.hint"),
@@ -4092,6 +4112,27 @@ const Commands = {
       console.warn(LOG_PREFIX, "[skald] move-declaration interception failed — falling back to narration", e);
     }
 
+    // ── Intelligent action → move mapping (v0.10.34) ────────────────────
+    // The message did NOT explicitly name a move. If it nonetheless DESCRIBES
+    // a mechanical action ("I explore the cave further", "I attack the wolf"),
+    // ask the AI classifier to map it to the appropriate Ironsworn move and
+    // open that dialog (or a confirmation card for ambiguous / less-certain
+    // cases) — suppressing narration until the dice resolve, exactly like an
+    // explicit declaration. Questions ("what should I do?") and pure roleplay
+    // are classified as such and fall through to ordinary narration. Gated by
+    // a setting (default ON) and only when the Ironsworn integration is active.
+    // Fully defensive: any failure falls back to narration.
+    try {
+      if ((Settings.get("intelligentMoveDetection") ?? true) && Integration.active()) {
+        const routed = await Integration.classifyAndRouteAction(args);
+        if (routed?.handled) {
+          return; // STOP — a roll dialog or confirmation card was shown.
+        }
+      }
+    } catch (e) {
+      console.warn(LOG_PREFIX, "[skald] intelligent action mapping failed — falling back to narration", e);
+    }
+
     return runConversation("general", args, {
       task: "Respond to the user as the Skald. If they ask a rules question, answer clearly; if they invite narration, narrate. If the fiction calls for a dice roll, name the appropriate Ironsworn move naturally inside your narration prose (written exactly as it appears in the move list) so it reads as part of the story — do NOT use a [[MOVE:…]] directive or a separate suggestion line.",
       allowMoves: true,
@@ -5611,6 +5652,110 @@ const Integration = {
         }
       });
     }
+  },
+
+  /* ---------------- Intelligent action → move mapping (v0.10.34) ---------------- */
+
+  /**
+   * Interpret a free-form player ACTION ("I explore the cave further") and, if it
+   * clearly triggers an Ironsworn move, open that move's roll dialog (or a
+   * confirmation card for ambiguous / less-certain cases) INSTEAD of narrating.
+   * Questions and pure roleplay fall through to narration.
+   *
+   * This is the AI half of the hybrid classifier: the deterministic
+   * `detectMoveDeclaration` (explicit move names) already ran and missed, so we
+   * ask the model to classify the message. The PROMPT, PARSE and ROUTING logic
+   * are all pure functions on IronswornController (unit-tested); this method only
+   * owns the Foundry/AI side: the `Client.chat` call and the resulting UI action.
+   *
+   * Fully defensive: any failure (no API key, malformed reply, offline) is caught
+   * and reported as "not handled" so the caller falls back to ordinary narration.
+   *
+   * @param {string} text  The player's free-form message (after "!").
+   * @returns {Promise<{handled: boolean}>}  handled=true when a dialog/card was
+   *   shown and narration must be suppressed; false to narrate as normal.
+   */
+  async classifyAndRouteAction(text) {
+    if (!this.active()) return { handled: false };
+    if (!text || typeof text !== "string" || !text.trim()) return { handled: false };
+    try {
+      // A light scene hint helps disambiguate combat-state-dependent actions
+      // (e.g. "I attack" → Enter the Fray vs Strike vs Clash). Cheap & optional.
+      let sceneContext = "";
+      try {
+        if (game.combat?.started) sceneContext = "The party is currently in active combat.";
+      } catch (_) { /* defensive */ }
+
+      const { system, user } = IronswornController.buildActionClassifierPrompt(text, { sceneContext });
+      const messages = [
+        { role: "system", content: system },
+        { role: "user", content: user }
+      ];
+      // Low temperature + small budget → fast, deterministic classification.
+      const reply = await Client.chat(messages, { temperature: 0.2, maxTokens: 250 });
+      const parsed = IronswornController.parseActionClassification(reply);
+      const alwaysConfirm = !!Settings.get("intelligentMoveConfirm");
+      const decision = IronswornController.decideActionRouting(parsed, { alwaysConfirm });
+
+      console.log(`${LOG_PREFIX} [skald] action classify → type=${parsed?.type ?? "?"} decision=${decision.action}${decision.move ? ` move="${decision.move.name}"` : ""}${decision.candidates ? ` candidates=${decision.candidates.map(c => c.name).join("|")}` : ""}`);
+
+      if (decision.action === "roll" && decision.move?.name) {
+        // Record the player's actual words as intent so the post-roll narration
+        // can reference what they were trying to do.
+        this._lastIntent = text.trim();
+        await this.doTriggerMove(decision.move.name, decision.stat || undefined);
+        return { handled: true };
+      }
+
+      if (decision.action === "confirm" && Array.isArray(decision.candidates) && decision.candidates.length) {
+        this._lastIntent = text.trim();
+        await this._postActionConfirmCard(decision.candidates, { reason: decision.reason, original: text.trim() });
+        return { handled: true };
+      }
+
+      // "narrate" → let the caller run normal AI narration.
+      return { handled: false };
+    } catch (e) {
+      console.warn(LOG_PREFIX, "[skald] action classification failed — falling back to narration", e);
+      return { handled: false };
+    }
+  },
+
+  /**
+   * Post an interactive confirmation card offering one or more candidate moves
+   * for an interpreted action. Each button reuses the existing
+   * `data-skald-action="link-move"` wiring (auto-wired on render by
+   * {@link Integration.wireSuggestionCard}), so clicking opens that move's
+   * official pre-roll dialog. The player may also simply ignore the card and
+   * keep narrating. No narration is generated until a move actually resolves.
+   *
+   * @param {Array<{move:object,name:string,stat:string,confidence:string}>} candidates
+   * @param {object} [opts]
+   * @param {string} [opts.reason]    Short rationale from the classifier.
+   * @param {string} [opts.original]  The player's original message (for context).
+   */
+  async _postActionConfirmCard(candidates, { reason = "", original = "" } = {}) {
+    const buttons = candidates.map((c) => {
+      const dsid = c.move?.id ? ` data-move-dsid="${escapeHtml(c.move.id)}"` : "";
+      const stat = c.stat ? ` data-stat="${escapeHtml(c.stat)}"` : "";
+      const label = `${escapeHtml(c.name)}${c.stat ? ` +${escapeHtml(c.stat)}` : ""}`;
+      return `<button type="button" class="es-action-move-btn" data-skald-action="link-move" data-move="${escapeHtml(c.name)}"${dsid}${stat}>${label}</button>`;
+    }).join("");
+
+    const ambiguous = candidates.length > 1;
+    const lead = ambiguous
+      ? "That action could call for more than one move. Which do you intend?"
+      : "It sounds like this calls for a move. Roll it?";
+    const tail = "<p class=\"es-action-confirm-note\"><em>Or simply keep narrating — no roll will be made unless you choose a move.</em></p>";
+    const why = reason ? `<p class="es-action-confirm-why"><em>${escapeHtml(reason)}</em></p>` : "";
+
+    const body =
+      `<p>${lead}</p>` +
+      why +
+      `<div class="es-action-move-choices">${buttons}</div>` +
+      tail;
+
+    return Chat.postSkald(body, { variant: "oracle", title: ambiguous ? "Which Move?" : "Make a Move?" });
   },
 
   /* ---------------- Move triggering & selector ---------------- */

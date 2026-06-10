@@ -339,6 +339,38 @@
   opacity: 0.8;
 }
 
+/* --- Interpreted-action confirmation card (v0.10.34) ---
+ * Buttons offered when the AI maps a free-form action to one or more moves. */
+.es-action-move-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 2px;
+}
+.es-action-move-btn {
+  flex: 0 1 auto;
+  padding: 4px 10px;
+  font-size: 0.92em;
+  color: var(--es-gold-2, #e8c178);
+  background: rgba(40, 30, 18, 0.55);
+  border: 1px solid rgba(214, 168, 90, 0.55);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.es-action-move-btn:hover {
+  color: var(--es-gold, #d6a85a);
+  background: rgba(60, 45, 24, 0.75);
+  border-color: var(--es-gold, #d6a85a);
+}
+.es-action-confirm-note,
+.es-action-confirm-why {
+  font-size: 0.85em;
+  opacity: 0.75;
+  margin: 4px 0 0;
+}
+
 /* --- Inline move suggestion line (v0.10.8) ---
  * Reverts the separate "A Move Beckons" / "What Comes Next" button-cards back
  * to a subtle, inline clickable link woven into the narration prose. */

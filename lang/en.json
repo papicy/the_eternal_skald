@@ -75,6 +75,14 @@
         "name": "Player Move Declarations Open the Dialog",
         "hint": "When a player simply NAMES an official Ironsworn move (e.g. \"!Strike\", \"!Face Danger\", \"!I want to Secure an Advantage +iron\"), open that move's roll dialog instead of generating AI narration. Moves stay the player's mechanical choice; the Skald continues the story only after the dice resolve. Questions and narration requests are unaffected. Requires Ironsworn Rules Integration. Turn OFF to treat every \"!\" message as a prompt to the Skald."
       },
+      "intelligentMoveDetection": {
+        "name": "Interpret Actions Into Moves (AI)",
+        "hint": "When a player DESCRIBES an action rather than naming a move (e.g. \"!I search the ruins\", \"!I attack the wolf\"), the Skald uses AI to map it to the appropriate Ironsworn move and opens that roll dialog — or, for ambiguous or less-certain actions, posts a short card so the player picks the move. Narration is suppressed until the dice resolve. Questions (\"what should I do?\") and pure roleplay still narrate normally. Requires Ironsworn Rules Integration. Turn OFF to revert to handling explicit move names only (every other message is narrated)."
+      },
+      "intelligentMoveConfirm": {
+        "name": "Always Confirm Interpreted Moves",
+        "hint": "When ON, an interpreted action ALWAYS shows a confirmation card with the suggested move(s) before any dialog opens — even when the AI is highly confident — so the roll is never started without an explicit click. When OFF (default), a confident single match opens its roll dialog directly, while ambiguous or less-certain actions still show a card. Only applies when 'Interpret Actions Into Moves' is enabled."
+      },
       "autoNarrateXp": {
         "name": "Auto-Narrate Experience Gains",
         "hint": "When the character earns experience (the Ironsworn XP counter rises, or a Starforged legacy track advances), the Skald automatically narrates the milestone in saga style. Requires Ironsworn Rules Integration. Observe-only: the Skald never writes or spends XP itself."
