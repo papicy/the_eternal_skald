@@ -13,6 +13,38 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.26] — 2026-06-10
+
+### Added
+- **Progress-track context enhancement (Phase 1 — read-only).** The live game
+  state the Skald sees now labels every progress track with its fullness and
+  flags the active fight and the focus vow, so the AI can tell at a glance
+  whether a track may be concluded:
+  - `IronswornController.fullnessLabel(boxes, completed, kind)` renders
+    `"7/10 boxes - NOT YET FULL"` vs `"10/10 boxes - ✅ READY TO FULFILL/END/REACH"`.
+  - `IronswornController.getActiveCombat(actor)` surfaces the single active foe
+    track (thin, clearly-named wrapper over `getActiveCombatTrack`).
+  - `IronswornController.identifyStoryFocusVow(actor)` infers which open vow the
+    current narrative is about — last-rolled vow on this actor first, newest
+    open vow as fallback.
+  - `describeCharacter()` now emits a grouped **PROGRESS TRACKS** block with an
+    `⚔️ ACTIVE COMBAT` line, `VOWS:` / `JOURNEYS:` groups, a `[STORY FOCUS]`
+    marker, and per-track FULL / NOT YET FULL labels (exact-title reference
+    lines retained for directive targeting).
+- **AI prompt hardening.** `buildIronswornPromptBlock()` now states a hard rule
+  that the Skald must NOT offer or self-complete a track (Fulfill Your Vow /
+  End the Fight / Reach Your Destination) until it is 10/10 — the main cause of
+  premature conclusions — with an explicit player-override exception, plus
+  multi-track guidance (act on the `[STORY FOCUS]` vow, one active combat only).
+
+### Verified
+- New `test/progress-track-context.test.mjs` (38 assertions) covering fullness
+  labels, multi-vow reads, active-combat detection, story-focus resolution
+  (last-rolled / fallback / cross-actor / completed-ignored), the labelled
+  `describeCharacter` block, edge cases, and a read-only (no-mutation) guard.
+  All 12 test suites pass with no regressions. **Phase 1 is read-only — no
+  writes to actor data.**
+
 ## [0.10.24] — 2026-06-09
 
 ### Added
@@ -1251,6 +1283,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.10.26]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.26
 [0.10.24]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.24
 [0.10.23]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.23
 [0.10.22]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.22
