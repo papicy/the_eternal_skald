@@ -82,6 +82,10 @@
         "name": "Always Confirm Interpreted Moves",
         "hint": "When ON, an interpreted action ALWAYS shows a confirmation card with the suggested move(s) before any dialog opens — even when the AI is highly confident — so the roll is never started without an explicit click. When OFF (default), a confident single match opens its roll dialog directly, while ambiguous or less-certain actions still show a card. Only applies when 'Interpret Actions Into Moves' is enabled."
       },
+      "assetBonusAdvisory": {
+        "name": "Asset Bonus Advisory",
+        "hint": "When ON (default), before a move is rolled the Skald scans the rolling character's enabled asset abilities for a bonus that plausibly applies (e.g. \"add +1\", \"+2 when…\") and posts a small, non-blocking chat suggestion. Purely advisory — the Skald never alters the roll; you decide whether to add the bonus in the official roll dialog. Requires Ironsworn Rules Integration."
+      },
       "autoNarrateXp": {
         "name": "Auto-Narrate Experience Gains",
         "hint": "When the character earns experience (the Ironsworn XP counter rises, or a Starforged legacy track advances), the Skald automatically narrates the milestone in saga style. Requires Ironsworn Rules Integration. Observe-only: the Skald never writes or spends XP itself."

@@ -981,6 +981,19 @@ const Settings = {
       default: false
     });
 
+    // (v0.10.38 — Phase 4) Asset Bonus Advisory: when ON, the Skald posts a
+    // non-blocking chat suggestion if one of the rolling character's assets
+    // grants a bonus that plausibly applies to the move being made. Purely
+    // advisory — the player applies it themselves in the roll dialog.
+    game.settings.register(MODULE_ID, "assetBonusAdvisory", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.assetBonusAdvisory.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.assetBonusAdvisory.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true
+    });
+
     game.settings.register(MODULE_ID, "autoNarrateXp", {
       name: game.i18n.localize("ETERNAL_SKALD.settings.autoNarrateXp.name"),
       hint: game.i18n.localize("ETERNAL_SKALD.settings.autoNarrateXp.hint"),
@@ -5957,6 +5970,11 @@ const Integration = {
     }
     this._lastIntent = `${moveName}${stat ? ` +${stat}` : ""}` + (this._lastIntent ? ` — ${this._lastIntent}` : "");
     const actor = IronswornController.getActiveCharacter();
+    // (v0.10.38 — Phase 4) Asset bonus advisory: a non-blocking suggestion if
+    // one of the character's assets grants a bonus that plausibly applies to
+    // this move. Purely informational — the player applies it in the dialog.
+    try { await this._maybeAdviseAssetBonuses(actor, moveName, stat); }
+    catch (e) { console.warn(LOG_PREFIX, "asset bonus advisory failed", e); }
     const res = await IronswornController.triggerMove(moveName, { actor, stat });
     if (!res?.ok) {
       await Chat.postSystem(
@@ -5982,6 +6000,44 @@ const Integration = {
     // The resulting Ironsworn roll card (or manual card) is picked up by
     // onIronswornRoll(), which narrates the outcome.
     return res;
+  },
+
+  /**
+   * (v0.10.38 — Phase 4) Asset Bonus Advisory.
+   *
+   * Before a move resolves, scan the active character's enabled asset
+   * abilities for a roll bonus that plausibly applies to this move and, if
+   * found, post a small non-blocking chat suggestion. The player chooses
+   * whether to apply it in the official roll dialog — the Skald never
+   * touches the roll itself, preserving full player agency and roll-system
+   * stability. Fully gated by the `assetBonusAdvisory` setting (default ON).
+   *
+   * @param {Actor|null} actor      the rolling character (may be null)
+   * @param {string}     moveName   the move being made
+   * @param {string}     [stat]     the stat being rolled (optional)
+   */
+  async _maybeAdviseAssetBonuses(actor, moveName, stat) {
+    try {
+      if (!Settings.get("assetBonusAdvisory")) return;
+    } catch (_) { return; }
+    if (!actor || !moveName) return;
+    let assets;
+    try { assets = IronswornController.getAssets(actor); }
+    catch (_) { return; }
+    const hits = IronswornController.detectAssetBonuses(assets, moveName, { stat: stat || "" });
+    if (!Array.isArray(hits) || !hits.length) return;
+    const items = hits.map((h) => {
+      const cond = h.condition
+        ? ` — <em>${escapeHtml(h.condition)}</em>`
+        : "";
+      return `<li>💡 Your <strong>${escapeHtml(h.asset)}</strong> grants <strong>+${h.bonus}</strong>${cond}</li>`;
+    }).join("");
+    const body =
+      `<p>You may have an asset bonus for <strong>${escapeHtml(moveName)}</strong>:</p>` +
+      `<ul class="es-asset-advisory">${items}</ul>` +
+      `<p class="es-action-confirm-note"><em>If it applies, add it yourself in the roll dialog — your call.</em></p>`;
+    try { await Chat.postSkald(body, { variant: "oracle", title: "Asset Bonus?" }); }
+    catch (e) { console.warn(LOG_PREFIX, "asset advisory post failed", e); }
   },
 
   /* ---------------- Inline entity-link handlers (v0.7.0) ---------------- */

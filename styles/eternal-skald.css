@@ -371,6 +371,20 @@
   margin: 4px 0 0;
 }
 
+/* --- Asset bonus advisory list (v0.10.38 — Phase 4) ---
+ * Compact, non-intrusive suggestion list shown before a move resolves when
+ * an asset may grant an applicable bonus. Purely advisory. */
+.es-asset-advisory {
+  margin: 4px 0 2px;
+  padding-left: 1.1em;
+  list-style: none;
+  font-size: 0.92em;
+}
+.es-asset-advisory li {
+  margin: 2px 0;
+  line-height: 1.45;
+}
+
 /* --- Inline move suggestion line (v0.10.8) ---
  * Reverts the separate "A Move Beckons" / "What Comes Next" button-cards back
  * to a subtle, inline clickable link woven into the narration prose. */
