@@ -344,7 +344,7 @@ export const Settings = {
       config: true,
       type: Number,
       range: { min: 0, max: 5000, step: 100 },
-      default: 2000
+      default: 500
     });
 
     game.settings.register(MODULE_ID, "aiAppliesEffects", {
