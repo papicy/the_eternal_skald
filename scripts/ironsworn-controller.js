@@ -92,7 +92,7 @@ const MOVE_CATALOG = Object.freeze([
   { id: "move:classic/adventure/resupply",             name: "Resupply",              stats: ["wits"],                                     cat: "Adventure" },
   { id: "move:classic/adventure/make_camp",            name: "Make Camp",             stats: ["supply"],                                   cat: "Adventure" },
   { id: "move:classic/adventure/undertake_a_journey",  name: "Undertake a Journey",   stats: ["wits"],                                     cat: "Adventure" },
-  { id: "move:classic/adventure/reach_your_destination", name: "Reach Your Destination", stats: [],                                       cat: "Adventure" },
+  { id: "move:classic/adventure/reach_your_destination", name: "Reach Your Destination", stats: ["progress"],                             cat: "Adventure" },
   // — Combat —
   { id: "move:classic/combat/enter_the_fray",          name: "Enter the Fray",        stats: ["heart", "shadow", "wits"],                  cat: "Combat" },
   { id: "move:classic/combat/strike",                  name: "Strike",                stats: ["iron", "edge"],                             cat: "Combat" },
