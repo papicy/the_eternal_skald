@@ -1,0 +1,43 @@
+---
+Use docs/engineering-brief.md and docs/repository-map.md as authoritative
+---
+
+## Task
+[Brief one-line description]
+
+## Mode
+- [ ] INVESTIGATE (findings only, no code changes)
+- [ ] IMPLEMENT (execute the fix/feature)
+
+## Classification
+[BUG] | [FEATURE] | [REFACTOR] | [COMPAT] | [INVESTIGATE]
+
+## Scope
+**Files Allowed:**
+- ALL
+
+**Files Forbidden:**
+- All files not explicitly listed above
+
+**Max Changes:**
+- Files: 3
+- Lines per file: 50
+
+## Context
+[Any relevant background, error messages, or previous attempts]
+
+## Expected Output
+1. Findings (what you discovered)
+2. Root Cause (if applicable)
+3. Minimal Plan (steps to fix)
+4. Risks (what could break)
+5. Patch (diff or specific changes)
+
+## Token Budget
+INVESTIGATE: 10k | IMPLEMENT: 20k
+
+## Approval Required For
+- [ ] New dependencies
+- [ ] Architecture changes
+- [ ] Breaking changes
+- [ ] Data model changes
