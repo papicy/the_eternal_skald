@@ -13,6 +13,25 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.11.1] — 2026-06-11
+
+### Changed
+- **"Reach Your Destination" metadata and AI guidance polished.** The
+  journey-finishing progress move already routed correctly through the
+  progress-move path (rolling against the open journey's progress score), but
+  its `MOVE_CATALOG` entry declared an empty stat list. It now declares
+  `stats: ["progress"]`, matching the other progress moves (*Fulfill Your Vow*,
+  *End the Fight*) for internal consistency.
+- Added a *Reach Your Destination* entry to the in-module move reference
+  (`ironsworn-data.js`), describing its strong-hit / weak-hit / miss outcomes
+  and noting that **reaching a destination grants no experience** — true to
+  Ironsworn rules, only fulfilling a vow awards XP.
+
+### Notes
+- Purely a metadata/documentation refinement: no change to how
+  *Reach Your Destination* is rolled or how a journey is completed. All test
+  gates remain green and behavior for the other progress moves is unchanged.
+
 ## [0.11.0] — 2026-06-11
 
 ### Fixed

@@ -239,6 +239,11 @@ const MOVES = {
     stat: "Wits",
     summary: "When you travel through hostile or unfamiliar lands, set the rank, then roll +wits at waypoints. Strong hit: mark progress. Weak hit: mark progress, pay a cost. Miss: trouble ahead."
   },
+  "Reach Your Destination": {
+    category: "Adventure",
+    stat: "—",
+    summary: "When your journey comes to an end, roll the journey's progress score (NOT a stat). Match against the challenge dice. Strong hit: arrive as expected, the situation is as you hoped. Weak hit: arrive, but face an unforeseen hardship or complication. Miss: arrive to face an unwelcome surprise. (No experience is awarded — only fulfilling a vow grants XP.)"
+  },
 
   // Combat moves
   "Enter the Fray": {
