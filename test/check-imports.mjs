@@ -37,6 +37,64 @@ for (const n of readdirSync(SCRIPTS).sort()) {
 }
 const FILES = [MAIN, ...subFiles];
 
+/**
+ * Replace the CONTENTS of all string/template literals and comments with spaces
+ * (preserving newlines and delimiters) using a proper char scanner. Regex-based
+ * stripping is unsafe here — these files contain very large template literals
+ * with embedded backticks/quotes that make regex backtracking drop real code
+ * (false negatives), which would defeat the purpose of this safety net.
+ */
+function stripNonCode(src) {
+  let out = "";
+  let i = 0;
+  const n = src.length;
+  while (i < n) {
+    const c = src[i], d = src[i + 1];
+    if (c === "/" && d === "/") {            // line comment
+      while (i < n && src[i] !== "\n") { out += src[i] === "\n" ? "\n" : " "; i++; }
+      continue;
+    }
+    if (c === "/" && d === "*") {            // block comment
+      out += "  "; i += 2;
+      while (i < n && !(src[i] === "*" && src[i + 1] === "/")) { out += src[i] === "\n" ? "\n" : " "; i++; }
+      if (i < n) { out += "  "; i += 2; }
+      continue;
+    }
+    if (c === '"' || c === "'") {            // single/double quoted string
+      out += c; i++;
+      while (i < n && src[i] !== c) {
+        if (src[i] === "\\") { out += "  "; i += 2; continue; }
+        out += src[i] === "\n" ? "\n" : " "; i++;
+      }
+      if (i < n) { out += c; i++; }
+      continue;
+    }
+    if (c === "`") {                          // template literal (handle ${ } code)
+      out += c; i++;
+      while (i < n && src[i] !== "`") {
+        if (src[i] === "\\") { out += "  "; i += 2; continue; }
+        if (src[i] === "$" && src[i + 1] === "{") {   // interpolation: keep code
+          out += "  "; i += 2;
+          let depth = 1;
+          while (i < n && depth > 0) {
+            if (src[i] === "{") depth++;
+            else if (src[i] === "}") depth--;
+            if (depth > 0) out += src[i];           // preserve embedded code
+            else out += " ";
+            i++;
+          }
+          continue;
+        }
+        out += src[i] === "\n" ? "\n" : " "; i++;
+      }
+      if (i < n) { out += c; i++; }
+      continue;
+    }
+    out += c; i++;
+  }
+  return out;
+}
+
 const reDef = /^(?:export\s+)?(?:async\s+)?(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/;
 function topLevelDefs(src) {
   const out = new Set();
@@ -75,13 +133,7 @@ for (const f of FILES) {
   const src   = fileSrc.get(f);
   const local = topLevelDefs(src);
   const imp   = importedNames(src);
-  // Strip comments + strings crudely to avoid matching symbols in prose.
-  const code  = src
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .replace(/\/\/[^\n]*/g, " ")
-    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
-    .replace(/'(?:[^'\\]|\\.)*'/g, "''")
-    .replace(/`(?:[^`\\]|\\.)*`/g, "``");
+  const code  = stripNonCode(src);
   const missing = [];
   for (const sym of ALL) {
     if (local.has(sym) || imp.has(sym)) continue;

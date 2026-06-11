@@ -8,7 +8,7 @@
  * the main module and introduces no import cycle.
  */
 import {
-  MODULE_ID, LOG_PREFIX,
+  MODULE_ID, SKALD_NAME, LOG_PREFIX,
   DEFAULT_ENDPOINT, DEFAULT_MODEL, PROVIDER_PRESETS
 } from "./constants.js";
 import { buildModelChoices } from "./model-catalogue.js";
