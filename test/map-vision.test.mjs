@@ -29,13 +29,27 @@
  *  Run: node test/map-vision.test.mjs
  * ===================================================================== */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SRC_PATH  = join(__dirname, "..", "scripts", "eternal-skald.js");
-const SRC = readFileSync(SRC_PATH, "utf8");
+// (Phase 2 refactor) Pure-data constants (COMMANDS, the vision-model catalogue,
+// PROVIDER_PRESETS, etc.) were extracted verbatim into scripts/core/*.js. These
+// source-text guards read every core module FIRST and then the main module, so
+// the relocated definitions are still seen. Core is prepended (not appended) so
+// the brace-matching extractor still has trailing code after a relocated block
+// such as `const COMMANDS = Object.freeze({ ... })`. Markers are unique, so no
+// assertion changes are needed — only the source corpus is widened.
+const CORE_DIR = join(__dirname, "..", "scripts", "core");
+let SRC = "";
+try {
+  for (const f of readdirSync(CORE_DIR).sort()) {
+    if (f.endsWith(".js")) SRC += readFileSync(join(CORE_DIR, f), "utf8") + "\n";
+  }
+} catch (_) { /* core/ may not exist in older trees */ }
+SRC += readFileSync(SRC_PATH, "utf8");
 const LANG = JSON.parse(readFileSync(join(__dirname, "..", "lang", "en.json"), "utf8"));
 
 let passed = 0, failed = 0;
