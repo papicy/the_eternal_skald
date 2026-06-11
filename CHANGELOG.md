@@ -13,6 +13,51 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.12.0] — 2026-06-11
+
+### Added
+- **AI "Discover a Site" (Ironsworn: Delve).** A new narrative feature that
+  generates a delve site on demand. It rolls the site's **theme** and **domain**
+  on the canonical Delve oracles (10 themes × 12 domains), then asks the AI to
+  author an evocative site — name, summary, rank, features/dangers, and **three
+  unanswered questions** ("mystery, not explanation"). The result is posted as a
+  saga card, a **delve progress track** is opened for it (GM/permission-gated),
+  and the full details are inscribed into the Living Chronicle journal. If the AI
+  is disabled or unreachable, it degrades to a **deterministic oracle-built
+  fallback site**, so the feature always produces a usable result.
+  - New `scripts/narrative/site-oracle.js` (pure, Foundry-free core logic) and a
+    `SiteGenerator` in `scripts/narrative/generators.js`.
+  - Wired into the move pipeline via `_isDiscoverSiteMove()` in the controller.
+  - Covered by `test/site-generator.test.mjs` (55 assertions).
+- **"Locate Your Objective" and "Escape the Depths" progress moves.** The two
+  Delve progress moves now roll against your **site's progress score** (filled
+  boxes = `floor(system.current / 4)`, capped 0–10), completing the *Discover a
+  Site → Delve* loop.
+  - `_isProgressMove()` now recognizes `locate_your_objective` and
+    `escape_the_depths` (by Datasworn id and display name).
+  - `rollProgressMove()` resolves the site track: an explicit sheet `trackRef`
+    wins; otherwise exactly one open site is **auto-selected**; multiple open
+    sites raise a **selection dialog** (DialogV2 with a classic `Dialog`
+    fallback); and with no open site a site-aware error points the player to
+    *Discover a Site* first.
+  - New helpers `_openSiteTracks()` and `_showSiteSelectionDialog()`.
+  - Covered by `test/locate-objective.test.mjs` (42 assertions).
+
+### Fixed
+- **Browser RAG no longer hard-fails over plain HTTP.** Semantic memory could
+  fail to initialize with *"Browser cache is not available in this environment"*
+  when Foundry was served over plain HTTP on a non-`localhost` host, disabling
+  RAG for the whole session. The Cache Storage API (`caches`) is only exposed in
+  a **secure context** (HTTPS or `localhost`); `browser-rag.js` now enables
+  transformers.js browser caching only when `caches` is present, and otherwise
+  falls back to **in-memory** model loading (re-downloaded per session) with a
+  one-time advisory. The HTTPS/localhost path is unchanged.
+
+### Notes
+- All changes are **additive and backwards-compatible**. Existing vow, journey,
+  and combat progress behavior is preserved exactly. The full test suite
+  (22 files) remains green.
+
 ## [0.11.2] — 2026-06-11
 
 ### Fixed
@@ -1542,6 +1587,7 @@ Until `1.0.0`, treat every release as an experimental development build.
 - The proxy approach proved fragile to deploy (reverse proxies, systemd/PM2 units,
   relative-URL handling), which motivated the `0.2.0` server-side rewrite.
 
+[0.12.0]: https://github.com/papicy/the_eternal_skald/releases/tag/v0.12.0
 [0.10.28]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.28
 [0.10.27]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.27
 [0.10.26]: https://github.com/papicy/eternal_skald/releases/tag/v0.10.26
