@@ -6,7 +6,7 @@ import { IronswornController } from "../ironsworn-controller.js";
 import { JournalSystem } from "./journal-system.js";
 // Call-time cross-imports (safe cycle): Integration (-> narrative step 9) and
 // OracleInterpreter (-> narrative step 8) still live in eternal-skald.js.
-import { Integration } from "../eternal-skald.js";
+import { Integration } from "../narrative/integration.js";
 import { OracleInterpreter } from "../narrative/generators.js";
 
 /**

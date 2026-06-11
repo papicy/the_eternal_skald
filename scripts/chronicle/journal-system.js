@@ -7,7 +7,8 @@ import { EntityLinker } from "./entity-linking.js";
 import { IronswornController } from "../ironsworn-controller.js";
 // Call-time cross-imports (safe cycle): ContradictionDetector, RagBridge and
 // Integration (-> narrative step 9) still live in eternal-skald.js.
-import { ContradictionDetector, RagBridge, Integration } from "../eternal-skald.js";
+import { ContradictionDetector, RagBridge } from "../eternal-skald.js";
+import { Integration } from "../narrative/integration.js";
 
 /**
  * A tiny, dependency-free background work queue.
