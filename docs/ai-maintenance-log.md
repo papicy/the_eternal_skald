@@ -463,3 +463,74 @@ ROLLBACK:     git revert <this commit-sha> and delete tag v0.12.0
 RESIDUAL RISK: NONE for behaviour. Note: package.json jumped 0.10.38 -> 0.12.0 to
               re-sync with module.json; the gap reflects that package.json had
               not been bumped in step with recent module.json releases.
+
+
+
+
+### [2026-06-11 21:40 EEST] — Feature: journey narrative pacing (Patches 1–4) + release 0.13.0
+AGENT:        Abacus AI maintenance agent (foundry-repository-steward)
+TASK TYPE:    FEAT (additive narrative-guidance) + CHORE (release bump)
+TOKEN BUDGET: 30,000  |  USED: within budget  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] task classified — FEAT (additive guidance) + release CHORE
+  [x] target file(s) located via full trace (see docs/PROPOSAL-journey-narrative-pacing.md)
+  [x] additive & backwards-compatible — no data-model / settings / API / lifecycle change
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] no architectural boundary crossed — controller (LOCKED) NOT edited by Patches 1–4
+  [x] regression test — full suite re-run GREEN (22 files)
+  [x] rollback plan defined
+
+PROBLEM:      The fiction reached a journey's destination before the progress
+              track filled (e.g. narrating arrival at 2/10). Root cause was
+              narrative, not mechanical: nothing told the AI/GM how far along the
+              track was, so arrival was narrated whenever the prose felt ready.
+
+APPROACH:     Implemented Patches 1–4 of docs/PROPOSAL-journey-narrative-pacing.md
+              — purely additive, progress-%-aware guidance. Patch 5 (gate-message
+              polish) and Patch 6 (Reach-Your-Destination weak/miss reframing,
+              behavioural) were deliberately NOT applied (Patch 6 is an approval-
+              gate item).
+
+CHANGE:
+  - scripts/narrative/integration.js:
+      • added _journeyPacingNote(boxes) helper (banded 0–3/4–6/7–8/9–10 guidance).
+      • _autoJourneyFlow(): on a HIT, append the pacing note to autoSummary; added
+        an explicit MISS branch (RAW: no progress marked → narrate the obstacle).
+      • _notifyProgress(): toast now shows the percentage (X/10 boxes (Y%)).
+  - scripts/ai/prompt-builder.js: added a permanent "JOURNEY PACING" doctrine to
+      the PROGRESS MOVES system-prompt block.
+  - scripts/chat/commands.js: !progress journey list now shows X/10 (Y%) plus a
+      one-line pacing hint per journey.
+  - module.json / package.json: version 0.12.0 -> 0.13.0 (MINOR; additive feature).
+  - module.json: prepended a v0.13.0 paragraph to the (HTML) description.
+  - CHANGELOG.md: added a Keep-a-Changelog [0.13.0] entry.
+
+FILES TOUCHED:
+  - scripts/narrative/integration.js
+  - scripts/ai/prompt-builder.js
+  - scripts/chat/commands.js
+  - module.json
+  - package.json
+  - CHANGELOG.md
+  - docs/ai-maintenance-log.md      (append-only)
+  (Note: a FEAT spanning 3 source files + release metadata; all changes additive,
+   no LOCKED source edited.)
+
+EVIDENCE:     markProgressByRank() returns `boxes` (0–10); progress % = boxes*10,
+              already in scope at every patched seam. autoSummary flows into the
+              narration prompt via the existing autoLine (integration.js L1566).
+
+SUITE:        GREEN — node test/run-all.mjs = 22 files / all passed, 0 failed.
+              `node --check` clean on all 3 edited scripts; module.json &
+              package.json validated as well-formed JSON (both 0.13.0).
+GATE:         None required for Patches 1–4 — additive guidance only, no new
+              dependency / architecture / socket / schema / public-API / breaking
+              change; controller (LOCKED) untouched. Patch 6 withheld for approval.
+RELEASE:      Committed to main and pushed to origin/main per the user's explicit
+              pull→apply→commit→push workflow request.
+ROLLBACK:     git revert <this commit-sha> — restores 0.12.0; no data/schema
+              migration involved.
+RESIDUAL RISK: LOW. All changes are advisory strings + presentation; mechanics
+              (progress-by-rank, progress-roll gate, Reach Your Destination)
+              unchanged. Existing worlds and in-flight journeys unaffected.

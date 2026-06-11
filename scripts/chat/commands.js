@@ -233,8 +233,15 @@ export const Commands = {
       }
       const rows = journeys.map(j => {
         const boxes = Math.max(0, Math.min(10, Number(j.boxes) || 0));
-        const rank = j.rank ? ` <em>(${escapeHtml(String(j.rank))})</em>` : "";
-        return `<tr><td>${escapeHtml(j.name || "The Journey")}${rank}</td><td>${boxes}/10 boxes</td></tr>`;
+        const pct   = boxes * 10;
+        const rank  = j.rank ? ` <em>(${escapeHtml(String(j.rank))})</em>` : "";
+        const hint  = boxes >= 7
+          ? "destination near — ready to <code>!Reach Your Destination</code>"
+          : boxes >= 4
+            ? "well underway"
+            : "just begun — waypoints are dramatic beats, not the destination";
+        return `<tr><td>${escapeHtml(j.name || "The Journey")}${rank}</td>` +
+               `<td>${boxes}/10 (${pct}%)</td><td class="es-help-aside">${hint}</td></tr>`;
       }).join("");
       const body = `
         <p>Your open journeys:</p>
