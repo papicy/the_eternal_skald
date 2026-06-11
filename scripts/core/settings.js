@@ -16,6 +16,9 @@ import { buildModelChoices } from "./model-catalogue.js";
 // It is only touched inside setting onChange callbacks (call-time), so this
 // late binding back into the main module is cycle-safe.
 import { EntityLinker } from "../chronicle/entity-linking.js";
+// IronswornController is referenced only inside a setting onChange callback
+// (call-time), so this import is cycle-safe.
+import { IronswornController } from "../ironsworn-controller.js";
 
 /* ===================================================================== */
 /*  §2  MODULE SETTINGS                                                   */

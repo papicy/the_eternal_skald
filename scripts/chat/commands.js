@@ -12,6 +12,9 @@ import { NpcDialogue, OracleInterpreter, LoreGenerator } from "../narrative/gene
 import { MapVision } from "../vision/map-vision.js";
 import { JournalSystem } from "../chronicle/journal-system.js";
 import { EntityLinker } from "../chronicle/entity-linking.js";
+import { IronswornData } from "../ironsworn-data.js";
+import { IronswornController } from "../ironsworn-controller.js";
+import { BrowserRAG } from "../browser-rag.js";
 
 /**
  * Master dispatcher. Returns true if the message was a recognised Skald
