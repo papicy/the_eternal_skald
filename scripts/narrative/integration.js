@@ -798,13 +798,35 @@ export const Integration = {
 
   /* ---------------- Move triggering & selector ---------------- */
 
-  /** Trigger a move through the Ironsworn controller (or manual fallback). */
-  async doTriggerMove(moveName, stat) {
+  /**
+   * Trigger a move through the Ironsworn controller (or manual fallback).
+   *
+   * @param {string}  moveName        The official move name.
+   * @param {string}  [stat]          Optional stat for the manual fallback.
+   * @param {object}  [opts]
+   * @param {string}  [opts.rawIntent]  The player's ORIGINAL words for this
+   *        action (e.g. "Undertake a Journey to Ironhome"). When a move is
+   *        declared explicitly we used to pass only the move name + stat, which
+   *        discarded any destination the player named — so journey auto-naming
+   *        always fell back to a generic title (the "all journeys are 'The
+   *        Journey'" bug). Passing the raw words here lets _resolveJourney()
+   *        recover the destination. (v0.11.3 — journey naming Layer 0.)
+   */
+  async doTriggerMove(moveName, stat, opts = {}) {
     if (!this.active()) {
       ui.notifications?.warn(`${SKALD_NAME}: Ironsworn system not active — cannot roll moves.`);
       return null;
     }
-    this._lastIntent = `${moveName}${stat ? ` +${stat}` : ""}` + (this._lastIntent ? ` — ${this._lastIntent}` : "");
+    // Build the intent string the post-roll narration + journey naming read.
+    // When the caller supplied the player's raw words (opts.rawIntent), use
+    // them as the authoritative intent (they carry the destination) rather than
+    // prepending to a possibly-stale prior intent. Otherwise keep the legacy
+    // behaviour of decorating whatever intent the action path already recorded.
+    const rawIntent = String(opts.rawIntent ?? "").trim();
+    const moveTag = `${moveName}${stat ? ` +${stat}` : ""}`;
+    this._lastIntent = rawIntent
+      ? `${moveTag} — ${rawIntent}`
+      : moveTag + (this._lastIntent ? ` — ${this._lastIntent}` : "");
     const actor = IronswornController.getActiveCharacter();
     // (v0.10.38 — Phase 4) Asset bonus advisory: a non-blocking suggestion if
     // one of the character's assets grants a bonus that plausibly applies to
@@ -1822,28 +1844,287 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
     return /\breach a milestone\b/i.test(String(moveName || ""));
   },
 
-  /**
-   * Best-effort meaningful name for an auto-created journey track, derived from
-   * the player's stated intent (e.g. "travel to the Frozen Keep" →
-   * "Journey to the Frozen Keep"). Falls back to a clean generic title so a
-   * track ALWAYS gets a sensible name rather than an empty/placeholder one.
+  /* ==================================================================
+   *  JOURNEY NAMING — multi-layer destination resolver (v0.11.3)
+   * ==================================================================
+   * Auto-created journey tracks used to be named by a single regex over the
+   * player's intent, falling back to the constant "The Journey" whenever it
+   * missed — which made every unparsed journey share one name (and collapse
+   * into a single track). The resolver below tries, in order:
+   *
+   *   Layer 1  Deterministic extraction — a broadened, case-insensitive regex
+   *            (more prepositions) plus bare compass-direction handling.
+   *   Layer 2  Context match — compare the intent against REAL place names
+   *            already in scope (scene name, map-note / journal-pin locations).
+   *   Layer 3  AI semantic extraction — a small, bounded, setting-gated LLM
+   *            call for complex phrasing ("we strike out past the frost-line").
+   *   Layer 4  Intelligent fallback — name from the active/story-focus vow or
+   *            the current scene, never a bare repeated "The Journey".
+   *
+   * Every layer is defensive; resolution NEVER throws and ALWAYS yields a
+   * non-empty, sensible name. Returns { name, rank, specific, source } where
+   * `specific` tells _autoJourneyFlow whether the destination is concrete
+   * enough to branch a separate track (vs. conservatively reusing the newest).
    */
-  _inferJourneyName() {
+  async _resolveJourney(actor) {
     const intent = String(this._lastIntent || "").trim();
-    if (intent) {
-      // "...to/toward/towards/for/into <Destination>" — capture a proper-ish
-      // place name (allow a leading "the").
-      const m = intent.match(/\b(?:to|toward|towards|for|into|reach|reaching|bound for)\s+((?:the\s+)?[A-Z][\w''’\- ]{2,48})/);
-      if (m) {
-        const dest = m[1].trim().replace(/[.,;:!?]+$/, "").replace(/\s+/g, " ");
-        if (dest && !/^journey\b/i.test(dest)) return `Journey to ${dest}`;
+
+    // ---- Layer 1: deterministic regex extraction ----
+    try {
+      const dest = this._extractDestinationDeterministic(intent);
+      if (dest) return { name: `Journey to ${dest}`, rank: this._inferJourneyRank(intent), specific: true, source: "regex" };
+      const dir = this._extractDirection(intent);
+      if (dir) return { name: `Journey ${dir}`, rank: this._inferJourneyRank(intent), specific: true, source: "direction" };
+    } catch (e) { this._dbg?.("journey naming L1 failed", e); }
+
+    // ---- Layer 2: context match against real, in-scope locations ----
+    try {
+      const ctxDest = this._matchContextLocation(intent);
+      if (ctxDest) return { name: `Journey to ${ctxDest}`, rank: this._inferJourneyRank(intent), specific: true, source: "context" };
+    } catch (e) { this._dbg?.("journey naming L2 failed", e); }
+
+    // ---- Layer 3: AI semantic extraction (bounded, setting-gated) ----
+    try {
+      if (intent && (Settings.get("aiJourneyNaming") ?? true)) {
+        const ai = await this._aiExtractDestination(intent, actor);
+        if (ai?.destination) {
+          const rank = this._normalizeRankWord(ai.rank) || this._inferJourneyRank(intent);
+          return { name: `Journey to ${this._titleCase(ai.destination)}`, rank, specific: true, source: "ai" };
+        }
       }
-    }
-    return "The Journey";
+    } catch (e) { this._dbg?.("journey naming L3 failed", e); }
+
+    // ---- Layer 4: intelligent fallback (active vow / scene), never bare ----
+    try {
+      const fb = this._fallbackJourneyName(actor);
+      if (fb?.name) return { name: fb.name, rank: this._inferJourneyRank(intent), specific: !!fb.specific, source: fb.source };
+    } catch (e) { this._dbg?.("journey naming L4 failed", e); }
+
+    return { name: "The Journey", rank: this._inferJourneyRank(intent), specific: false, source: "generic" };
   },
 
-  /** Default rank for an auto-created journey track. */
-  _inferJourneyRank() {
+  /**
+   * Layer 1 — deterministic destination extraction. Case-INSENSITIVE, with a
+   * broadened set of travel cues, returning a Title-Cased place name (or "").
+   */
+  _extractDestinationDeterministic(intent) {
+    if (!intent) return "";
+    // Travel cues that precede a destination. Multi-word cues first so e.g.
+    // "set out for" wins over a bare "for". The destination is any run of
+    // word-ish characters (letters/marks/apostrophes/hyphens/spaces), captured
+    // case-insensitively and cleaned up afterwards.
+    const CUE = "(?:bound for|set out for|set off for|head(?:ing|ed)? (?:to|for)|make for|making for|depart(?:ing)? for|venture (?:to|into)|voyage to|sail(?:ing)? (?:to|for)|march(?:ing)? (?:to|on)|ride (?:to|for)|travel(?:ling|ing)? to|journey(?:ing)? to|onward to|towards?|reach(?:ing)?|into|to|for)";
+    const re = new RegExp(`\\b${CUE}\\s+((?:the\\s+)?[\\p{L}][\\p{L}''’\\- ]{1,48})`, "iu");
+    const m = intent.match(re);
+    if (!m) return "";
+    let dest = m[1].trim()
+      .replace(/[.,;:!?].*$/, "")          // cut at first sentence punctuation
+      .replace(/\s+/g, " ")
+      .trim();
+    // The capture is deliberately greedy (place names can be multi-word), so it
+    // may sweep up the clause that FOLLOWS the destination ("…to Skellmark
+    // across the sea", "…for Hearthwild before the storm"). Cut at the first
+    // clause-boundary / connective word so we keep only the place name itself.
+    dest = dest.replace(/\s+(?:across|before|after|while|until|through|throughout|beyond|past|near|amid|amidst|when|where|because|so|once|though|although|since|unless|but|and|then|with|using|by|to|in order|despite|without).*$/i, "").trim();
+    // Strip a leading travel verb the broad cue may have left attached
+    // ("to reach the old watchtower" → "the old watchtower").
+    dest = dest.replace(/^(?:reach(?:ing)?|go(?:ing)?|get(?:ting)?|head(?:ing)?|travel(?:ling|ing)?|journey(?:ing)?|venture|return(?:ing)?)\s+/i, "").trim();
+    // Place names are short; cap to the first 5 words to avoid runaway capture.
+    { const w = dest.split(/\s+/); if (w.length > 5) dest = w.slice(0, 5).join(" "); }
+    // Trim any dangling article/preposition the cap or cut may have left.
+    dest = dest.replace(/\s+(?:of|the|a|an|in|on|at|by|for)(?:\s+(?:a|an|the))?$/i, "").trim();
+    if (!dest) return "";
+    // Reject obvious non-destinations (the move name itself, generic words).
+    if (/^journey\b/i.test(dest)) return "";
+    if (/^(it|them|him|her|us|me|that|this|there|here|home|safety|danger|trouble)$/i.test(dest)) {
+      // "home" → handled as a sensible destination; others are non-places.
+      if (!/^home$/i.test(dest)) return "";
+    }
+    return this._titleCase(dest);
+  },
+
+  /**
+   * Layer 1b — bare compass / relative direction ("journey north", "press on
+   * downriver"). Returns a Title-Cased direction word or "".
+   */
+  _extractDirection(intent) {
+    if (!intent) return "";
+    const m = intent.match(/\b(north|south|east|west|northward|southward|eastward|westward|upriver|downriver|inland|seaward|homeward)\b/i);
+    return m ? this._titleCase(m[1]) : "";
+  },
+
+  /**
+   * Layer 2 — match the intent against REAL place names already in scope:
+   * the active scene's name and its map-note / journal-pin locations (the same
+   * data _gatherSceneContext surfaces to the AI). Returns the canonical place
+   * name (correct spelling/casing) when the intent mentions it, else "".
+   */
+  _matchContextLocation(intent) {
+    if (!intent) return "";
+    const hay = intent.toLowerCase();
+    const places = this._getContextLocations();
+    // Prefer the LONGEST matching name so "the Frozen Keep" beats "Keep".
+    let best = "";
+    for (const p of places) {
+      const needle = String(p || "").trim();
+      if (needle.length < 3) continue;
+      if (hay.includes(needle.toLowerCase()) && needle.length > best.length) best = needle;
+    }
+    return best;
+  },
+
+  /**
+   * Collect real, in-scope location names: the active scene's map-note /
+   * journal-pin labels and the scene name itself. Fully defensive — returns []
+   * on any read failure so naming never breaks.
+   */
+  _getContextLocations() {
+    const out = [];
+    const seen = new Set();
+    const push = (n) => {
+      const v = String(n ?? "").trim();
+      if (!v) return;
+      const k = v.toLowerCase();
+      if (seen.has(k)) return;
+      seen.add(k); out.push(v);
+    };
+    try {
+      const scene = game?.scenes?.active ?? canvas?.scene ?? null;
+      if (scene) {
+        const notes = scene.notes ? Array.from(scene.notes) : [];
+        for (const note of notes) {
+          if (!note) continue;
+          let label = "";
+          try { label = String(note.text ?? "").trim(); } catch (_) { label = ""; }
+          let journalName = "";
+          try {
+            const entry = (note.entryId && game?.journal?.get) ? game.journal.get(note.entryId) : (note.entry ?? null);
+            if (entry?.name) journalName = String(entry.name).trim();
+          } catch (_) { journalName = ""; }
+          push(label || journalName);
+        }
+        push(String(scene.navName || scene.name || "").trim());
+      }
+    } catch (_) { /* graceful degradation */ }
+    return out;
+  },
+
+  /**
+   * Layer 3 — AI semantic extraction for complex phrasing. Bounded (low token
+   * budget, low temperature), setting-gated, and fully defensive: any failure
+   * returns null so resolution falls through to the Layer-4 fallback. Feeds the
+   * model the player's intent plus the real in-scope locations so it grounds
+   * the destination in the actual fiction. Expects a one-line JSON object.
+   *
+   * @returns {Promise<{destination?:string, rank?:string}|null>}
+   */
+  async _aiExtractDestination(intent, actor) {
+    const places = this._getContextLocations().slice(0, 12);
+    const vow = (() => { try { return IronswornController.getActiveVow?.(actor)?.name || ""; } catch (_) { return ""; } })();
+    const placeLine = places.length ? `Known nearby places: ${places.join(", ")}.` : "No known places listed.";
+    const vowLine = vow ? `The character's current vow: "${vow}".` : "";
+    const system = "You extract the DESTINATION of an Ironsworn journey from a player's words. " +
+      "Reply with ONE line of compact JSON only, no prose: " +
+      '{"destination":"<short place name or empty>","rank":"<troublesome|dangerous|formidable|extreme|epic>"}. ' +
+      "Prefer a destination that matches a known nearby place. If no destination is implied, use an empty string. " +
+      "Pick a rank reflecting how arduous the trip sounds (default formidable).";
+    const user = `Player intent: "${intent}"\n${placeLine}\n${vowLine}`;
+    try {
+      const reply = await Client.chat(
+        [{ role: "system", content: system }, { role: "user", content: user }],
+        { temperature: 0.2, maxTokens: 80 }
+      );
+      const raw = String(reply || "");
+      const m = raw.match(/\{[\s\S]*\}/);
+      if (!m) return null;
+      const obj = JSON.parse(m[0]);
+      let destination = String(obj?.destination ?? "").trim().replace(/[.,;:!?]+$/, "");
+      if (/^journey\b/i.test(destination)) destination = destination.replace(/^journey\s+(?:to\s+)?/i, "").trim();
+      if (destination.length < 2 || destination.length > 50) destination = "";
+      const rank = this._normalizeRankWord(obj?.rank);
+      return { destination, rank };
+    } catch (e) {
+      this._dbg?.("AI destination extraction failed", e);
+      return null;
+    }
+  },
+
+  /**
+   * Layer 4 — intelligent fallback. Instead of a bare repeated "The Journey",
+   * name the track from the current STORY FOCUS / active vow ("Journey toward
+   * <vow keyword>") or, failing that, the current scene ("Journey from
+   * <scene>"). Returns { name, specific, source }. `specific:false` keeps the
+   * conservative reuse-newest behaviour so near-duplicate generic journeys
+   * don't spam separate tracks; a vow/scene-seeded name is treated as specific.
+   */
+  _fallbackJourneyName(actor) {
+    // Active / story-focus vow → a goal-oriented journey name.
+    try {
+      const vow = IronswornController.getActiveVow?.(actor);
+      if (vow?.name) {
+        const kw = this._vowKeyword(vow.name);
+        if (kw) return { name: `Journey toward ${kw}`, specific: true, source: "vow" };
+      }
+    } catch (_) { /* ignore */ }
+    // Current scene → a place-anchored journey name.
+    try {
+      const scene = game?.scenes?.active ?? canvas?.scene ?? null;
+      const sn = String(scene?.navName || scene?.name || "").trim();
+      if (sn && !/^scene$/i.test(sn)) return { name: `Journey from ${this._titleCase(sn)}`, specific: false, source: "scene" };
+    } catch (_) { /* ignore */ }
+    return { name: "The Journey", specific: false, source: "generic" };
+  },
+
+  /**
+   * Reduce a vow title to a short, evocative keyword/phrase for naming a
+   * journey after it (e.g. "Avenge the burning of Hearthwild" → "Hearthwild").
+   * Best-effort: prefers a trailing proper noun, else the last few words.
+   */
+  _vowKeyword(vowName) {
+    const n = String(vowName || "").trim().replace(/[.,;:!?]+$/, "");
+    if (!n) return "";
+    // A proper noun anywhere in the vow is the strongest signal.
+    const proper = n.match(/\b([A-Z][\w''’\-]+(?:\s+[A-Z][\w''’\-]+)*)\b/g);
+    if (proper && proper.length) {
+      // Skip a leading capitalised verb ("Avenge", "Find") if more follows.
+      const cand = proper.length > 1 ? proper[proper.length - 1] : proper[0];
+      if (cand && cand.length > 2) return cand;
+    }
+    // Else the last 3 words, trimmed.
+    const words = n.split(/\s+/);
+    return words.slice(-3).join(" ");
+  },
+
+  /** Title-Case a place/direction phrase, preserving a leading "the". */
+  _titleCase(s) {
+    return String(s || "")
+      .split(/\s+/)
+      .map((w, i) => {
+        const lw = w.toLowerCase();
+        // Keep small joining words lower-case unless first.
+        if (i > 0 && /^(the|of|a|an|and|to|in|on|at|by)$/.test(lw)) return lw;
+        return w.charAt(0).toUpperCase() + w.slice(1);
+      })
+      .join(" ")
+      .trim();
+  },
+
+  /** Coerce an arbitrary rank string to a canonical Ironsworn rank word or "". */
+  _normalizeRankWord(r) {
+    const v = String(r ?? "").trim().toLowerCase();
+    return ["troublesome", "dangerous", "formidable", "extreme", "epic"].includes(v) ? v : "";
+  },
+
+  /**
+   * Default rank for an auto-created journey track. Light heuristic over the
+   * intent (epic/long → harder; quick/short → easier); defaults to formidable.
+   */
+  _inferJourneyRank(intent = "") {
+    const t = String(intent || "").toLowerCase();
+    if (/\b(epic|legendary|across the world|to the ends|impossible)\b/.test(t)) return "epic";
+    if (/\b(extreme|perilous|treacherous|forsaken|far[- ]?off|distant)\b/.test(t)) return "extreme";
+    if (/\b(dangerous|hard|arduous|gruel|harsh|long)\b/.test(t)) return "dangerous";
+    if (/\b(quick|short|easy|nearby|brief|stroll|just (?:over|past)|down the road)\b/.test(t)) return "troublesome";
     return "formidable";
   },
 
@@ -1882,8 +2163,12 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
     // opens its own track so simultaneous journeys stay separate. When the
     // destination is unknown (generic "The Journey"), we keep the conservative
     // reuse-newest behaviour to avoid spamming near-duplicate tracks.
-    const inferredName = this._inferJourneyName();             // "Journey to X" | "The Journey"
-    const specific     = !/^the journey$/i.test(inferredName); // did we identify a real destination?
+    // (v0.11.3 — naming overhaul) Resolve the destination via the multi-layer
+    // resolver (command-parser intent → regex → context → AI → fallback) so the
+    // track is named after the real destination instead of a generic label.
+    const resolved     = await this._resolveJourney(actor);
+    const inferredName = resolved.name;       // "Journey to X" | "Journey north" | <fallback> | "The Journey"
+    const specific     = resolved.specific;   // did we identify a real destination?
     let track = IronswornController._newestOpenTrackItem(actor, "journey");
 
     if (track && specific) {
@@ -1895,7 +2180,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
 
     if (!track) {
       const name = inferredName;
-      const rank = this._inferJourneyRank();
+      const rank = resolved.rank;
       const res  = await IronswornController.createProgressTrack(actor, name, "journey", rank);
       if (res?.ok) {
         track = IronswornController.getProgressTrack(actor, res.id)

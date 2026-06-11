@@ -2207,6 +2207,31 @@ export const IronswornController = {
     const current = Number(foundry.utils.getProperty(track, "system.current") ?? 0);
     const score = Math.max(0, Math.min(10, Math.floor(current / 4)));
 
+    // (v0.11.3 — progress gate) "Reach Your Destination" (and other progress
+    // moves) should not be rolled before the journey/vow has been meaningfully
+    // advanced — in Ironsworn you mark progress along the way, then make the
+    // progress roll once you arrive. Rolling at 0–few boxes is almost always a
+    // premature AI-offered roll that wastes the track. Gate it behind a minimum
+    // number of filled boxes (configurable; default 4). The gate is skippable
+    // with opts.force (a deliberate player override). Fully defensive: any
+    // Settings read failure falls back to the documented defaults.
+    // NOTE: this controller intentionally has no imports (settings.js imports
+    // IT, so importing Settings here would be circular). Read the world setting
+    // straight from Foundry under the module scope (ES_SCOPE === MODULE_ID).
+    let gateOn = true, minBoxes = 4;
+    try { const g = game?.settings?.get?.(ES_SCOPE, "enforceJourneyProgressGate"); gateOn = (g === undefined || g === null) ? true : !!g; } catch (_) {}
+    try { const n = Number(game?.settings?.get?.(ES_SCOPE, "journeyMinProgressBoxes")); if (Number.isFinite(n) && n >= 0) minBoxes = n; } catch (_) {}
+    if (kind === "journey" && gateOn && !opts.force && score < minBoxes) {
+      return {
+        ok: false,
+        method: "none",
+        error: `“${track.name}” has only ${score}/10 progress box${score === 1 ? "" : "es"} — ` +
+               `you need at least ${minBoxes} before rolling "${move?.name ?? moveRef}". ` +
+               `Mark more progress (e.g. "Undertake a Journey" or !progress <boxes>) first, ` +
+               `then make the progress roll once you arrive.`
+      };
+    }
+
     // Preferred: the system's progress-roll dialog (attaches the move card).
     const dlg = this.api()?.applications?.IronswornPrerollDialog;
     if (typeof dlg?.showForProgress === "function") {
