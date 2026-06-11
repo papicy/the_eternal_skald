@@ -2,7 +2,7 @@ import { LOG_PREFIX, MODULE_ID, SKALD_NAME, COMMANDS } from "../core/constants.j
 import { Settings } from "../core/settings.js";
 import { Client } from "../ai/client.js";
 import { buildSystemPrompt } from "../ai/prompt-builder.js";
-import { Memory, Chat, escapeHtml, formatMarkdown } from "./display.js";
+import { Memory, Chat, escapeHtml, formatMarkdown, parseMetadata } from "./display.js";
 // Call-time cross-imports (safe cycle): these subsystems still live in eternal-skald.js
 // and are only invoked inside command handlers (never at module-eval).
 import { runConversation, CombatController, SceneContext,
@@ -96,6 +96,9 @@ export function dispatchCommand(rawText) {
       case COMMANDS.ANALYZE_MAP:   return () => Commands.scout(args);
       // --- Manual journey progress (v0.11.3) ---
       case COMMANDS.PROGRESS:      return () => Commands.progress(args);
+      // --- Journal amend / rewrite (v0.14.0) ---
+      case COMMANDS.JOURNAL_REWRITE: return () => Commands.journalRewrite(args);
+      case COMMANDS.JOURNAL_AMEND:   return () => Commands.journalAmend(args);
       default:               return null;
     }
   })();
@@ -156,6 +159,8 @@ export const Commands = {
       [COMMANDS.COMBAT, "Get tactical narration/advice for the current fight."],
       [COMMANDS.PROGRESS, "Review or advance a journey. <code>!progress</code> lists your journeys; <code>!progress 2</code> marks +2 boxes on the newest (add a name to target one)."],
       [COMMANDS.JOURNALS,  "List the chronicle entries the Skald has scribed. e.g. <code>!journals npc</code>"],
+      [COMMANDS.JOURNAL_REWRITE, "GM-only: rewrite a chronicle entry's canonical content (prior text archived within). e.g. <code>!journal-rewrite \"Captain Reeves\" she is revealed a traitor</code>"],
+      [COMMANDS.JOURNAL_AMEND,   "GM-only: append new details to a chronicle entry. e.g. <code>!journal-amend \"Highmount\" the eastern gate collapsed</code>"],
       [COMMANDS.MYSTERIES, "Review the open mysteries and unresolved threads."],
       [COMMANDS.REMIND,    "Recall what the chronicle holds — now with semantic memory. e.g. <code>!remind Keldra</code>"],
       [COMMANDS.END_SESSION, "GM-only: weave a Session Chronicle from this session's events."],
@@ -792,6 +797,143 @@ export const Commands = {
         resolve(false);
       }
     });
+  },
+
+  /* ------------------ !journal-rewrite / !journal-amend (v0.14.0) ------------------ */
+
+  /**
+   * Parse a journal command's args into { name, instruction }. Supports a
+   * leading quoted name ("Captain Reeves" rest...) or, if unquoted, treats the
+   * FIRST word as the name and the remainder as the instruction.
+   */
+  _parseJournalArgs(args) {
+    const raw = String(args || "").trim();
+    if (!raw) return { name: "", instruction: "" };
+    const q = raw.match(/^["“']([^"”']+)["”']\s*(.*)$/);
+    if (q) return { name: q[1].trim(), instruction: (q[2] || "").trim() };
+    const sp = raw.search(/\s/);
+    if (sp === -1) return { name: raw, instruction: "" };
+    return { name: raw.slice(0, sp).trim(), instruction: raw.slice(sp + 1).trim() };
+  },
+
+  /**
+   * Resolve a chronicle entry by fuzzy name across the three entity types.
+   * Returns { entry, type } or null. Reuses JournalSystem._findEntry().
+   */
+  _resolveJournalEntry(name) {
+    for (const type of ["npc", "location", "discovery"]) {
+      try {
+        const entry = JournalSystem._findEntry(type, name, []);
+        if (entry) return { entry, type };
+      } catch (_) { /* try next type */ }
+    }
+    return null;
+  },
+
+  /**
+   * Ask the model for fresh content for an entry. Returns an entities[]-shaped
+   * object via the standard [[SKALD_META]] protocol (so the existing parser
+   * understands it). `mode` is "rewrite" (full regenerate) or "amend" (delta).
+   */
+  async _generateEntryContent(entry, type, instruction, mode) {
+    const page = entry.pages?.contents?.[0];
+    const current = page?.text?.content ?? "";
+    const aiCtx = (() => { try { return entry.getFlag?.(MODULE_ID, "aiContext") || ""; } catch (_) { return ""; } })();
+    const verb = mode === "rewrite"
+      ? "Regenerate the FULL, clean canonical entry for this subject."
+      : "Produce ONLY the new/changed details to add to this subject.";
+    const sys = buildSystemPrompt({
+      task: `${verb} Output EXACTLY ONE [[SKALD_META]] block containing a single
+"entities" array with ONE object of type "${type}", action "${mode === "rewrite" ? "create" : "update"}",
+name "${entry.name}", and the appropriate structured fields + a 1–3 sentence
+"description". No narration, no prose outside the block.`,
+      allowJournal: true
+    });
+    const user = `EXISTING ENTRY (HTML):\n${current.slice(0, 4000)}\n\nCONTEXT NOTES:\n${aiCtx}\n\nGM INSTRUCTION:\n${instruction || "(none — use established lore)"}`;
+    let reply = "";
+    try {
+      reply = await Client.chat(
+        [{ role: "system", content: sys }, { role: "user", content: user }],
+        { temperature: 0.5, maxTokens: 900 }
+      );
+    } catch (e) {
+      console.warn(LOG_PREFIX, "journal content generation failed:", e?.message || e);
+      return null;
+    }
+    const { metadata } = parseMetadata(reply);
+    const ent = Array.isArray(metadata?.entities) ? metadata.entities.find(e => e?.name) : null;
+    return ent || null;
+  },
+
+  /**
+   * !journal-rewrite "<entity>" <instruction>
+   * Regenerate an entry's canonical body. Prior content is ARCHIVED by
+   * JournalSystem.rewriteEntity() (via the "rewrite" queue job) — never lost.
+   */
+  async journalRewrite(args) {
+    if (!JournalSystem.canWrite?.()) {
+      return Chat.postSystem(`<em>Only the GM may rewrite the chronicle.</em>`, { gmWhisper: true });
+    }
+    const { name, instruction } = this._parseJournalArgs(args);
+    if (!name) {
+      return Chat.postSkald(
+        `<p>Usage: <code>!journal-rewrite "Captain Reeves" she is now revealed a traitor</code></p>`,
+        { variant: "lore", title: "Rewrite a Chronicle Entry", gmWhisper: true }
+      );
+    }
+    const found = this._resolveJournalEntry(name);
+    if (!found) {
+      return Chat.postSystem(`<em>No chronicle entry found for “${escapeHtml(name)}”.</em>`, { gmWhisper: true });
+    }
+    const ent = await this._generateEntryContent(found.entry, found.type, instruction, "rewrite");
+    if (!ent) {
+      return Chat.postSystem(`<em>The Skald could not compose a rewrite for “${escapeHtml(found.entry.name)}”.</em>`, { gmWhisper: true });
+    }
+    // Route through the serial queue (archive-safe). Strip the title from body
+    // fields; rewriteEntity() re-adds the entry's name.
+    JournalSystem.queue().enqueue({
+      kind: "rewrite", op: "rewrite", type: found.type,
+      target: found.entry.name, aliases: [],
+      body: ent, reason: instruction || "GM-requested rewrite"
+    });
+    return Chat.postSkald(
+      `<p>Rewriting <strong>${escapeHtml(found.entry.name)}</strong> — the prior text has been archived within the entry.</p>`,
+      { variant: "lore", title: "Chronicle Rewritten", gmWhisper: true }
+    );
+  },
+
+  /**
+   * !journal-amend "<entity>" <instruction>
+   * Append a structured update to an entry (history-safe append, same engine
+   * as the AI's action:"update").
+   */
+  async journalAmend(args) {
+    if (!JournalSystem.canWrite?.()) {
+      return Chat.postSystem(`<em>Only the GM may amend the chronicle.</em>`, { gmWhisper: true });
+    }
+    const { name, instruction } = this._parseJournalArgs(args);
+    if (!name) {
+      return Chat.postSkald(
+        `<p>Usage: <code>!journal-amend "Highmount" the eastern gate collapsed in the storm</code></p>`,
+        { variant: "lore", title: "Amend a Chronicle Entry", gmWhisper: true }
+      );
+    }
+    const found = this._resolveJournalEntry(name);
+    if (!found) {
+      return Chat.postSystem(`<em>No chronicle entry found for “${escapeHtml(name)}”.</em>`, { gmWhisper: true });
+    }
+    const ent = await this._generateEntryContent(found.entry, found.type, instruction, "amend");
+    if (!ent) {
+      return Chat.postSystem(`<em>The Skald could not compose an amendment for “${escapeHtml(found.entry.name)}”.</em>`, { gmWhisper: true });
+    }
+    JournalSystem.queue().enqueue({
+      kind: "rewrite", op: "amend", type: found.type,
+      target: found.entry.name, aliases: [], body: ent
+    });
+    return Chat.postSkald(
+      `<p>Amending <strong>${escapeHtml(found.entry.name)}</strong> with new details.</p>`,
+      { variant: "lore", title: "Chronicle Amended", gmWhisper: true }
+    );
   },
 
   /* ------------------------ !end-session (v0.4.0) ------------------ */

@@ -166,6 +166,18 @@
         "name": "Session Chronicle on Demand",
         "hint": "Enable the !end-session command (and idle auto-summaries), which weave a saga-styled recap of everything recorded this session into a dated Session Chronicle journal. Defaults to ON."
       },
+      "journalingDensity": {
+        "name": "Journaling Density",
+        "hint": "How much of the narrative the Skald records to the chronicle. 'Notable only' keeps the original behavior (record major beats). 'Standard' always notes 1–3 anchor facts per reply. 'High' captures most continuity anchors and world-state shifts. 'Exhaustive' records nearly everything worth remembering as atomic Who/What/Where/When/How/Why facts (larger journals)."
+      },
+      "metadataBackfill": {
+        "name": "Metadata Backfill",
+        "hint": "When the Skald's reply contains no valid chronicle metadata, run a second lightweight AI call to extract notes from the finished narrative. The most effective fix for 'nothing gets noted'. Fire-and-forget — if the extraction fails, nothing breaks."
+      },
+      "journalEditMode": {
+        "name": "Journal Edit Mode",
+        "hint": "Controls whether the AI may amend or rewrite existing journal entries. 'Manual' — only the !journal-rewrite / !journal-amend GM commands. 'AI proposes' — the AI suggests changes and you click Accept/Reject on a GM-only card. 'Auto' — the AI applies changes automatically (active GM only). Prior content is always archived, never deleted."
+      },
       "sessionAutoMinutes": {
         "name": "Auto-Summary Idle Timer (minutes)",
         "hint": "Automatically weave a Session Chronicle after this many minutes of inactivity (no new narration). Requires 'Session Chronicle on Demand' to be ON. Set to 0 to disable idle auto-summaries and only chronicle manually via !end-session. Default: 0 (off)."
