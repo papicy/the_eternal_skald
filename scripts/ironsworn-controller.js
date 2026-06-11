@@ -1364,6 +1364,19 @@ export const IronswornController = {
       return this._executeMilestone(opts.actor ?? this.getActiveCharacter());
     }
 
+    // 0c. DISCOVER A SITE — a no-roll Ironsworn: Delve move with no rollable
+    //     stat. It used to dead-end at the "no dialog and no rollable stat"
+    //     error below. Route it to the AI site generator, which rolls a random
+    //     Theme + Domain (preserving Delve DNA), enriches them into a
+    //     mysterious site and creates a site progress track — degrading to a
+    //     manual-oracle fallback if the AI is unavailable. The dynamic import
+    //     keeps this controller free of top-level dependencies (see the
+    //     "importing Settings would be circular" note elsewhere in this file).
+    if (this._isDiscoverSiteMove(dataswornId, move?.name)) {
+      const { SiteGenerator } = await import("./narrative/generators.js");
+      return SiteGenerator.discover({ ...opts, actor: opts.actor ?? this.getActiveCharacter() });
+    }
+
     // 1. Preferred: the system pre-roll dialog.
     if (dataswornId && this.hasPrerollDialog()) {
       try {
@@ -2033,9 +2046,14 @@ export const IronswornController = {
    */
   _isProgressMove(dsid, name) {
     const id = String(dsid ?? "").toLowerCase();
-    if (/\/(fulfill_your_vow|reach_your_destination|end_the_fight)$/.test(id)) return true;
+    // (v0.11.4 — Delve) "Locate Your Objective" and "Escape the Depths" are also
+    // progress rolls — they roll a SITE track's progress score, exactly like
+    // Fulfill Your Vow / Reach Your Destination roll a vow/journey. Without this
+    // they used to dead-end at triggerMove()'s "no rollable stat" error.
+    if (/\/(fulfill_your_vow|reach_your_destination|end_the_fight|locate_your_objective|escape_the_depths)$/.test(id)) return true;
     const n = String(name ?? "").toLowerCase().trim();
-    return n === "fulfill your vow" || n === "reach your destination" || n === "end the fight";
+    return n === "fulfill your vow" || n === "reach your destination" || n === "end the fight"
+        || n === "locate your objective" || n === "escape the depths";
   },
 
   /**
@@ -2047,6 +2065,98 @@ export const IronswornController = {
     if (/\/reach_a_milestone$/.test(id)) return true;
     const n = String(name ?? "").toLowerCase().trim();
     return n === "reach a milestone";
+  },
+
+  /**
+   * Is this the Ironsworn: Delve "Discover a Site" move?  It rolls no dice and
+   * has no rollable stat, so it is handled by the AI site generator rather than
+   * the action/progress roll paths.
+   */
+  _isDiscoverSiteMove(dsid, name) {
+    const id = String(dsid ?? "").toLowerCase();
+    if (/\/discover_a_site$/.test(id)) return true;
+    const n = String(name ?? "").toLowerCase().trim();
+    return n === "discover a site";
+  },
+
+  /**
+   * All OPEN (incomplete) site progress tracks on the actor — the tracks the
+   * Skald created with trackKind "delve" (see SiteGenerator / createProgressTrack).
+   * Newest first. Read-only. Used to resolve which site a Delve progress move
+   * ("Locate Your Objective" / "Escape the Depths") rolls against.
+   * @param {Actor} actor
+   * @returns {Item[]}
+   */
+  _openSiteTracks(actor) {
+    if (!actor?.items) return [];
+    const out = [];
+    for (const item of actor.items) {
+      if (item.type !== "progress") continue;
+      if (foundry.utils.getProperty(item, "system.completed")) continue;
+      const flagKind = (item.getFlag?.(ES_SCOPE, "trackKind")
+                     ?? foundry.utils.getProperty(item, `flags.${ES_SCOPE}.trackKind`)
+                     ?? "").toLowerCase();
+      if (flagKind === "delve") out.push(item);
+    }
+    out.sort((a, b) => (b._stats?.createdTime ?? 0) - (a._stats?.createdTime ?? 0));
+    return out;
+  },
+
+  /**
+   * Ask the player which open site a Delve progress move should roll against,
+   * when more than one site is active. Returns the chosen track Item, or null
+   * if the player cancels/closes (the move is then aborted — never auto-chosen).
+   * Prefers DialogV2 (v13+) and falls back to the classic Dialog.
+   * @param {Item[]} sites
+   * @param {string} moveName
+   * @returns {Promise<Item|null>}
+   */
+  async _showSiteSelectionDialog(sites, moveName) {
+    const esc = (s) => String(s ?? "").replace(/[&<>"]/g, c =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    const options = sites.map((s) => {
+      const cur = Number(foundry.utils.getProperty(s, "system.current") ?? 0);
+      const boxes = Math.max(0, Math.min(10, Math.floor(cur / 4)));
+      return `<option value="${esc(s.id)}">${esc(s.name)} (${boxes}/10)</option>`;
+    }).join("");
+    const content = `<p>Which site are you exploring for <strong>${esc(moveName)}</strong>?</p>` +
+      `<div class="form-group"><select name="es-site" style="width:100%">${options}</select></div>`;
+    const pick = (id) => sites.find(s => s.id === id) ?? null;
+
+    const DV2 = foundry?.applications?.api?.DialogV2;
+    if (DV2?.prompt) {
+      try {
+        const id = await DV2.prompt({
+          window: { title: "Select a Site" },
+          content,
+          ok: { label: "Roll", callback: (_ev, button) => button?.form?.elements?.["es-site"]?.value ?? null },
+          rejectClose: false
+        });
+        return pick(id);
+      } catch (e) {
+        warn("site selection DialogV2 failed — falling back to classic Dialog:", e?.message ?? e);
+      }
+    }
+    return await new Promise((resolve) => {
+      try {
+        new Dialog({
+          title: "Select a Site",
+          content,
+          buttons: {
+            ok: { label: "Roll", callback: (html) => {
+              const root = html?.[0] ?? html;
+              resolve(pick(root?.querySelector?.("select[name=es-site]")?.value));
+            } },
+            cancel: { label: "Cancel", callback: () => resolve(null) }
+          },
+          default: "ok",
+          close: () => resolve(null)
+        }).render(true);
+      } catch (e) {
+        warn("site selection dialog unavailable:", e?.message ?? e);
+        resolve(null);
+      }
+    });
   },
 
   /**
@@ -2165,6 +2275,8 @@ export const IronswornController = {
     const kind = /reach_your_destination/.test(idl) || nml === "reach your destination" ? "journey"
                : /fulfill_your_vow/.test(idl)       || nml === "fulfill your vow"       ? "vow"
                : /end_the_fight/.test(idl)          || nml === "end the fight"           ? "combat"
+               : /locate_your_objective|escape_the_depths/.test(idl)
+                 || nml === "locate your objective" || nml === "escape the depths"        ? "site"
                : null;
 
     // Resolve the track: explicit ref wins, else newest open track of the kind.
@@ -2179,14 +2291,34 @@ export const IronswornController = {
       const ac = this.getActiveCombat(actor) ?? this.getActiveCombatTrack(actor);
       if (ac?.id) track = actor.items?.get?.(ac.id) ?? null;
     }
-    if (!track && kind && kind !== "combat") track = this._newestOpenTrackItem(actor, kind);
+    // SITE moves ("Locate Your Objective" / "Escape the Depths") roll the
+    // active site's progress score. Resolution, in order:
+    //   • an explicit trackRef (the site-sheet roll button passes one) — handled
+    //     above by findTrack;
+    //   • exactly one open site → use it automatically;
+    //   • several open sites → ask the player which one (never auto-decide);
+    //   • no open site → a clear, actionable error.
+    if (!track && kind === "site") {
+      const sites = this._openSiteTracks(actor);
+      if (sites.length === 1) {
+        track = sites[0];
+      } else if (sites.length > 1) {
+        track = await this._showSiteSelectionDialog(sites, move?.name ?? String(moveRef));
+        if (!track) return { ok: false, method: "cancelled", error: "Site selection cancelled." };
+      }
+      // sites.length === 0 falls through to the shared "no open track" error below.
+    }
+    if (!track && kind && kind !== "combat" && kind !== "site") track = this._newestOpenTrackItem(actor, kind);
     if (!track) {
       const noun = kind ?? "progress";
-      const begin = kind === "combat" ? "Enter the fray" : `Begin the ${noun}`;
+      const begin = kind === "combat" ? "Enter the fray"
+                  : kind === "site"   ? "Discover a Site"
+                  : `Begin the ${noun}`;
+      const label = noun === "combat" ? "fight" : noun;
       return {
         ok: false,
         method: "none",
-        error: `No open ${noun === "combat" ? "fight" : noun} track to roll "${move?.name ?? moveRef}" against. ` +
+        error: `No open ${label} track to roll "${move?.name ?? moveRef}" against. ` +
                `${begin} first (or open its track card and roll from there).`
       };
     }
