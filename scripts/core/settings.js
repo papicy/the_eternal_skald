@@ -279,6 +279,44 @@ export const Settings = {
       default: true
     });
 
+    /* ---- Journey naming & progress (v0.11.3) ---- */
+
+    // When ON, complex/poetic travel phrasing that the deterministic and
+    // context layers can't parse is sent to a small, bounded LLM call to
+    // extract a destination so the journey track is named meaningfully.
+    game.settings.register(MODULE_ID, "aiJourneyNaming", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.aiJourneyNaming.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.aiJourneyNaming.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true
+    });
+
+    // When ON, "Reach Your Destination" (and other journey progress rolls)
+    // require a minimum number of filled progress boxes before they can be
+    // rolled — preventing premature progress rolls on barely-started journeys.
+    game.settings.register(MODULE_ID, "enforceJourneyProgressGate", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.enforceJourneyProgressGate.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.enforceJourneyProgressGate.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true
+    });
+
+    // The minimum number of filled progress boxes (0–10) required before a
+    // journey progress roll is allowed when the gate above is enabled.
+    game.settings.register(MODULE_ID, "journeyMinProgressBoxes", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.journeyMinProgressBoxes.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.journeyMinProgressBoxes.hint"),
+      scope: "world",
+      config: true,
+      type: Number,
+      range: { min: 1, max: 10, step: 1 },
+      default: 4
+    });
+
     /* ---- Experience granting (v0.10.32 — Phase 1) ---- */
 
     game.settings.register(MODULE_ID, "awardXpOnCompletion", {
