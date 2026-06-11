@@ -1864,7 +1864,7 @@ function escapeHtml(str) {
  * original (already-formatted) HTML is returned untouched, so narration is
  * never broken by linking.
  */
-const EntityLinker = {
+export const EntityLinker = {
   /** @type {{regex: RegExp, byName: Map<string, object>}|null} */
   _cache: null,
   _dirty: true,

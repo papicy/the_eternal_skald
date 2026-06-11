@@ -12,6 +12,10 @@ import {
   DEFAULT_ENDPOINT, DEFAULT_MODEL, PROVIDER_PRESETS
 } from "./constants.js";
 import { buildModelChoices } from "./model-catalogue.js";
+// EntityLinker lives in the main module (it will relocate to chronicle/ later).
+// It is only touched inside setting onChange callbacks (call-time), so this
+// late binding back into the main module is cycle-safe.
+import { EntityLinker } from "../eternal-skald.js";
 
 /* ===================================================================== */
 /*  §2  MODULE SETTINGS                                                   */
