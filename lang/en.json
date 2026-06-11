@@ -90,6 +90,18 @@
         "name": "Auto-Narrate Experience Gains",
         "hint": "When the character earns experience (the Ironsworn XP counter rises, or a Starforged legacy track advances), the Skald automatically narrates the milestone in saga style. Requires Ironsworn Rules Integration. Observe-only: the Skald never writes or spends XP itself."
       },
+      "aiJourneyNaming": {
+        "name": "AI Journey Destination Naming",
+        "hint": "When ON (default), poetic or complex travel phrasing that the built-in patterns and your scene's known places can't resolve is sent to a small, bounded AI call to extract the destination, so an auto-created journey track is named after where you're actually going instead of a generic \"The Journey\". Turn OFF to rely on pattern/context matching only (no extra AI call). Requires Ironsworn Rules Integration."
+      },
+      "enforceJourneyProgressGate": {
+        "name": "Require Progress Before Reaching a Destination",
+        "hint": "When ON (default), the \"Reach Your Destination\" progress roll is blocked until the journey has at least the minimum number of filled progress boxes set below. This mirrors Ironsworn play — you mark progress as you travel, then make the progress roll once you arrive — and prevents premature progress rolls on barely-started journeys. Turn OFF to allow a progress roll at any time."
+      },
+      "journeyMinProgressBoxes": {
+        "name": "Minimum Progress Boxes to Reach a Destination",
+        "hint": "The minimum number of filled progress boxes (1–10) a journey needs before \"Reach Your Destination\" can be rolled, when the gate above is enabled. Default 4. Lower it for shorter journeys or raise it to demand longer treks."
+      },
       "awardXpOnCompletion": {
         "name": "Auto-Award XP on Vow Completion",
         "hint": "When a vow (or other progress track) is marked complete — whether from the sheet, a fulfilled-vow roll, or the Skald — automatically award the rank-appropriate experience (Troublesome 1 … Epic 5). The award is recorded once per track (it can never grant twice). Requires Ironsworn Rules Integration. Turn OFF to record experience entirely by hand."

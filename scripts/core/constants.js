@@ -358,6 +358,8 @@ export const COMMANDS = Object.freeze({
   // --- Map vision / scouting (v0.10.23) ---
   SCOUT:        "!scout",
   SURVEY:       "!survey",
-  ANALYZE_MAP:  "!analyze-map"
+  ANALYZE_MAP:  "!analyze-map",
+  // --- Manual journey progress (v0.11.3) ---
+  PROGRESS:     "!progress"
 });
 

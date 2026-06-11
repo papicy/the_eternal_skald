@@ -94,6 +94,8 @@ export function dispatchCommand(rawText) {
       case COMMANDS.SCOUT:         return () => Commands.scout(args);
       case COMMANDS.SURVEY:        return () => Commands.scout(args);
       case COMMANDS.ANALYZE_MAP:   return () => Commands.scout(args);
+      // --- Manual journey progress (v0.11.3) ---
+      case COMMANDS.PROGRESS:      return () => Commands.progress(args);
       default:               return null;
     }
   })();
@@ -152,6 +154,7 @@ export const Commands = {
       [COMMANDS.SCENE,  "Generate a scene/location description."],
       [COMMANDS.LORE,   "Generate world-building lore (and a Journal Entry)."],
       [COMMANDS.COMBAT, "Get tactical narration/advice for the current fight."],
+      [COMMANDS.PROGRESS, "Review or advance a journey. <code>!progress</code> lists your journeys; <code>!progress 2</code> marks +2 boxes on the newest (add a name to target one)."],
       [COMMANDS.JOURNALS,  "List the chronicle entries the Skald has scribed. e.g. <code>!journals npc</code>"],
       [COMMANDS.MYSTERIES, "Review the open mysteries and unresolved threads."],
       [COMMANDS.REMIND,    "Recall what the chronicle holds — now with semantic memory. e.g. <code>!remind Keldra</code>"],
@@ -182,6 +185,113 @@ export const Commands = {
     return Chat.postSkald(body, { variant: "help", title: "Commands of the Skald" });
   },
 
+  /* ----------------------------- !progress ------------------------- */
+  /**
+   * (v0.11.3) Manually advance — or review — a JOURNEY track.
+   *
+   *   !progress              → list open journey tracks with their progress.
+   *   !progress <boxes>      → add <boxes> filled boxes to the newest open
+   *                            journey (1 box = 4 ticks). e.g. !progress 2
+   *   !progress <boxes> <name> → advance the journey whose name fuzzy-matches
+   *                            <name> instead of the newest open one.
+   *
+   * This is the player-facing companion to the "Undertake a Journey" auto-flow
+   * and the progress gate on "Reach Your Destination": it lets you mark travel
+   * progress by hand so you can legitimately reach the minimum before rolling.
+   * Defensive throughout — never throws; reports problems to chat instead.
+   */
+  async progress(args) {
+    const integ = Integration.active();
+    if (!integ) {
+      return Chat.postSystem(
+        `${escapeHtml(SKALD_NAME)}: progress tracking needs the Ironsworn Rules Integration to be active.`,
+        { gmWhisper: true }
+      );
+    }
+
+    const actor = IronswornController.getActiveCharacter();
+    if (!actor) {
+      return Chat.postSystem(
+        `${escapeHtml(SKALD_NAME)}: no active character — select a token or assign your user a character first.`,
+        { gmWhisper: true }
+      );
+    }
+
+    const raw = String(args || "").trim();
+
+    // Helper: list this actor's OPEN journey tracks (with progress) as a card.
+    const listOpenJourneys = () => {
+      const journeys = (IronswornController.getProgressTracks(actor) || []).filter(t => {
+        const isJourney = t.kind === "journey" || String(t.subtype || "").toLowerCase() === "journey";
+        return isJourney && !t.completed;
+      });
+      if (!journeys.length) {
+        return Chat.postSkald(
+          `<p>No open journeys to advance. Begin one with <code>!Undertake a Journey</code> (or just describe setting out), then use <code>!progress &lt;boxes&gt;</code>.</p>`,
+          { variant: "help", title: "Journeys" }
+        );
+      }
+      const rows = journeys.map(j => {
+        const boxes = Math.max(0, Math.min(10, Number(j.boxes) || 0));
+        const rank = j.rank ? ` <em>(${escapeHtml(String(j.rank))})</em>` : "";
+        return `<tr><td>${escapeHtml(j.name || "The Journey")}${rank}</td><td>${boxes}/10 boxes</td></tr>`;
+      }).join("");
+      const body = `
+        <p>Your open journeys:</p>
+        <div class="es-help-scroll"><table class="es-help-table"><tbody>${rows}</tbody></table></div>
+        <p class="es-help-aside"><em>Advance one with</em> <code>!progress &lt;boxes&gt;</code> <em>(e.g.</em> <code>!progress 2</code><em>), or</em> <code>!progress &lt;boxes&gt; &lt;name&gt;</code> <em>to target a specific journey.</em></p>
+      `;
+      return Chat.postSkald(body, { variant: "help", title: "Journeys" });
+    };
+
+    // No argument (or a non-numeric first token) → just list journeys.
+    if (!raw) return listOpenJourneys();
+
+    const m = raw.match(/^([0-9]+)\b\s*(.*)$/);
+    if (!m) return listOpenJourneys();
+
+    let boxes = parseInt(m[1], 10);
+    if (!Number.isFinite(boxes) || boxes < 1) boxes = 1;
+    if (boxes > 10) boxes = 10;                         // a track is only 10 boxes
+    const nameFilter = String(m[2] || "").trim();
+
+    // Resolve the target journey track: explicit name (fuzzy, journey-scoped)
+    // or the newest open journey.
+    let track = null;
+    try {
+      if (nameFilter) {
+        const match = IronswornController.findTrackFuzzy(actor, nameFilter, "journey");
+        if (match && !foundry.utils.getProperty(match, "system.completed")) track = match;
+      }
+      if (!track && !nameFilter) track = IronswornController._newestOpenTrackItem(actor, "journey");
+    } catch (_) { /* fall through to the no-track message */ }
+
+    if (!track) {
+      const which = nameFilter ? `no open journey matching “${escapeHtml(nameFilter)}”` : "no open journey to advance";
+      return Chat.postSkald(
+        `<p>${which.charAt(0).toUpperCase() + which.slice(1)}. Begin one with <code>!Undertake a Journey</code> first, or run <code>!progress</code> to list your journeys.</p>`,
+        { variant: "help", title: "Journeys" }
+      );
+    }
+
+    // 1 box = 4 ticks. markProgress clamps to the 0–40 (0–10 box) range.
+    const res = await IronswornController.markProgress(actor, track.id, boxes * 4);
+    if (!res?.ok) {
+      return Chat.postSystem(
+        `${escapeHtml(SKALD_NAME)}: could not mark progress — ${escapeHtml(res?.error || "unknown error")}.`,
+        { gmWhisper: true }
+      );
+    }
+
+    const noun = boxes === 1 ? "box" : "boxes";
+    return Chat.postSkald(
+      `<p>Marked <strong>+${boxes} ${noun}</strong> on <strong>${escapeHtml(res.track)}</strong> — now <strong>${res.boxes}/10</strong> boxes.` +
+      (res.boxes >= 10 ? ` It is fully charted — you may now <code>!Reach Your Destination</code>.` : ``) +
+      `</p>`,
+      { variant: "help", title: "Journey Progress" }
+    );
+  },
+
   /* ----------------------------- !skald ---------------------------- */
   async skald(args) {
     if (!args) {
@@ -206,7 +316,10 @@ export const Commands = {
           console.log(`${LOG_PREFIX} [skald] move declaration detected: "${decl.move.name}"${decl.stat ? ` +${decl.stat}` : ""} (confidence=${decl.confidence}) — opening roll dialog, suppressing narration`);
           // doTriggerMove records intent (for post-roll narration) and opens
           // the system's official pre-roll dialog (progress/milestone-aware).
-          await Integration.doTriggerMove(decl.move.name, decl.stat || undefined);
+          // Pass the player's ORIGINAL words as rawIntent so journey auto-naming
+          // can recover any destination they named (e.g. "Undertake a Journey to
+          // Ironhome" → "Journey to Ironhome"). (v0.11.3)
+          await Integration.doTriggerMove(decl.move.name, decl.stat || undefined, { rawIntent: args });
           return; // STOP — player drives the roll; no AI narration here.
         }
       }
