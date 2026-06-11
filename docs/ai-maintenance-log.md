@@ -264,3 +264,84 @@ RESIDUAL RISK: LOW. Behaviour is gated to the previously-dead Discover-a-Site pa
               as subtype "progress" tagged trackKind:"delve" (consistent with how journeys/
               combat are stored), so no schema risk. Foundry runtime not exercised headlessly
               (no Foundry in CI) — verified via pure unit tests + load-smoke + source guards.
+
+### [2026-06-11 20:34 EEST] — Implement "Locate Your Objective" / "Escape the Depths" (Delve site progress moves)
+AGENT:        Abacus AI maintenance agent
+TASK TYPE:    IMPLEMENT
+TOKEN BUDGET: 20,000  |  USED: within budget  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md + repository-map.md (prior context this session)
+  [x] task classified — IMPLEMENT (LOCKED file edited)
+  [x] target file(s)+line(s) located (evidence below)
+  [~] <= 3 files / <= 50 changed lines per file — EXCEEDED in the LOCKED controller
+      (+112 net); gated approval recorded (see GATE)
+  [x] additive & backwards-compatible — new behaviour only on the two previously-dead
+      Delve progress moves; vow/journey/combat resolution unchanged (regression test [9])
+  [x] no setting/flag/directive/i18n key removed or renamed (none added either)
+  [~] architectural boundary crossed — LOCKED edit; APPROVED (Option B)
+  [x] regression test added — test/locate-objective.test.mjs (42 assertions)
+  [x] rollback plan defined
+
+PROBLEM:      The Ironsworn: Delve progress moves "Locate Your Objective" and
+              "Escape the Depths" (both stats:["progress"]) had no track to roll
+              against and dead-ended at triggerMove()'s "no dialog and no rollable
+              stat" error (see prior INVESTIGATE entry / docs/INVESTIGATION-…).
+
+APPROACH (Option B, approved):
+  Whitelist both moves as PROGRESS moves and resolve the SITE track they roll
+  against, in order: explicit trackRef (sheet roll button) → exactly one open
+  site → auto; several open sites → a selection dialog (player chooses, never
+  auto-decided); no open site → a clear, actionable error. A site is a progress
+  Item tagged flags.<scope>.trackKind="delve" (created by SiteGenerator).
+
+EVIDENCE (brief §4 format):
+  CLAIM:      Both moves are progress rolls; adding them to the whitelist routes
+              them through rollProgressMove instead of the error fall-through.
+  EVIDENCE:   scripts/ironsworn-controller.js:2047-2057 :: _isProgressMove
+              (catalog rows :130 locate, :131 escape — both stats:["progress"])
+  CONFIDENCE: HIGH
+  BASIS:      read the catalog + guard; unit test [1] + [8]; suite green.
+  CLAIM:      Site resolution honours player agency — 0→error, 1→auto, many→dialog,
+              cancel→abort (never auto-picks); vow/journey/combat unaffected.
+  EVIDENCE:   scripts/ironsworn-controller.js:2214-2231 :: rollProgressMove
+              + _openSiteTracks (2090) + _showSiteSelectionDialog (2114)
+  CONFIDENCE: HIGH
+  BASIS:      unit tests [3]-[7] (auto/dialog/cancel/sheet) + [9] regression.
+  CLAIM:      "Delve the Depths" (an action roll, stats edge/shadow/wits) is NOT
+              swept into the progress path.
+  EVIDENCE:   unit test [1] asserts !_isProgressMove("Delve the Depths").
+  CONFIDENCE: HIGH
+  BASIS:      catalog row :127; explicit negative test.
+
+CHANGE:       scripts/ironsworn-controller.js (🔴 LOCKED, approved):
+  - _isProgressMove — whitelist locate_your_objective + escape_the_depths (dsid + name).
+  - rollProgressMove — new kind "site"; site-track resolution block (auto / dialog /
+    error); site-aware "no open track" message; excluded site from the generic
+    newest-open-track fallback so resolution stays explicit.
+  - NEW _openSiteTracks(actor) — open trackKind:"delve" tracks, newest first.
+  - NEW _showSiteSelectionDialog(sites, moveName) — DialogV2 (v13+) with classic
+    Dialog fallback; returns the chosen Item or null on cancel/close. HTML-escaped.
+FILES TOUCHED:
+  - scripts/ironsworn-controller.js               (+112 / -5, LOCKED — exceeds 50-line cap)
+  - test/locate-objective.test.mjs                (+247 / -0, new test)
+  - docs/ai-maintenance-log.md                    (append-only)
+TESTS:        ADDED test/locate-objective.test.mjs — 42 passed, 0 failed
+              (whitelist, _openSiteTracks filtering/order, no-site error, single-site
+               auto, multi-site dialog choose + cancel, sheet trackRef path, triggerMove
+               routing, vow/journey/combat regression). End-to-end simulated with a mocked
+               system progress dialog (CONFIG.IRONSWORN…showForProgress).
+SUITE:        GREEN — `npm test` = 22 files / all passed, 0 failed.
+              Plus check-imports: PASS, load-smoke: PASS.
+GATE:         APPROVED (recorded). User selected Option B and approved editing the 🔴 LOCKED
+              scripts/ironsworn-controller.js, incl. exceeding the 50-line-per-file cap (+112
+              net) for the resolution logic + selection dialog. Continuation of the
+              feat/ai-discover-a-site branch. No settings/flags/i18n keys removed or renamed;
+              all existing progress-move behaviour preserved.
+ROLLBACK:     git revert <this commit-sha> — reverts the controller hunk and removes the test;
+              the two moves return to their prior error state. No data migration involved.
+RESIDUAL RISK: LOW. New behaviour fires only for the two named Delve moves. Site tracks reuse
+              the existing trackKind:"delve" tag (no schema change). The dialog degrades
+              DialogV2 → classic Dialog → null (clean abort). Foundry runtime not exercised
+              headlessly (no Foundry in CI) — verified via the mocked-dialog unit suite +
+              load-smoke + import check.
