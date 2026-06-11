@@ -367,7 +367,11 @@ const makeJournalPois = (() => {
      "[11] autoAnalyzeScenes registered (Boolean, default true)");
   ok(/register\(MODULE_ID, "visionModel",[\s\S]*?type: String,[\s\S]*?default: "inherit"/.test(SRC),
      "[11] visionModel registered (String, default 'inherit')");
-  ok(/"gemini-3-flash-preview":\s*"gemini-3-flash-preview"/.test(SRC), "[11] visionModel offers a concrete vision model");
+  // (v0.10.31) The visionModel dropdown is now populated dynamically via
+  // buildModelChoices() from the vision-model catalogue (ABACUS_VISION_MODELS /
+  // OPENROUTER_VISION_MODELS) instead of a hard-coded `choices` literal. Verify
+  // the catalogue offers a concrete vision model rather than a stale static key.
+  ok(/id:\s*"gemini-3-flash-preview"/.test(SRC), "[11] visionModel offers a concrete vision model");
   // (v0.10.24) New analysis-quality / resolution / format settings.
   ok(/register\(MODULE_ID, "mapAnalysisQuality",[\s\S]*?type: String,[\s\S]*?default: "balanced"/.test(SRC),
      "[11] mapAnalysisQuality registered (String, default 'balanced')");
