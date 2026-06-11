@@ -204,6 +204,9 @@
 
 .es-help-table {
   width: 100%;
+  /* fixed layout so the table honours width:100% and wraps content instead of
+     growing past the chat panel and triggering a horizontal scrollbar */
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 0.92em;
   margin: 4px 0 6px;
@@ -212,9 +215,13 @@
   padding: 3px 6px;
   vertical-align: top;
   border-bottom: 1px solid rgba(214, 168, 90, 0.12);
+  /* allow long descriptions / inline code examples to wrap within the cell */
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
 }
 .es-help-table td:first-child {
-  white-space: nowrap;
   width: 28%;
 }
 .es-help-table code {
@@ -222,6 +229,11 @@
   color: var(--es-gold-2);
   padding: 1px 4px;
   border-radius: 2px;
+  /* inline code examples must wrap rather than force the card to scroll */
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
 }
 .es-help-aside {
   font-size: 0.85em;
@@ -233,8 +245,11 @@
    chat panel and never gets clipped by the surrounding container: the list
    scrolls internally once it grows past a sensible height. */
 .es-help-scroll {
+  max-width: 100%;
   max-height: 55vh;
   overflow-y: auto;
+  /* the table wraps its own content now; never scroll sideways */
+  overflow-x: hidden;
   margin: 4px 0 6px;
   /* offset the table's own top/bottom margin so spacing stays consistent */
   padding-right: 2px;
