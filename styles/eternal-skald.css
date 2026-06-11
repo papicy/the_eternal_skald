@@ -986,3 +986,21 @@
   color: var(--es-gold-2, #f0c878);
   font-size: 0.9em;
 }
+
+
+
+/* =============================================================================
+ * AI chronicle-edit proposal cards (v0.14.0)
+ * ========================================================================== */
+.es-proposal-head { margin: 0 0 .35em; }
+.es-proposal-reason { margin: .15em 0 .6em; opacity: .85; }
+.es-proposal-actions { display: flex; gap: .5em; }
+.es-proposal-accept { background: rgba(60,140,70,.18); }
+.es-proposal-reject { background: rgba(150,60,60,.18); }
+.es-proposal-done,
+.es-proposal-done[disabled] { opacity: .45; cursor: default; }
+.es-proposal-chosen { outline: 1px solid var(--color-border-highlight, #c8a13a); }
+
+/* Collapsible archive block left behind by a rewrite/merge (v0.14.0) */
+.es-journal-archive { margin-top: .75em; opacity: .9; }
+.es-journal-archive > summary { cursor: pointer; font-size: .9em; opacity: .8; }

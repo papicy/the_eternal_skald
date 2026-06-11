@@ -2,7 +2,7 @@ import { LOG_PREFIX, MODULE_ID, SKALD_NAME } from "../core/constants.js";
 import { Settings } from "../core/settings.js";
 import { Client } from "../ai/client.js";
 import { buildSystemPrompt, buildJournalPromptBlock } from "../ai/prompt-builder.js";
-import { Chat, escapeHtml, formatMarkdown, parseMetadata } from "../chat/display.js";
+import { Chat, Memory, escapeHtml, formatMarkdown, parseMetadata } from "../chat/display.js";
 import { EntityLinker } from "./entity-linking.js";
 import { IronswornController } from "../ironsworn-controller.js";
 // Call-time cross-imports (safe cycle): ContradictionDetector, RagBridge and
@@ -265,6 +265,100 @@ export const JournalSystem = {
     catch (_) { return false; }
   },
 
+  /** Current journal edit mode: "manual" | "propose" | "auto". Defensive. */
+  editMode() {
+    const m = String(Settings.get("journalEditMode") || "manual").toLowerCase();
+    return ["manual", "propose", "auto"].includes(m) ? m : "manual";
+  },
+
+  /**
+   * True only on the single client that should perform auto-applied writes,
+   * to avoid duplicate mutations in multiplayer. Mirrors the existing
+   * active-GM host pattern used by the idle auto-summary (_isAutoSummaryHost).
+   */
+  _isAutoApplyHost() {
+    try {
+      const activeGM = game.users?.activeGM;
+      if (activeGM) return game.user?.id === activeGM.id;
+      // Fallback: lowest-id connected GM acts as host.
+      const gms = game.users?.filter?.(u => u.isGM && u.active) ?? [];
+      gms.sort((a, b) => String(a.id).localeCompare(String(b.id)));
+      return gms.length ? gms[0].id === game.user?.id : !!game.user?.isGM;
+    } catch (_) { return !!game.user?.isGM; }
+  },
+
+  /**
+   * (v0.14.0) Backfill extractor. When a narration arrived with no usable
+   * [[SKALD_META]] block, ask the model — in a tiny, cheap, low-temperature
+   * call — to emit ONLY a metadata block describing the just-finished
+   * exchange, then feed it back through the normal ingest pipeline.
+   *
+   * Honors journaling density so the extractor records as much as the GM asked
+   * for. Fully defensive; never throws.
+   *
+   * @param {string} reply   the narration that lacked metadata
+   * @param {object} ctx     ingest context ({ channel, sourceVow })
+   */
+  async _runBackfill(reply, ctx = {}) {
+    if (!this.enabled() || !this.canWrite()) return null;
+    if (Settings.get("metadataBackfill") === false) return null;
+
+    // Gather the recent exchange as context. The rolling Memory buffer already
+    // holds the user/assistant turns for this channel; fall back to just the
+    // reply if it is empty.
+    let exchange = "";
+    try {
+      const turns = Memory.get?.(ctx.channel ?? "skald") ?? [];
+      exchange = turns.slice(-6)
+        .map(t => `${t.role === "user" ? "Player" : "Skald"}: ${t.content}`)
+        .join("\n\n");
+    } catch (_) { /* defensive */ }
+    if (!exchange) exchange = `Skald: ${String(reply || "").slice(0, 6000)}`;
+
+    const density = String(Settings.get("journalingDensity") || "standard").toLowerCase();
+    const richness = (density === "exhaustive" || density === "high")
+      ? "Capture EVERYTHING worth remembering as atomic Who/What/Where/When/How/Why facts — names, places, time, injuries, supplies, world-state shifts, lore, decisions, mysteries."
+      : "Capture the key continuity anchors: names, places, decisions, facts, mysteries, and any world-state change.";
+
+    // The extractor reuses the canonical metadata protocol so the JSON shape is
+    // guaranteed to match what ingestMetadata() already understands.
+    const protocol = (() => {
+      try { return buildJournalPromptBlock(); } catch (_) { return ""; }
+    })();
+
+    const system = `You are a chronicle scribe. Read the exchange and output ONLY a single
+[[SKALD_META]] ... [[/SKALD_META]] block of valid single-line JSON describing
+what is worth remembering. Output NOTHING else — no narration, no commentary,
+no code fences. ${richness}
+
+${protocol}`;
+
+    const messages = [
+      { role: "system", content: system },
+      { role: "user", content: `EXCHANGE TO CHRONICLE:\n\n${exchange}` }
+    ];
+
+    let extractorReply = "";
+    try {
+      // Low temperature + small budget → fast, deterministic, cheap.
+      extractorReply = await Client.chat(messages, { temperature: 0.2, maxTokens: 600 });
+    } catch (e) {
+      console.warn(LOG_PREFIX, "backfill extractor call failed:", e?.message || e);
+      return null;
+    }
+
+    const { metadata } = parseMetadata(extractorReply);
+    if (!metadata || typeof metadata !== "object") {
+      console.log(`${LOG_PREFIX} [backfill] extractor produced no usable metadata — skipping.`);
+      return null;
+    }
+    // IMPORTANT: route straight to ingestMetadata (NOT ingestReply) to avoid any
+    // chance of a backfill loop.
+    this.ingestMetadata(metadata, { ...ctx, backfilled: true });
+    console.log(`${LOG_PREFIX} [backfill] chronicle populated from extractor pass.`);
+    return metadata;
+  },
+
   queue() {
     if (!this._queue) this._queue = new JournalQueue((job) => this._process(job));
     return this._queue;
@@ -287,7 +381,16 @@ export const JournalSystem = {
     try {
       if (!this.enabled() || !this.canWrite()) return null;
       const { metadata } = parseMetadata(reply);
-      if (!metadata || typeof metadata !== "object") return null;
+      if (!metadata || typeof metadata !== "object") {
+        // (v0.14.0) No usable metadata. If backfill is enabled, fire a second
+        // lightweight extractor pass over the finished exchange. Fire-and-forget
+        // — failures are swallowed and never reach the player.
+        if (Settings.get("metadataBackfill") !== false) {
+          this._runBackfill(reply, ctx)
+            .catch(e => console.warn(LOG_PREFIX, "metadata backfill failed:", e?.message || e));
+        }
+        return null;
+      }
       this.ingestMetadata(metadata, ctx);
       return metadata;
     } catch (e) {
@@ -355,6 +458,12 @@ export const JournalSystem = {
     const worldState = (metadata.worldState && typeof metadata.worldState === "object") ? metadata.worldState : null;
     if (mysteries.length || decisions.length || (worldState && Object.keys(worldState).length)) {
       q.enqueue({ kind: "thread", mysteries, decisions, worldState, sourceVow });
+    }
+
+    // 4) (v0.14.0) Edit proposals — only honored when edit mode allows it.
+    if (Array.isArray(metadata.proposals) && metadata.proposals.length) {
+      try { this._handleProposals(metadata.proposals, ctx); }
+      catch (e) { console.warn(LOG_PREFIX, "proposal handling failed:", e?.message || e); }
     }
   },
 
@@ -455,6 +564,7 @@ export const JournalSystem = {
       case "entity":  return this._processEntity(job);
       case "facts":   return this._processFacts(job);
       case "thread":  return this._processThread(job);
+      case "rewrite": return this._processRewrite(job);   // (v0.14.0)
       default: return;
     }
   },
@@ -546,6 +656,300 @@ export const JournalSystem = {
     } catch (e) {
       console.warn(LOG_PREFIX, "_updateEntity failed:", e?.message || e);
       return null;
+    }
+  },
+
+  /* ---------------- archive-safe mutators (v0.14.0) ---------------- */
+
+  /**
+   * Append a structured update to an existing entry (history-safe by nature —
+   * it only adds). This is the engine behind `!journal-amend`. Reuses the
+   * existing append-only _updateEntity path so behavior matches auto-updates.
+   *
+   * @param {JournalEntry} entry  resolved via _findEntry()
+   * @param {string} type         "npc" | "location" | "discovery"
+   * @param {object} entity       entities[]-shaped object (description + fields)
+   * @returns {Promise<JournalEntry|null>}
+   */
+  async amendEntity(entry, type, entity) {
+    if (!entry || !this.canWrite()) return null;
+    try {
+      return await this._updateEntity(entry, type, entity, null);
+    } catch (e) {
+      console.warn(LOG_PREFIX, "amendEntity failed:", e?.message || e);
+      return null;
+    }
+  },
+
+  /**
+   * Rewrite an entry's canonical body, ARCHIVING the prior content first so
+   * nothing is ever lost. The old body is moved into a collapsible
+   * "Archived — <timestamp>" <details> block placed BELOW the new content.
+   *
+   * @param {JournalEntry} entry  resolved via _findEntry()
+   * @param {string} type         "npc" | "location" | "discovery"
+   * @param {object|string} body  an entities[]-shaped object (rendered via
+   *                              _renderEntityHtml) OR a ready HTML string.
+   * @param {object} [opts]
+   * @param {string} [opts.reason] short note recorded in the archive header.
+   * @returns {Promise<JournalEntry|null>}
+   */
+  async rewriteEntity(entry, type, body, opts = {}) {
+    if (!entry || !this.canWrite()) return null;
+    try {
+      const page = entry.pages?.contents?.[0] ?? entry.pages?.find?.(() => true);
+      const prev = page?.text?.content ?? "";
+
+      // Build the new canonical HTML. Accept either a structured entity object
+      // or a raw HTML string (the AI/command may supply either).
+      let newHtml;
+      if (typeof body === "string") {
+        newHtml = body;
+      } else if (body && typeof body === "object") {
+        // Ensure the rewrite carries the entry's current title if none given.
+        const ent = { name: entry.name, ...body };
+        newHtml = this._renderEntityHtml(type, ent);
+      } else {
+        newHtml = prev; // nothing usable supplied — no-op rewrite
+      }
+
+      // ARCHIVE prior content (never destroy). Skip if there was none.
+      const archived = prev.trim() ? this._archiveBody(prev, opts.reason) : "";
+      const merged = `${newHtml}${archived}`;
+
+      if (page) await page.update({ "text.content": merged });
+
+      // Refresh flags + memory + links, exactly like _updateEntity does.
+      const aiCtx = (body && typeof body === "object") ? this._entityContext({ name: entry.name, ...body }) : "";
+      await entry.update({
+        flags: {
+          [MODULE_ID]: {
+            type,
+            lastUpdated: Date.now(),
+            aiContext: aiCtx
+              ? `${(entry.getFlag?.(MODULE_ID, "aiContext") || "")}\n${aiCtx}`.trim().slice(0, 4000)
+              : (entry.getFlag?.(MODULE_ID, "aiContext") || "")
+          }
+        }
+      });
+
+      if (this.notifyLevel() !== "none") this._toast(entry.name, type, "Rewrote");
+      RagBridge.indexEntry(entry);
+      try { EntityLinker.invalidate(); } catch (_) {}
+      return entry;
+    } catch (e) {
+      console.warn(LOG_PREFIX, "rewriteEntity failed:", e?.message || e);
+      return null;
+    }
+  },
+
+  /**
+   * Wrap prior page content in a collapsible, clearly-labelled archive block so
+   * a rewrite never loses history. Returns an HTML fragment to append after the
+   * new canonical body.
+   */
+  _archiveBody(prevHtml, reason = "") {
+    const stamp = new Date().toLocaleString();
+    const why = reason ? ` — ${escapeHtml(String(reason).slice(0, 200))}` : "";
+    return `\n<hr class="es-journal-sep"/>\n` +
+      `<details class="es-journal-archive">` +
+      `<summary><em>Archived — ${escapeHtml(stamp)}${why}</em></summary>\n` +
+      `${prevHtml}\n` +
+      `</details>`;
+  },
+
+  /**
+   * Queue worker for a rewrite/amend/rename/merge job. Resolves the target via
+   * the existing fuzzy _findEntry() matcher and dispatches to the archive-safe
+   * mutators. Used by GM commands and accepted proposals.
+   *
+   * job = { kind:"rewrite", op, type, target, aliases?, body?, newName?,
+   *         mergeWith?, reason? }
+   */
+  async _processRewrite(job) {
+    const { op = "rewrite", type, target, aliases = [], body, newName, mergeWith, reason } = job;
+    const entry = this._findEntry(type, target, aliases);
+    if (!entry) {
+      console.warn(LOG_PREFIX, `[rewrite] no entry found for "${target}" (${type})`);
+      try { Chat.postSystem(`<em>No chronicle entry found for “${escapeHtml(String(target))}”.</em>`, { gmWhisper: true }); } catch (_) {}
+      return null;
+    }
+    switch (op) {
+      case "amend":  return this.amendEntity(entry, type, body || {});
+      case "rewrite":return this.rewriteEntity(entry, type, body, { reason });
+      case "rename": return this._renameEntity(entry, type, newName, { reason });
+      case "merge":  return this._mergeEntities(entry, type, mergeWith, { reason });
+      default:       return this.rewriteEntity(entry, type, body, { reason });
+    }
+  },
+
+  /** Retitle an entry and fold its old name into aliases (history-safe). */
+  async _renameEntity(entry, type, newName, opts = {}) {
+    if (!entry || !newName || !this.canWrite()) return null;
+    try {
+      const oldName = entry.name;
+      const mergedAliases = this._mergeAliases(this._entryAliases(entry), [oldName]);
+      await entry.update({
+        name: String(newName).slice(0, 100),
+        flags: { [MODULE_ID]: { type, lastUpdated: Date.now(), aliases: mergedAliases } }
+      });
+      try {
+        const page = entry.pages?.contents?.[0];
+        if (page) await page.update({ name: String(newName).slice(0, 100) });
+      } catch (_) {}
+      if (this.notifyLevel() !== "none") this._toast(newName, type, "Renamed");
+      RagBridge.indexEntry(entry);
+      try { EntityLinker.invalidate(); } catch (_) {}
+      return entry;
+    } catch (e) {
+      console.warn(LOG_PREFIX, "_renameEntity failed:", e?.message || e);
+      return null;
+    }
+  },
+
+  /**
+   * Merge a duplicate into the canonical entry: archive the duplicate's body
+   * into the keeper, absorb its aliases, then delete the duplicate. The
+   * duplicate's content is preserved inside the keeper's archive block.
+   */
+  async _mergeEntities(keeper, type, dupName, opts = {}) {
+    if (!keeper || !dupName || !this.canWrite()) return null;
+    try {
+      const dup = this._findEntry(type, dupName, []);
+      if (!dup || dup.id === keeper.id) return keeper;
+      const dupPage = dup.pages?.contents?.[0];
+      const dupBody = dupPage?.text?.content ?? "";
+      const keepPage = keeper.pages?.contents?.[0];
+      const keepBody = keepPage?.text?.content ?? "";
+      const merged = `${keepBody}${this._archiveBody(dupBody, `Merged from “${dup.name}”${opts.reason ? ` — ${opts.reason}` : ""}`)}`;
+      if (keepPage) await keepPage.update({ "text.content": merged });
+      const mergedAliases = this._mergeAliases(
+        this._entryAliases(keeper), [dup.name, ...this._entryAliases(dup)]
+      );
+      await keeper.update({ flags: { [MODULE_ID]: { type, lastUpdated: Date.now(), aliases: mergedAliases } } });
+      try { await dup.delete(); } catch (_) {}
+      if (this.notifyLevel() !== "none") this._toast(keeper.name, type, "Merged");
+      RagBridge.indexEntry(keeper);
+      try { EntityLinker.invalidate(); } catch (_) {}
+      return keeper;
+    } catch (e) {
+      console.warn(LOG_PREFIX, "_mergeEntities failed:", e?.message || e);
+      return null;
+    }
+  },
+
+  /* ---------------- AI edit proposals (v0.14.0) ---------------- */
+
+  /**
+   * Sanitise + route AI-emitted edit proposals according to journalEditMode.
+   * - manual : drop (defensive; the protocol block isn't even sent in manual).
+   * - propose: post ONE GM-only Accept/Reject card per valid proposal.
+   * - auto   : enqueue the rewrite directly — active-GM client only.
+   *
+   * @param {Array<object>} proposals
+   * @param {object} ctx
+   */
+  _handleProposals(proposals, ctx = {}) {
+    const mode = this.editMode();
+    if (mode === "manual") return;
+    if (!this.canWrite()) return;
+
+    for (const p of proposals) {
+      const clean = this._sanitizeProposal(p);
+      if (!clean) continue;
+
+      if (mode === "auto") {
+        // Apply automatically, but only on the one host client to avoid dupes.
+        if (!this._isAutoApplyHost()) continue;
+        this.queue().enqueue({ kind: "rewrite", ...clean });
+      } else {
+        // propose → GM-only review card (only the active host posts it, so a
+        // table with several GMs doesn't get duplicate cards).
+        if (!this._isAutoApplyHost()) continue;
+        this._postProposalCard(clean);
+      }
+    }
+  },
+
+  /** Validate + normalise one proposal object. Returns a queue-ready job or null. */
+  _sanitizeProposal(p) {
+    if (!p || typeof p !== "object") return null;
+    const op = String(p.op || "").toLowerCase();
+    if (!["rewrite", "merge", "rename", "amend"].includes(op)) return null;
+    const type = String(p.type || "").toLowerCase();
+    if (!["npc", "location", "discovery"].includes(type)) return null;
+    const target = String(p.target || "").trim();
+    if (!target) return null;
+
+    const job = { op, type, target, aliases: [], reason: String(p.reason || "").slice(0, 240) };
+    if (op === "rewrite" || op === "amend") {
+      // body may be a structured entity object OR an HTML string.
+      job.body = (typeof p.body === "string") ? p.body
+        : (p.body && typeof p.body === "object") ? p.body : {};
+    }
+    if (op === "rename") {
+      job.newName = String(p.newName || "").trim().slice(0, 100);
+      if (!job.newName) return null;
+    }
+    if (op === "merge") {
+      job.mergeWith = String(p.mergeWith || "").trim();
+      if (!job.mergeWith) return null;
+    }
+    return job;
+  },
+
+  /**
+   * Post a GM-only chat card describing a proposed edit with Accept / Reject
+   * buttons. The full job payload is stashed in the message flags so the
+   * button handler (Integration.wireSuggestionCard) can enqueue it verbatim on
+   * Accept — no re-derivation, no drift.
+   */
+  async _postProposalCard(job) {
+    const opLabel = { rewrite: "Rewrite", amend: "Amend", rename: "Rename", merge: "Merge" }[job.op] || "Edit";
+    const detail = (() => {
+      if (job.op === "rename") return `→ rename to <strong>${escapeHtml(job.newName)}</strong>`;
+      if (job.op === "merge")  return `→ merge with <strong>${escapeHtml(job.mergeWith)}</strong>`;
+      return "";
+    })();
+    const reason = job.reason ? `<p class="es-proposal-reason"><em>${escapeHtml(job.reason)}</em></p>` : "";
+    const content =
+      `<p class="es-proposal-head">📜 The Skald proposes to <strong>${escapeHtml(opLabel)}</strong> ` +
+      `the chronicle entry <strong>${escapeHtml(job.target)}</strong> ${detail}</p>` +
+      reason +
+      `<div class="es-proposal-actions">` +
+      `<button type="button" class="es-action-move-btn es-proposal-accept" data-skald-action="journal-accept">Accept</button>` +
+      `<button type="button" class="es-action-move-btn es-proposal-reject" data-skald-action="journal-reject">Reject</button>` +
+      `</div>`;
+
+    try {
+      // Chat.postSkald spreads opts.flags DIRECTLY into flags[MODULE_ID], so the
+      // bare key lands at flags[MODULE_ID].journalProposal and is read back via
+      // msg.getFlag(MODULE_ID, "journalProposal"). NO change to postSkald needed.
+      return await Chat.postSkald(content, {
+        variant: "lore",
+        title: "Chronicle Proposal",
+        gmWhisper: true,
+        flags: { journalProposal: job }
+      });
+    } catch (e) {
+      console.warn(LOG_PREFIX, "_postProposalCard failed:", e?.message || e);
+      return null;
+    }
+  },
+
+  /**
+   * Enqueue an accepted proposal (called by the Accept button handler). Reads
+   * the stashed job from the message flag and routes it through the serial,
+   * archive-safe rewrite queue.
+   */
+  acceptProposal(job) {
+    if (!job || !this.canWrite()) return false;
+    try {
+      this.queue().enqueue({ kind: "rewrite", ...job });
+      return true;
+    } catch (e) {
+      console.warn(LOG_PREFIX, "acceptProposal failed:", e?.message || e);
+      return false;
     }
   },
 

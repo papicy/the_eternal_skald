@@ -683,6 +683,31 @@ export const Integration = {
                 );
               }
             }
+          } else if (action === "journal-accept" || action === "journal-reject") {
+            // (v0.14.0) AI chronicle-edit proposal. The full job payload was
+            // stashed in the message flags by JournalSystem._postProposalCard.
+            const msg = (typeof message?.id === "string")
+              ? game.messages?.get(message.id) : message;
+            let job = null;
+            try { job = msg?.getFlag?.(MODULE_ID, "journalProposal") || null; } catch (_) {}
+
+            if (action === "journal-accept") {
+              const ok = job ? JournalSystem.acceptProposal(job) : false;
+              await Chat.postSystem(
+                ok ? `<em>Proposal accepted — the chronicle will be updated.</em>`
+                   : `<em>Could not apply the proposal (it may have expired).</em>`,
+                { gmWhisper: true }
+              );
+            } else {
+              await Chat.postSystem(`<em>Proposal rejected — the chronicle stands.</em>`, { gmWhisper: true });
+            }
+            // Disable both buttons on this card so the choice is final.
+            try {
+              const card = btn.closest(".eternal-skald-card") || root;
+              card.querySelectorAll?.("[data-skald-action='journal-accept'],[data-skald-action='journal-reject']")
+                .forEach(b => { b.disabled = true; b.classList.add("es-proposal-done"); });
+              btn.classList.add("es-proposal-chosen");
+            } catch (_) {}
           }
         } catch (e) {
           console.error(LOG_PREFIX, "suggestion button failed", e);
