@@ -256,7 +256,19 @@ export const BrowserRAG = {
         try {
           if (transformers.env) {
             transformers.env.allowLocalModels = false;
-            transformers.env.useBrowserCache  = true;
+            // The Cache Storage API (`caches`) is only exposed in a secure
+            // context (HTTPS or localhost). Foundry is frequently served over
+            // plain HTTP on a LAN/remote host, where `caches` is undefined and
+            // transformers.js throws "Browser cache is not available in this
+            // environment". Only opt into the browser cache when it actually
+            // exists; otherwise fall back to in-memory (re-fetch each session).
+            if (typeof caches !== "undefined") {
+              transformers.env.useBrowserCache = true;
+              console.log(`${LOG_PREFIX} [RAG] Browser cache enabled — model will persist across sessions.`);
+            } else {
+              transformers.env.useBrowserCache = false;
+              console.warn(`${LOG_PREFIX} [RAG] Browser cache unavailable (non-HTTPS / insecure context). Using in-memory fallback — the model re-downloads each session. Serve Foundry over HTTPS or localhost for persistent caching.`);
+            }
           }
         } catch (_) {}
 

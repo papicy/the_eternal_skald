@@ -345,3 +345,121 @@ RESIDUAL RISK: LOW. New behaviour fires only for the two named Delve moves. Site
               DialogV2 → classic Dialog → null (clean abort). Foundry runtime not exercised
               headlessly (no Foundry in CI) — verified via the mocked-dialog unit suite +
               load-smoke + import check.
+
+
+
+### [2026-06-11 20:55 EEST] — Fix RAG "Browser cache is not available" failure over HTTP
+AGENT:        Abacus AI maintenance agent
+TASK TYPE:    IMPLEMENT (bug fix)
+TOKEN BUDGET: 10,000  |  USED: within budget  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md + repository-map.md (prior context this session)
+  [x] task classified — IMPLEMENT (Option A, user-approved)
+  [x] target file(s)+line(s) located (evidence below)
+  [x] <= 3 files / <= 50 changed lines per file — YES (1 code file, +13 net; 1 doc append)
+  [x] additive & backwards-compatible — only relaxes an over-aggressive setting
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] no architectural boundary crossed — change confined to browser-rag.js init()
+  [x] regression test added/extended — full suite re-run (see TESTS); no new behaviour testable headlessly (browser-only `caches` global)
+  [x] rollback plan defined
+
+PROBLEM:      RAG semantic memory hard-fails on first use with
+              "Browser cache is not available in this environment" when Foundry
+              is served over plain HTTP on a non-localhost host. RAG then stays
+              disabled for the whole session (_initFailed sticky).
+
+EVIDENCE (brief §4 format):
+  CLAIM:      browser-rag.js unconditionally opted into the Cache Storage API.
+  EVIDENCE:   scripts/browser-rag.js:259 (pre-fix) :: init() set
+              transformers.env.useBrowserCache = true with no guard.
+  CONFIDENCE: HIGH
+  BASIS:      read the line directly.
+
+  CLAIM:      The Cache Storage API (`caches`) only exists in a secure context
+              (HTTPS or localhost); over HTTP on a LAN/remote host it is
+              undefined and transformers.js throws the observed error from
+              within pipeline(), surfaced by the catch at line ~282.
+  EVIDENCE:   scripts/browser-rag.js:264 (pipeline) → catch at :281-282.
+  CONFIDENCE: HIGH
+  BASIS:      MDN secure-context requirement for CacheStorage; matches the
+              exact thrown message text.
+
+CHANGE:       Gated `useBrowserCache` on `typeof caches !== "undefined"`,
+              mirroring the module's existing IndexedDB guard
+              (VectorStore.supported()). When the cache exists → enable it and
+              log an info line; when absent → set it false and warn that RAG is
+              using an in-memory fallback (model re-downloads each session) with
+              a hint to serve over HTTPS/localhost for persistence. RAG now
+              works in all contexts instead of hard-failing on HTTP.
+FILES TOUCHED (<= 3):
+  - scripts/browser-rag.js          (+13 / -1, init() cache guard + logging)
+  - docs/ai-maintenance-log.md      (append-only)
+TESTS:        No new test file — the trigger is the browser-only `caches`
+              global, which is not present in the framework-free Node runner
+              (Node has no `caches`, so the fallback branch is what executes
+              under test; the secure-context branch cannot be exercised
+              headlessly without a browser). Verified instead via:
+SUITE:        GREEN — `npm test` = 22 files / all passed, 0 failed.
+              node --check scripts/browser-rag.js: PASS.
+              check-imports: PASS.  load-smoke: PASS (browser-rag.js imports cleanly).
+GATE:         None required — single non-LOCKED file, +13 net (under the 50-line
+              cap), additive and backwards-compatible. Option A approved by user.
+ROLLBACK:     git revert <this commit-sha> — restores the unconditional
+              useBrowserCache = true. No data/schema migration involved.
+RESIDUAL RISK: LOW. The change only relaxes an over-aggressive setting: the
+              HTTPS/localhost path is unchanged (caches exists → still true). In
+              insecure contexts the ~90 MB model re-downloads per session
+              (slower first query, more bandwidth) but RAG functions instead of
+              failing. Does not address unrelated load failures (CDN blocked by
+              CSP/offline) — those remain graceful soft-fails by design.
+
+
+
+### [2026-06-11 21:10 EEST] — Release: bump version to 0.12.0
+AGENT:        Abacus AI maintenance agent
+TASK TYPE:    CHORE (version bump / release)
+TOKEN BUDGET: 10,000  |  USED: within budget  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] task classified — CHORE (metadata/release only; no behaviour change)
+  [x] target file(s) located (module.json, package.json, CHANGELOG.md)
+  [x] <= 3 code/config files changed — YES (module.json, package.json, CHANGELOG.md; + this log)
+  [x] additive & backwards-compatible — version metadata only
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] no architectural boundary crossed — no LOCKED source edited
+  [x] regression test — N/A (no executable behaviour changed); full suite re-run anyway
+  [x] rollback plan defined
+
+REASON:       The feat/ai-discover-a-site branch added two new features and one
+              fix that were never versioned. MINOR bump per SemVer (new features,
+              backwards-compatible): 0.11.3 -> 0.12.0.
+
+CHANGE:
+  - module.json:  version 0.11.3 -> 0.12.0; prepended a v0.12.0 changelog
+                  paragraph to the (HTML) description.
+  - package.json: version 0.10.38 -> 0.12.0 (was lagging; now in sync with
+                  module.json, the authoritative Foundry version).
+  - CHANGELOG.md: added a Keep-a-Changelog [0.12.0] entry (Added: Discover a
+                  Site + Locate Your Objective / Escape the Depths; Fixed: RAG
+                  browser-cache guard) plus a link reference.
+  - download/manifest URLs unchanged (they target the `main` branch, not a
+    version-pinned path, so no edit needed).
+
+FILES TOUCHED (<= 3 + log):
+  - module.json                     (version + description)
+  - package.json                    (version)
+  - CHANGELOG.md                    (0.12.0 entry + link ref)
+  - docs/ai-maintenance-log.md      (append-only)
+SUITE:        GREEN — `npm test` = 22 files / all passed, 0 failed.
+              module.json + package.json validated as well-formed JSON; versions
+              confirmed in sync (0.12.0).
+GATE:         None required — release metadata only, no LOCKED source touched,
+              no behaviour change.
+RELEASE:      Tagged v0.12.0 (annotated) and pushed with the commit to
+              origin/feat/ai-discover-a-site.
+ROLLBACK:     git revert <this commit-sha> and delete tag v0.12.0
+              (git tag -d v0.12.0 && git push origin :refs/tags/v0.12.0).
+RESIDUAL RISK: NONE for behaviour. Note: package.json jumped 0.10.38 -> 0.12.0 to
+              re-sync with module.json; the gap reflects that package.json had
+              not been bumped in step with recent module.json releases.
