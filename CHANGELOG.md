@@ -13,6 +13,42 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.14.0] — 2026-06-11
+
+### Added
+- **Journaling density setting.** A new `journalingDensity` world setting
+  (`minimal` / `notable` / `standard` / `rich`) lets the GM tune how much the
+  Skald writes to the living journal. The selected density is woven into the
+  AI's journal-prompt block so the storyteller knows how aggressively to record
+  people, places, and developments. Defaults to **`standard`**, which is slightly
+  more eager to journal than the previous implicit behaviour.
+- **Metadata backfill.** New `metadataBackfill` setting (default **on**). When a
+  reply names an entity that already exists but is thin on detail, the Skald now
+  backfills the missing metadata (aliases, descriptions, links) instead of
+  silently skipping it, keeping long-running chronicles coherent.
+- **Journal edit mode.** New `journalEditMode` setting (`manual` / `auto`)
+  controlling whether AI-authored journal changes are applied automatically on
+  the host or staged for review.
+- **`!journal-rewrite` and `!journal-amend` GM commands.** GMs can now direct the
+  Skald to rewrite an existing journal entry from scratch or amend it with new
+  information, with the original body archived for safety. Both commands resolve
+  the target entry by name/alias and regenerate prose via the AI using the
+  configured journaling density.
+- **AI proposal Accept / Reject UI.** When the AI proposes journal changes
+  (rewrites, renames, merges, amendments), they are now posted as an interactive
+  saga card with **Accept** and **Reject** controls instead of being applied
+  blindly. Proposals are sanitized before display and applied only on explicit
+  confirmation.
+
+### Changed
+- The journal-prompt block sent to the AI is now density-aware and includes a
+  dedicated **proposal protocol** describing how the model should request
+  structural journal changes.
+
+### Notes
+- All changes are additive and backward-compatible; existing worlds keep working
+  with sensible defaults (density `standard`, backfill on, edit mode `manual`).
+
 ## [0.13.0] — 2026-06-11
 
 ### Added

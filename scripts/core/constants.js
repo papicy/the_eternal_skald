@@ -360,6 +360,9 @@ export const COMMANDS = Object.freeze({
   SURVEY:       "!survey",
   ANALYZE_MAP:  "!analyze-map",
   // --- Manual journey progress (v0.11.3) ---
-  PROGRESS:     "!progress"
+  PROGRESS:     "!progress",
+  // --- Journal amend / rewrite (v0.14.0) ---
+  JOURNAL_REWRITE: "!journal-rewrite",
+  JOURNAL_AMEND:   "!journal-amend"
 });
 

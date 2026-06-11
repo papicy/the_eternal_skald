@@ -173,6 +173,55 @@ export function buildContextSuggestionBlock() {
  * noteworthy happened, so casual chatter doesn't spawn journals.
  */
 export function buildJournalPromptBlock() {
+  // Density tier governs HOW MUCH the Skald records. "notable" reproduces the
+  // original v0.13.0 behavior; standard/high/exhaustive progressively require
+  // the block and atomic Who/What/Where/When/How/Why facts. Defensive default.
+  const density = (() => {
+    const d = String(Settings.get("journalingDensity") || "standard").toLowerCase();
+    return ["notable", "standard", "high", "exhaustive"].includes(d) ? d : "standard";
+  })();
+
+  // The emission rule is the ONLY part that changes per density. It replaces the
+  // old "If nothing is worth recording, OMIT THE WHOLE BLOCK" instruction.
+  const emissionRule = (() => {
+    switch (density) {
+      case "notable":
+        return `• Every field is OPTIONAL — include only what genuinely applies. If nothing
+  is worth recording, OMIT THE WHOLE BLOCK. Do not invent filler.`;
+
+      case "standard":
+        return `• ALWAYS append the block. Record AT LEAST 1–3 atomic items per reply across
+  facts / decisions / mysteries / worldState / touched entities. "Worth
+  recording" includes small continuity anchors: names, places, time of day,
+  injuries, supplies, vows or journeys begun/advanced, bargains, threats
+  revealed. Still no pure filler — but lean toward recording.`;
+
+      case "high":
+        return `• ALWAYS append the block, and record AGGRESSIVELY. Capture most continuity
+  anchors AND world-state changes that are NOT actions (weather shifts, mood,
+  rising tensions, new constraints, revealed truths, contradictions, faction
+  stance). Prefer MANY small atomic items over a few large ones.
+• Write ONE fact per item. Where it fits, phrase each fact / worldState line so
+  it answers Who / What / Where / When / How / Why — e.g.
+  "At dusk (when), the barrow road (where) flooded (what) because the tide
+  rose (why), stranding Reeves's column (who)." Atomic facts are indexable and
+  recall-friendly.`;
+
+      case "exhaustive":
+        return `• ALWAYS append the block, and record NEARLY EVERYTHING worth remembering.
+  Capture continuity anchors, lore and implications ("why it matters"), sensory
+  set-dressing that may matter later, and every non-action world-state change
+  (weather, mood, tensions, constraints, revealed truths, contradictions,
+  faction stance, time).
+• Write ONE atomic fact per item — never bundle. Phrase each fact / worldState
+  line to answer Who / What / Where / When / How / Why whenever possible. Favor
+  a LONG list of small precise facts over prose. Expect large journals; that is
+  intended at this tier.
+• Still never fabricate events that did not occur — record what the narrative
+  established, in maximum granularity.`;
+    }
+  })();
+
   return `\
 CHRONICLE METADATA (auto-journaling — append AFTER your narration):
 The Skald keeps a living chronicle. When your reply introduces or advances
@@ -185,8 +234,7 @@ last thing in your reply, on its own lines, in this precise shape:
 
 Rules for the block:
 • It MUST be valid, single-line JSON (no comments, no trailing commas).
-• Every field is OPTIONAL — include only what genuinely applies. If nothing
-  is worth recording, OMIT THE WHOLE BLOCK. Do not invent filler.
+${emissionRule}
 • "entities": notable characters/places/things. Each has:
     - "type": one of "npc" | "location" | "discovery"
     - "name": short proper name (the journal title)
@@ -211,7 +259,54 @@ Rules for the block:
   faction stance, time of day, …).
 • "decisions": meaningful choices the players just made.
 • NEVER mention this block, its syntax, or "metadata" in your narration. The
-  player never sees it — it is stripped before display.`;
+  player never sees it — it is stripped before display.${buildProposalProtocolBlock()}`;
+}
+
+/**
+ * Build the optional "proposals" sub-protocol that teaches the AI to suggest
+ * corrections to EXISTING chronicle entries. Returns "" in manual mode (so the
+ * journal block is byte-identical to the density-only change); otherwise it
+ * appends a protocol that rides INSIDE the same [[SKALD_META]] block as a
+ * "proposals" array. The ingestor reads metadata.proposals[] and, per edit
+ * mode, either posts a GM-only Accept/Reject card (propose) or applies on the
+ * active GM (auto). See JournalSystem._handleProposals().
+ */
+export function buildProposalProtocolBlock() {
+  try {
+    const mode = String(Settings.get("journalEditMode") || "manual").toLowerCase();
+    if (mode === "manual") return "";   // AI may not propose edits in manual mode.
+
+    const verb = (mode === "auto")
+      ? "These will be applied automatically by the GM client (history is archived first)."
+      : "The GM will review each in a card and click Accept or Reject before anything changes.";
+
+    return `
+
+CHRONICLE EDIT PROPOSALS (optional — only inside the SAME metadata block):
+When an EXISTING chronicle entry has become inaccurate, outdated, or duplicated,
+you MAY include a "proposals" array in the metadata JSON. ${verb}
+Use proposals SPARINGLY — only for genuine corrections, not routine additions
+(routine new detail still goes through normal "entities" with action:"update").
+Shape, inside the same single-line JSON object:
+  "proposals":[
+    {"op":"rewrite","type":"npc","target":"Captain Reeves","reason":"She was revealed to be a traitor; the canonical entry is now wrong.","body":"<full replacement description / structured fields, same shape as an entities[] item>"},
+    {"op":"merge","type":"location","target":"The Broken Tor","mergeWith":"Broken Tor","reason":"Duplicate entries for the same place."},
+    {"op":"rename","type":"npc","target":"the captain","newName":"Captain Reeves","reason":"Her full name is now known."}
+  ]
+Proposal rules:
+• "op": one of "rewrite" | "merge" | "rename".
+• "type": "npc" | "location" | "discovery" (which chronicle folder to search).
+• "target": the entry's current name or a known alias (fuzzy-matched).
+• "reason": ONE short sentence the GM will see — why the change is warranted.
+• rewrite → also include "body" (a full entities[]-shaped object OR an HTML
+  string) that REPLACES the canonical content. Prior content is archived, never
+  destroyed.
+• merge → also include "mergeWith" (the duplicate's name/alias).
+• rename → also include "newName".
+• NEVER mention proposals or this protocol in your narration.`;
+  } catch (_) {
+    return "";   // Never break the prompt builder.
+  }
 }
 
 /**

@@ -500,6 +500,69 @@ export const Settings = {
       default: true
     });
 
+    /* ---- Memory & journaling enhancements (v0.14.0) ----
+     * Three world-scoped controls that govern HOW MUCH the chronicle records,
+     * whether a backfill extractor runs when the AI forgets its metadata, and
+     * whether the AI may amend/rewrite canonical entries (and how).
+     * No journal/document schema changes — purely behavioral gates.
+     */
+
+    // 1) Journaling Density — how much narrative detail becomes chronicle data.
+    //    "notable" reproduces the exact pre-v0.14 behavior (omit when nothing
+    //    major happened); higher tiers progressively REQUIRE a metadata block
+    //    and atomic Who/What/Where/When/How/Why facts. Consumed by
+    //    buildJournalPromptBlock() in scripts/ai/prompt-builder.js.
+    game.settings.register(MODULE_ID, "journalingDensity", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.journalingDensity.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.journalingDensity.hint"),
+      scope: "world",
+      config: true,
+      type: String,
+      choices: {
+        notable:    "Notable only (record major beats — original behavior)",
+        standard:   "Standard (always note 1–3 anchors per reply)",
+        high:       "High (record most continuity anchors & world state)",
+        exhaustive: "Exhaustive (record nearly everything worth remembering)"
+      },
+      default: "standard"
+    });
+
+    // 2) Metadata Backfill — when a reply has no valid [[SKALD_META]] block,
+    //    run a second lightweight extractor AI call to mine the finished
+    //    narrative for chronicle notes. Consumed by JournalSystem.ingestReply()
+    //    in scripts/chronicle/journal-system.js. Fire-and-forget; degrades
+    //    gracefully if the extractor call fails.
+    game.settings.register(MODULE_ID, "metadataBackfill", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.metadataBackfill.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.metadataBackfill.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true
+    });
+
+    // 3) Journal Edit Mode — governs AI-initiated amend/rewrite/merge/rename.
+    //    "manual"  : only the GM commands (!journal-rewrite / !journal-amend)
+    //                may mutate canonical entries.
+    //    "propose" : the AI may PROPOSE changes; the GM clicks Accept/Reject on
+    //                a GM-only chat card before anything is written.
+    //    "auto"    : the AI applies changes automatically, but ONLY on the
+    //                active-GM client (still GM-authoritative). History is
+    //                always archived first — content is never hard-deleted.
+    game.settings.register(MODULE_ID, "journalEditMode", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.journalEditMode.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.journalEditMode.hint"),
+      scope: "world",
+      config: true,
+      type: String,
+      choices: {
+        manual:  "Manual (only GM commands rewrite/amend)",
+        propose: "AI proposes (GM clicks Accept / Reject)",
+        auto:    "Auto (AI applies — active GM only, history archived)"
+      },
+      default: "manual"
+    });
+
     // ---- Browser-based RAG / AI memory (v0.5.0) -----------------------
 
     // Master switch for semantic memory. When off, the Skald behaves
