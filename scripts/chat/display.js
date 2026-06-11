@@ -3,7 +3,8 @@ import { Settings } from "../core/settings.js";
 import { Client } from "../ai/client.js";
 // Call-time cross-imports (safe cycle): EntityLinker & Integration still live in
 // eternal-skald.js and are only referenced inside method bodies here.
-import { EntityLinker, Integration } from "../eternal-skald.js";
+import { EntityLinker } from "../chronicle/entity-linking.js";
+import { Integration } from "../eternal-skald.js";
 
 /**
  * In-memory rolling buffer of recent messages, keyed by "channel" so

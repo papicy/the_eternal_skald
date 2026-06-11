@@ -2,7 +2,8 @@ import { Settings } from "../core/settings.js";
 // Temporary cross-import: Integration & JournalSystem still live in eternal-skald.js and are
 // referenced only at call-time inside these build functions (never at module-eval), so this
 // cycle is safe. Repoint when Integration -> narrative/ (step 9) and JournalSystem -> chronicle/ (step 6).
-import { Integration, JournalSystem } from "../eternal-skald.js";
+import { Integration } from "../eternal-skald.js";
+import { JournalSystem } from "../chronicle/journal-system.js";
 
 /**
  * Builds the system prompt that establishes the Eternal Skald persona,

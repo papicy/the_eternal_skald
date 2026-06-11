@@ -5,9 +5,11 @@ import { buildSystemPrompt } from "../ai/prompt-builder.js";
 import { Memory, Chat, escapeHtml, formatMarkdown } from "./display.js";
 // Call-time cross-imports (safe cycle): these subsystems still live in eternal-skald.js
 // and are only invoked inside command handlers (never at module-eval).
-import { runConversation, Integration, JournalSystem, NpcDialogue, OracleInterpreter,
-         LoreGenerator, CombatController, SceneContext, MapVision, EntityLinker,
+import { runConversation, Integration, NpcDialogue, OracleInterpreter,
+         LoreGenerator, CombatController, SceneContext, MapVision,
          RagProgress } from "../eternal-skald.js";
+import { JournalSystem } from "../chronicle/journal-system.js";
+import { EntityLinker } from "../chronicle/entity-linking.js";
 
 /**
  * Master dispatcher. Returns true if the message was a recognised Skald
