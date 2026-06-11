@@ -21,6 +21,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { readSkaldSource } from "./_skald-source.mjs";
 
 let passed = 0, failed = 0;
 function ok(cond, msg) { if (cond) { passed++; } else { failed++; console.error("  ✗ FAIL:", msg); } }
@@ -139,7 +140,10 @@ function extractFn(src, marker) {
   return src.slice(start, i);
 }
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SRC = readFileSync(join(__dirname, "..", "scripts", "eternal-skald.js"), "utf8");
+// (Phase 2 refactor) The monolith was decomposed into scripts/<subsystem>/*.js
+// modules. This source-text guard scans the whole refactored tree via the
+// shared reader so relocated definitions are still seen wherever they live.
+const SRC = readSkaldSource();
 // _parseWriteDirective(verb, body) and _completionMoveKind(moveName) use no
 // `this`, so we can lift them straight out as plain functions.
 const _parseWriteDirective = new Function(

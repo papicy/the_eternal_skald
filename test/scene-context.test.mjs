@@ -21,10 +21,13 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { readSkaldSource } from "./_skald-source.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SRC_PATH  = join(__dirname, "..", "scripts", "eternal-skald.js");
-const SRC = readFileSync(SRC_PATH, "utf8");
+// (Phase 2 refactor) The monolith was decomposed into scripts/<subsystem>/*.js
+// modules. These source-text guards scan the whole refactored tree via the
+// shared reader so relocated definitions are still seen wherever they live.
+const SRC = readSkaldSource();
 
 let passed = 0, failed = 0;
 function ok(cond, msg) { if (cond) { passed++; } else { failed++; console.error("  ✗ FAIL:", msg); } }

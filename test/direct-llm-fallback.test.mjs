@@ -23,25 +23,17 @@
  *  Run: node test/direct-llm-fallback.test.mjs
  * ===================================================================== */
 
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { readSkaldSource } from "./_skald-source.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SRC_PATH  = join(__dirname, "..", "scripts", "eternal-skald.js");
 const LANG_PATH = join(__dirname, "..", "lang", "en.json");
-// (Phase 2 refactor) Settings (and other definitions) were extracted verbatim
-// into scripts/core/*.js. Read every core module FIRST, then the main module,
-// so these source-text guards still see the relocated definitions (core is
-// prepended so any brace-matching extractor keeps trailing code to scan).
-const CORE_DIR = join(__dirname, "..", "scripts", "core");
-let SRC = "";
-try {
-  for (const f of readdirSync(CORE_DIR).sort()) {
-    if (f.endsWith(".js")) SRC += readFileSync(join(CORE_DIR, f), "utf8") + "\n";
-  }
-} catch (_) { /* core/ may not exist in older trees */ }
-SRC += readFileSync(SRC_PATH, "utf8");
+// (Phase 2 refactor) The monolith was decomposed into scripts/<subsystem>/*.js
+// modules. These source-text guards scan the whole refactored tree via the
+// shared reader so relocated definitions are still seen wherever they live.
+const SRC  = readSkaldSource();
 const LANG = JSON.parse(readFileSync(LANG_PATH, "utf8"));
 
 let passed = 0, failed = 0;
