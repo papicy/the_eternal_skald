@@ -1719,8 +1719,20 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
       target = (av && actor.items?.get?.(av.id))
             || IronswornController.resolveCompletionTrack(actor, "", "vow");
     } else if (kind === "combat") {
-      const ac = IronswornController.getActiveCombat(actor);
-      target = ac && actor.items?.get?.(ac.id);
+      // (v0.11.0) Prefer the foe track the progress roll ACTUALLY rolled
+      // against — recorded by IronswornController.rollProgressMove() as
+      // _lastProgressTrack — so the correct fight closes even when several
+      // foes are open or the active-combat flag has drifted to a different
+      // foe. Fall back to the active-combat flag when no rolled track is known.
+      const lpt = IronswornController._lastProgressTrack;
+      if (lpt && lpt.kind === "combat" && lpt.actorId === actor.id) {
+        const t = actor.items?.get?.(lpt.id);
+        if (t && !foundry.utils.getProperty(t, "system.completed")) target = t;
+      }
+      if (!target) {
+        const ac = IronswornController.getActiveCombat(actor);
+        target = ac && actor.items?.get?.(ac.id);
+      }
     } else { // journey
       target = IronswornController.resolveCompletionTrack(actor, "", "journey");
     }

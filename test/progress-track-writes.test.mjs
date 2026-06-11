@@ -152,6 +152,13 @@ const _parseWriteDirective = new Function(
 const _completionMoveKind = new Function(
   "return (" + extractFn(SRC, "_completionMoveKind(moveName)").replace(/^_completionMoveKind/, "function _completionMoveKind") + ")"
 )();
+// _isProgressMove(dsid, name) lives in the root-level ironsworn-controller.js,
+// which the shared corpus deliberately excludes — read that file directly. It
+// uses no `this`, so we can lift it out as a plain function.
+const CTRL_SRC = readFileSync(join(__dirname, "..", "scripts", "ironsworn-controller.js"), "utf8");
+const _isProgressMove = new Function(
+  "return (" + extractFn(CTRL_SRC, "_isProgressMove(dsid, name)").replace(/^_isProgressMove/, "function _isProgressMove") + ")"
+)();
 
 console.log("Progress-track WRITE / story-arc / roll-integration test (v0.10.27)\n");
 
@@ -326,6 +333,25 @@ console.log("[11] Phase 4 — _completionMoveKind classification");
   eq(_completionMoveKind("Reach Your Destination"), "journey", "Reach Your Destination → journey");
   eq(_completionMoveKind("Strike"), null, "non-completion move → null");
   eq(_completionMoveKind("Undertake a Journey"), null, "advancing move is NOT a completion move");
+}
+
+/* --------------------------------------------------------------------- */
+console.log("[12] v0.11.0 — _isProgressMove recognises all three completion moves");
+{
+  // By Datasworn ID (rules-package agnostic).
+  ok(_isProgressMove("move:classic/quest/fulfill_your_vow", null), "Fulfill Your Vow id → progress");
+  ok(_isProgressMove("move:classic/adventure/reach_your_destination", null), "Reach Your Destination id → progress");
+  ok(_isProgressMove("move:classic/combat/end_the_fight", null), "End the Fight id → progress (the v0.11.0 fix)");
+  // By name (case/spacing-insensitive).
+  ok(_isProgressMove(null, "End the Fight"), "End the Fight name → progress");
+  ok(_isProgressMove(null, "  end the fight  "), "End the Fight name is trimmed + case-insensitive");
+  ok(_isProgressMove(null, "Fulfill Your Vow"), "Fulfill Your Vow name → progress");
+  ok(_isProgressMove(null, "Reach Your Destination"), "Reach Your Destination name → progress");
+  // NON-progress (action-roll) combat moves must NOT be misclassified.
+  ok(!_isProgressMove("move:classic/combat/strike", "Strike"), "Strike is NOT a progress move");
+  ok(!_isProgressMove("move:classic/combat/clash", "Clash"), "Clash is NOT a progress move");
+  ok(!_isProgressMove("move:classic/combat/battle", "Battle"), "Battle is NOT a progress move");
+  ok(!_isProgressMove(null, "Enter the Fray"), "Enter the Fray is NOT a progress move");
 }
 
 /* ===================================================================== */

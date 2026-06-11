@@ -37,9 +37,10 @@ IRONSWORN CORE RULES DIGEST (for your reference as GM/Skald):
 • Key moves you should reference by name:
   Face Danger, Secure an Advantage, Gather Information, Heal, Resupply,
   Make Camp, Undertake a Journey, Enter the Fray, Strike, Clash, Battle,
-  Endure Harm, Endure Stress, Swear an Iron Vow, Reach a Milestone,
-  Fulfill Your Vow, Compel, Sojourn, Forge a Bond, Test Your Bond,
-  Discover a Site, Delve the Depths, Locate Your Objective, Ritual.
+  End the Fight, Endure Harm, Endure Stress, Swear an Iron Vow,
+  Reach a Milestone, Fulfill Your Vow, Compel, Sojourn, Forge a Bond,
+  Test Your Bond, Discover a Site, Delve the Depths, Locate Your Objective,
+  Ritual.
 • On a miss, "pay the price" — invent a fitting consequence from the
   Pay the Price oracle or the narrative.
 • On a match (both challenge dice the same), introduce a twist.
@@ -323,20 +324,26 @@ For example, NEVER write something like "roll to Locate Your Objective"
 unless "Locate Your Objective" literally appears in the list above. If no
 listed move fits the fiction, suggest none rather than invent one.
 
-PROGRESS MOVES — how a journey or vow is COMPLETED (read carefully):
-• "Reach Your Destination" is the real move for FINISHING A JOURNEY, and
-  "Fulfill Your Vow" is the real move for FINISHING A VOW. They are PROGRESS
-  moves: they are rolled against the track's PROGRESS SCORE (its filled
-  boxes), NOT against a stat (Edge/Heart/Iron/Shadow/Wits) and NOT with an
-  action die. So when you suggest one, use a stat of "—".
+PROGRESS MOVES — how a journey, vow, or fight is COMPLETED (read carefully):
+• "Reach Your Destination" FINISHES A JOURNEY, "Fulfill Your Vow" FINISHES A
+  VOW, and "End the Fight" FINISHES A COMBAT (defeats the foe). All three are
+  PROGRESS moves: they are rolled against the track's PROGRESS SCORE (its
+  filled boxes), NOT against a stat (Edge/Heart/Iron/Shadow/Wits) and NOT with
+  an action die. So when you suggest one, use a stat of "—".
 • To advance a journey toward its destination, the character uses
   "Undertake a Journey" (a Wits roll) to mark progress; the journey is only
   resolved when "Reach Your Destination" is rolled against the accumulated
   progress. Likewise a vow is advanced through play and resolved with
-  "Fulfill Your Vow".
-• "Reach Your Destination" and "Undertake a Journey" are DIFFERENT moves —
-  never treat reaching the destination as a Wits/stat move, and never invent
-  a stat for it. The client rolls it against the matching journey track for you.`);
+  "Fulfill Your Vow", and a foe is worn down with "Strike"/"Clash" and
+  finished with "End the Fight".
+• "Reach Your Destination" / "Undertake a Journey" are DIFFERENT moves, and
+  likewise "End the Fight" / "Strike" / "Clash" are DIFFERENT moves — never
+  treat finishing a journey or a fight as a stat move, and never invent a stat
+  for the progress move. The client rolls it against the matching track for you.
+• "End the Fight" is rolled against the FOE's progress score (the harm dealt
+  via Strike/Clash). Strong hit: foe defeated. Weak hit: it ends at a cost.
+  Miss: it ends badly (the foe escapes or turns the tables). Completing a
+  fight grants NO experience — only fulfilling a vow awards XP.`);
   }
 
   if (allowMoves) {

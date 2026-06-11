@@ -98,7 +98,7 @@ const MOVE_CATALOG = Object.freeze([
   { id: "move:classic/combat/strike",                  name: "Strike",                stats: ["iron", "edge"],                             cat: "Combat" },
   { id: "move:classic/combat/clash",                   name: "Clash",                 stats: ["iron", "edge"],                             cat: "Combat" },
   { id: "move:classic/combat/turn_the_tide",           name: "Turn the Tide",         stats: [],                                           cat: "Combat" },
-  { id: "move:classic/combat/end_the_fight",           name: "End the Fight",         stats: [],                                           cat: "Combat" },
+  { id: "move:classic/combat/end_the_fight",           name: "End the Fight",         stats: ["progress"],                                 cat: "Combat" },
   { id: "move:classic/combat/battle",                  name: "Battle",                stats: ["edge", "heart", "iron", "shadow", "wits"],  cat: "Combat" },
   // — Suffer —
   { id: "move:classic/suffer/endure_harm",             name: "Endure Harm",           stats: ["iron"],                                     cat: "Suffer" },
@@ -1344,14 +1344,14 @@ export const IronswornController = {
 
     dbg("triggerMove:", { moveRef, resolved: dataswornId });
 
-    // 0. PROGRESS MOVES — "Fulfill Your Vow" and "Reach Your Destination" are
-    //    not action rolls against a stat; they are PROGRESS rolls against a
-    //    specific track's score. The system's generic move dialog cannot roll
-    //    them without a track context (and they have no rollable stat), which
-    //    is exactly why they used to dead-end with "no dialog and no rollable
-    //    stat". Route them to the progress-roll path against the matching open
-    //    track instead. Reach Your Destination uses the same mechanics as
-    //    Fulfill Your Vow — both roll the track's progress score.
+    // 0. PROGRESS MOVES — "Fulfill Your Vow", "Reach Your Destination" and
+    //    "End the Fight" are not action rolls against a stat; they are PROGRESS
+    //    rolls against a specific track's score. The system's generic move
+    //    dialog cannot roll them without a track context (and they have no
+    //    rollable stat), which is exactly why they used to dead-end with "no
+    //    dialog and no rollable stat". Route them to the progress-roll path
+    //    against the matching open track instead. All three share the same
+    //    mechanic — roll the track's progress score (vow / journey / foe).
     if (this._isProgressMove(dataswornId, move?.name)) {
       return this.rollProgressMove(moveRef, opts);
     }
@@ -2026,15 +2026,16 @@ export const IronswornController = {
 
   /**
    * True iff a move is a PROGRESS move that rolls a track's progress score
-   * (rather than an action roll against a stat). Currently the two the Skald
-   * drives: "Fulfill Your Vow" (vows) and "Reach Your Destination" (journeys).
-   * Matched on Datasworn ID first (rules-package agnostic) then by name.
+   * (rather than an action roll against a stat). The three the Skald drives:
+   * "Fulfill Your Vow" (vows), "Reach Your Destination" (journeys), and
+   * "End the Fight" (combat foes). Matched on Datasworn ID first
+   * (rules-package agnostic) then by name (case/spacing-insensitive).
    */
   _isProgressMove(dsid, name) {
     const id = String(dsid ?? "").toLowerCase();
-    if (/\/(fulfill_your_vow|reach_your_destination)$/.test(id)) return true;
+    if (/\/(fulfill_your_vow|reach_your_destination|end_the_fight)$/.test(id)) return true;
     const n = String(name ?? "").toLowerCase().trim();
-    return n === "fulfill your vow" || n === "reach your destination";
+    return n === "fulfill your vow" || n === "reach your destination" || n === "end the fight";
   },
 
   /**
@@ -2132,17 +2133,19 @@ export const IronswornController = {
   },
 
   /**
-   * Roll a PROGRESS move ("Fulfill Your Vow" / "Reach Your Destination")
-   * against a progress track's score, via the system's own progress-roll
-   * dialog (IronswornPrerollDialog.showForProgress) — identical to clicking
-   * the track's roll button. This is the correct mechanic for completing a
-   * vow or journey: you roll the track's progress score (filled boxes, 0–10)
-   * against the two challenge dice, NOT an action die + stat.
+   * Roll a PROGRESS move ("Fulfill Your Vow" / "Reach Your Destination" /
+   * "End the Fight") against a progress track's score, via the system's own
+   * progress-roll dialog (IronswornPrerollDialog.showForProgress) — identical
+   * to clicking the track's roll button. This is the correct mechanic for
+   * completing a vow, journey, or fight: you roll the track's progress score
+   * (filled boxes, 0–10) against the two challenge dice, NOT an action die +
+   * stat. Per Ironsworn rules, completing a fight grants NO experience (only
+   * fulfilling a vow does), so this path never awards XP for "End the Fight".
    *
    * The track is resolved from (in order): an explicit `opts.trackRef`, then
-   * the newest open track of the kind the move implies (vow → vow track,
-   * journey → journey track). The move's Datasworn ID is attached so the roll
-   * card shows the right move text/title.
+   * the track the move implies — vow → newest open vow, journey → newest open
+   * journey, combat → the active fight (then newest open foe). The move's
+   * Datasworn ID is attached so the roll card shows the right move text/title.
    *
    * @param {string} moveRef  move name or Datasworn ID.
    * @param {object} [opts]
@@ -2161,18 +2164,30 @@ export const IronswornController = {
     const nml = String(move?.name ?? moveRef).toLowerCase();
     const kind = /reach_your_destination/.test(idl) || nml === "reach your destination" ? "journey"
                : /fulfill_your_vow/.test(idl)       || nml === "fulfill your vow"       ? "vow"
+               : /end_the_fight/.test(idl)          || nml === "end the fight"           ? "combat"
                : null;
 
     // Resolve the track: explicit ref wins, else newest open track of the kind.
     let track = opts.trackRef ? this.findTrack(actor, opts.trackRef) : null;
-    if (!track && kind) track = this._newestOpenTrackItem(actor, kind);
+    if (!track && kind === "combat") {
+      // Combat foes are stored as progress Items tagged trackKind "combat"
+      // (or carrying the system's own "foe" subtype). Prefer the explicitly
+      // tracked ACTIVE combat (the fight the story is currently about), then
+      // fall back to the newest open foe track. getActiveCombat()/
+      // getActiveCombatTrack() return lightweight summaries, so re-read the
+      // real Item from the actor to roll its score.
+      const ac = this.getActiveCombat(actor) ?? this.getActiveCombatTrack(actor);
+      if (ac?.id) track = actor.items?.get?.(ac.id) ?? null;
+    }
+    if (!track && kind && kind !== "combat") track = this._newestOpenTrackItem(actor, kind);
     if (!track) {
       const noun = kind ?? "progress";
+      const begin = kind === "combat" ? "Enter the fray" : `Begin the ${noun}`;
       return {
         ok: false,
         method: "none",
-        error: `No open ${noun} track to roll "${move?.name ?? moveRef}" against. ` +
-               `Begin the ${noun} first (or open its track card and roll from there).`
+        error: `No open ${noun === "combat" ? "fight" : noun} track to roll "${move?.name ?? moveRef}" against. ` +
+               `${begin} first (or open its track card and roll from there).`
       };
     }
 

@@ -261,6 +261,11 @@ const MOVES = {
     stat: "Edge / Heart / Iron / Shadow / Wits",
     summary: "When you fight a battle and let the dice decide the outcome, roll +stat reflecting your approach. Strong hit: prevail and choose a boon. Weak hit: prevail at cost. Miss: it ends badly."
   },
+  "End the Fight": {
+    category: "Combat",
+    stat: "—",
+    summary: "When you reduce a foe to no progress and seek to end the fight, roll the foe's progress score (NOT a stat). Match against the challenge dice. Strong hit: the foe is defeated. Weak hit: it ends, but at a cost or with a complication. Miss: it ends badly — the foe turns the tables or escapes."
+  },
   "Endure Harm": {
     category: "Suffer",
     stat: "Iron",
