@@ -1,0 +1,19 @@
+{
+  "name": "the-eternal-skald",
+  "version": "0.10.38",
+  "description": "An AI-powered storyteller, oracle interpreter, and tactical enemy controller for Ironsworn in Foundry VTT.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node test/run-all.mjs",
+    "test:file": "node"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/papicy/eternal_skald.git"
+  },
+  "license": "SEE LICENSE IN LICENSE"
+}

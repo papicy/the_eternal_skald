@@ -1,0 +1,264 @@
+{
+  "ETERNAL_SKALD": {
+    "moduleTitle": "The Eternal Skald",
+    "settings": {
+      "aiMode": {
+        "name": "AI Mode",
+        "hint": "Master switch for the Eternal Skald. When ON, messages beginning with '!' are sent to the AI GM. When OFF, '!' messages are treated as ordinary chat and the Skald stays silent. Defaults to ON. Can also be toggled with the configurable keyboard shortcut (Configure Controls → The Eternal Skald)."
+      },
+      "streamingEnabled": {
+        "name": "Streaming Responses",
+        "hint": "Render the Skald's replies in real time, word by word, as the AI generates them — instead of waiting for the whole reply to arrive. Gives near-instant feedback and a livelier feel. If streaming is ever unavailable (older server hook, network issue), the Skald automatically falls back to a normal buffered reply, so it is safe to leave ON. Defaults to ON."
+      },
+      "providerPreset": {
+        "name": "AI Provider",
+        "hint": "Pick your AI provider to auto-fill the API Endpoint below with that provider's OpenAI-compatible chat-completions URL. You still supply your own API Key and AI Model separately. The Skald is powered by Abacus AI ChatLLM, so 'Abacus AI' is the recommended default. Choose 'Custom' for a self-hosted gateway, the legacy RouteLLM endpoint, or any other endpoint (leaves the endpoint untouched). World-scoped, GM-only. Default: Abacus AI.",
+        "choices": {
+          "abacus": "Abacus AI (recommended)",
+          "openai": "OpenAI",
+          "openrouter": "OpenRouter",
+          "google": "Google AI (Gemini)",
+          "custom": "Custom (manual endpoint)"
+        }
+      },
+      "apiKey": {
+        "name": "API Key",
+        "hint": "Your AI provider's API key (Abacus AI, OpenAI, OpenRouter, Google AI, etc.). Keep this private — it will be sent with every request. World-scoped, GM-only."
+      },
+      "modelName": {
+        "name": "AI Model",
+        "hint": "Pick the model for generation from the list — it is filtered to the AI Provider chosen above and sorted by price (free models first), shown as 'Model Name ($X.XX per 1M tokens) - Provider'. Change the provider above and this list updates instantly. Defaults to gemini-3-flash-preview. If you previously typed a custom model id, it is preserved at the top as '(current)'."
+      },
+      "apiEndpoint": {
+        "name": "API Endpoint",
+        "hint": "Chat-completions endpoint URL. Auto-filled when you pick a provider above; defaults to the Abacus AI endpoint https://routellm.abacus.ai/v1/chat/completions. Edit directly only when using a 'Custom' provider or backend."
+      },
+      "connectionMode": {
+        "name": "Connection Mode",
+        "hint": "How the Skald reaches the AI. 'Auto' (recommended) tries the same-origin server hook first and automatically falls back to a direct browser→AI request if the hook isn't loaded — this is what makes the Skald work on hosted/managed Foundry where you can't add the server-side launch flag. 'Server hook only' forces the hook (shows a setup error if it's missing). 'Direct (browser→AI)' always calls the AI endpoint straight from the browser. World-scoped, GM-only. Default: Auto.",
+        "choices": {
+          "auto": "Auto (server hook, then direct fallback) — recommended",
+          "server": "Server hook only",
+          "direct": "Direct (browser → AI)"
+        }
+      },
+      "intensity": {
+        "name": "Skald Intensity",
+        "hint": "How dramatic and verbose the Skald speaks (1 = terse, 10 = full saga-singer operatic)."
+      },
+      "autoNarrateCombat": {
+        "name": "Auto-Narrate Combat",
+        "hint": "When enabled, the Skald posts a short flavour line at the start of each combatant's turn."
+      },
+      "autoControlEnemies": {
+        "name": "AI Controls Enemies",
+        "hint": "When enabled, the Skald takes the turn for any non-player combatant: deciding action, moving the token, rolling the attack, applying harm, then advancing the turn."
+      },
+      "memoryLength": {
+        "name": "Conversation Memory",
+        "hint": "How many recent messages the Skald remembers per conversation channel."
+      },
+      "ironswornIntegration": {
+        "name": "Ironsworn Rules Integration",
+        "hint": "When the foundry-ironsworn system is active, let the Skald read character state, trigger the system's own move rolls, and narrate the official outcomes. Disable to run the Skald purely as a narrator. No effect if the Ironsworn system is not installed."
+      },
+      "suggestMoves": {
+        "name": "Suggest Moves",
+        "hint": "Allow the Skald to recommend an Ironsworn move after its narration, shown as an interactive card with a one-click 'Roll' button and a 'Choose Different Move' option. Requires Ironsworn Rules Integration."
+      },
+      "autoNarrateMoves": {
+        "name": "Auto-Narrate Move Outcomes",
+        "hint": "When a move is rolled through the Ironsworn system, the Skald automatically narrates the result (strong hit / weak hit / miss) in saga style. Requires Ironsworn Rules Integration."
+      },
+      "interceptMoveDeclarations": {
+        "name": "Player Move Declarations Open the Dialog",
+        "hint": "When a player simply NAMES an official Ironsworn move (e.g. \"!Strike\", \"!Face Danger\", \"!I want to Secure an Advantage +iron\"), open that move's roll dialog instead of generating AI narration. Moves stay the player's mechanical choice; the Skald continues the story only after the dice resolve. Questions and narration requests are unaffected. Requires Ironsworn Rules Integration. Turn OFF to treat every \"!\" message as a prompt to the Skald."
+      },
+      "intelligentMoveDetection": {
+        "name": "Interpret Actions Into Moves (AI)",
+        "hint": "When a player DESCRIBES an action rather than naming a move (e.g. \"!I search the ruins\", \"!I attack the wolf\"), the Skald uses AI to map it to the appropriate Ironsworn move and opens that roll dialog — or, for ambiguous or less-certain actions, posts a short card so the player picks the move. Narration is suppressed until the dice resolve. Questions (\"what should I do?\") and pure roleplay still narrate normally. Requires Ironsworn Rules Integration. Turn OFF to revert to handling explicit move names only (every other message is narrated)."
+      },
+      "intelligentMoveConfirm": {
+        "name": "Always Confirm Interpreted Moves",
+        "hint": "When ON, an interpreted action ALWAYS shows a confirmation card with the suggested move(s) before any dialog opens — even when the AI is highly confident — so the roll is never started without an explicit click. When OFF (default), a confident single match opens its roll dialog directly, while ambiguous or less-certain actions still show a card. Only applies when 'Interpret Actions Into Moves' is enabled."
+      },
+      "assetBonusAdvisory": {
+        "name": "Asset Bonus Advisory",
+        "hint": "When ON (default), before a move is rolled the Skald scans the rolling character's enabled asset abilities for a bonus that plausibly applies (e.g. \"add +1\", \"+2 when…\") and posts a small, non-blocking chat suggestion. Purely advisory — the Skald never alters the roll; you decide whether to add the bonus in the official roll dialog. Requires Ironsworn Rules Integration."
+      },
+      "autoNarrateXp": {
+        "name": "Auto-Narrate Experience Gains",
+        "hint": "When the character earns experience (the Ironsworn XP counter rises, or a Starforged legacy track advances), the Skald automatically narrates the milestone in saga style. Requires Ironsworn Rules Integration. Observe-only: the Skald never writes or spends XP itself."
+      },
+      "awardXpOnCompletion": {
+        "name": "Auto-Award XP on Vow Completion",
+        "hint": "When a vow (or other progress track) is marked complete — whether from the sheet, a fulfilled-vow roll, or the Skald — automatically award the rank-appropriate experience (Troublesome 1 … Epic 5). The award is recorded once per track (it can never grant twice). Requires Ironsworn Rules Integration. Turn OFF to record experience entirely by hand."
+      },
+      "weakHitHalfXp": {
+        "name": "Half XP on a Weak-Hit Completion",
+        "hint": "OPTIONAL rule. When a completion move resolves as a WEAK HIT, award half the rank's experience (rounded up) instead of the full amount. Off by default (full XP regardless of outcome). Only applies when the completion outcome is known."
+      },
+      "narrationDelay": {
+        "name": "Narration Delay (ms)",
+        "hint": "How long to wait after a roll before auto-narrating (allows dice animations to finish). Recommended: 2000ms for Dice So Nice, 500ms without."
+      },
+      "aiAppliesEffects": {
+        "name": "AI Applies Mechanical Effects",
+        "hint": "Permit the Skald to apply mechanical effects it proposes — adjusting momentum, harm, stress, supply, marking progress, rolling oracles, and running the combat automation (combat tracks & initiative). On by default. Turn OFF to keep the player in full control of the sheet."
+      },
+      "showEffectAnnouncements": {
+        "name": "Show Effect Announcements",
+        "hint": "Post the brief \"The Skald enacts: …\" whisper messages that announce the mechanical effects the Skald applies (momentum changes, progress marks, completed tracks, etc.). On by default. Turn OFF to hide these technical notices and keep the chat focused on the narration."
+      },
+      "aiModifiesSheet": {
+        "name": "AI Modifies Character Sheet",
+        "hint": "Controls whether the Skald may directly edit the character sheet beyond the basic meters. \"Impacts only\" (default) lets it toggle conditions/debilities (wounded, shaken, corrupted, etc.) as the story warrants; \"Full\" also lets it set base stats (edge, heart, iron, shadow, wits) within 0–5. \"Off\" keeps impacts and stats entirely player-controlled. All edits are GM-applied, bounded, and logged."
+      },
+      "aiCreatesContent": {
+        "name": "AI Creates Content",
+        "hint": "Controls whether the Skald may create new entities from the official Ironsworn compendia. \"Foes only\" (default) lets it spawn foe actors from the bestiary as encounters arise; \"Full\" also lets it add assets/items to your character and create new player characters. \"Off\" disables all creation. Every creation is GM-applied, verified against the compendia first, and logged."
+      },
+      "autoCreateCombatTracks": {
+        "name": "Auto-Create Combat Tracks",
+        "hint": "When the Skald narrates the start of a fight, automatically create a combat progress track for each foe so attacks can be marked against it. Requires AI Applies Mechanical Effects."
+      },
+      "autoCloseStaleCombatTracks": {
+        "name": "Auto-Close Old Combat Tracks",
+        "hint": "Ironsworn is fought one foe at a time. When a new fight begins, automatically mark any combat tracks left open from a previous fight as complete, so they don't linger as orphaned, untracked tracks. On by default. Turn OFF to allow multiple simultaneous combat tracks."
+      },
+      "defaultEnemyRank": {
+        "name": "Default Enemy Rank",
+        "hint": "Fallback challenge rank for CUSTOM enemies only — used when the Skald invents a foe that is not in the Ironsworn foe compendium and does not specify a rank. Standard foes (Bear, Wyvern, Bandit, …) automatically use their official compendium rank. Higher ranks take more progress to fill (troublesome = quickest, epic = longest)."
+      },
+      "debugLogging": {
+        "name": "Debug Logging",
+        "hint": "Print verbose Ironsworn integration diagnostics to the browser console (F12). Useful for troubleshooting move detection and effect parsing."
+      },
+      "entityLinking": {
+        "name": "Link Entities in Narration",
+        "hint": "Turn names the Skald narrates into clickable links: NPCs, locations and discoveries already scribed into the chronicle open their Journal Entry, and known Ironsworn moves offer a one-click roll. Purely additive — if a name has no match it stays plain text. Defaults to ON."
+      },
+      "autoJournaling": {
+        "name": "Auto-Journaling",
+        "hint": "Let the Skald automatically scribe NPCs, locations, discoveries, world facts and story threads into Foundry Journal Entries as they emerge in play — organized into folders under 'The Eternal Skald'. Runs quietly in the background and never interrupts narration. Defaults to ON."
+      },
+      "journalNotifications": {
+        "name": "Journal Notifications",
+        "hint": "How loudly the Skald announces new chronicle entries. 'Silent' = no popups; 'Minimal' = a brief toast for new NPCs/locations/discoveries (default); 'Detailed' = also toast updates to existing entries. World Facts and Story Threads are always silent."
+      },
+      "journalPermissions": {
+        "name": "Journal Visibility",
+        "hint": "Who can see the auto-scribed chronicle entries. 'GM Only' keeps them private to the GM (default); 'Shared with Players' grants all players observer access so they can read the chronicle."
+      },
+      "sessionAutoSummary": {
+        "name": "Session Chronicle on Demand",
+        "hint": "Enable the !end-session command (and idle auto-summaries), which weave a saga-styled recap of everything recorded this session into a dated Session Chronicle journal. Defaults to ON."
+      },
+      "sessionAutoMinutes": {
+        "name": "Auto-Summary Idle Timer (minutes)",
+        "hint": "Automatically weave a Session Chronicle after this many minutes of inactivity (no new narration). Requires 'Session Chronicle on Demand' to be ON. Set to 0 to disable idle auto-summaries and only chronicle manually via !end-session. Default: 0 (off)."
+      },
+      "contextSuggestions": {
+        "name": "Context-Aware Suggestions",
+        "hint": "Let the Skald offer subtle, situation-aware next-step hints (drawn from the active scene, location and recent story threads) when narrating. Purely advisory and never forces the story. Defaults to ON."
+      },
+      "contradictionDetection": {
+        "name": "Lore Contradiction Alerts",
+        "hint": "After each narration, quietly compare freshly recorded facts against established chronicle lore and whisper a GM-only advisory if they seem to conflict. Nothing is ever changed automatically. Uses Semantic Memory (RAG) and the AI; defaults to OFF."
+      },
+      "customLinkStyles": {
+        "name": "Custom Entity Link Styles",
+        "hint": "Let you recolor and re-icon the in-chat entity links (moves, oracles, tracks, assets) to taste via the !link-style command. When OFF, the built-in saga styling is used. Defaults to OFF."
+      },
+      "autoAnalyzeScenes": {
+        "name": "Auto-Analyze Scenes (Map Vision)",
+        "hint": "When you view a new scene, let the Skald SEE its map artwork with a vision-capable AI model — identifying terrain, landmarks, paths, hazards and points of interest, and scribing the locations to the chronicle. Only the base map is read (never tokens or fog), each scene is scouted once, and you can always re-scout on demand with the !scout command. Costs one vision AI call per new map. Defaults to ON."
+      },
+      "visionModel": {
+        "name": "Vision Model",
+        "hint": "Which AI model performs map/image analysis. 'Inherit' reuses your Narration Model (ideal when it is already multimodal, e.g. gemini-3-flash-preview or gpt-4o). The rest of the list is filtered to the AI Provider chosen above and sorted by price (free models first), shown as 'Model Name ($X.XX per 1M tokens) - Provider'; change the provider and this list updates instantly. Flagship multimodal models (gpt-4o, the Claude Sonnet/Opus 4 family, Gemini 2.5/3) have the strongest OCR/fine-detail vision; lightweight 'mini'/'nano'/'lite' tiers accept images but routinely miss small labels and faint paths. If the chosen model cannot see images, the Skald skips analysis with a GM-only notice rather than wasting a call.",
+        "choices": {
+          "inherit": "Inherit from Narration Model"
+        }
+      },
+      "mapAnalysisQuality": {
+        "name": "Map Analysis Quality",
+        "hint": "How thoroughly the Skald reads a map. Fast: a single full-map pass (1 AI call, cheapest). Balanced: a full-map overview plus a 2×2 sectioned detail pass on larger maps — much better text and POI recall (recommended). Thorough: overview plus a 2×2 or 3×3 sectioned pass chosen by map resolution, combining all findings — best recall, but uses several AI calls (and tokens) per scene.",
+        "choices": {
+          "fast": "Fast — single full-map pass",
+          "balanced": "Balanced — overview + sections (recommended)",
+          "thorough": "Thorough — overview + fine grid (most calls)"
+        }
+      },
+      "maxMapResolution": {
+        "name": "Max Map Resolution",
+        "hint": "Longest-edge pixel size the base map is downscaled to before it is sent to the model. Higher keeps small text and labels legible (better recall) at the cost of more image tokens. 4096 px (★) suits most detailed fantasy maps; 'Original' disables downscaling for the sharpest possible read (highest cost).",
+        "choices": {
+          "original": "Original (no downscaling)"
+        }
+      },
+      "imageFormat": {
+        "name": "Map Image Format",
+        "hint": "How captured map images are encoded before upload. Auto (recommended) uses lossless PNG so text stays crisp. PNG forces lossless. JPEG produces the smallest payload but its compression blurs small labels and fine lines, hurting text recognition.",
+        "choices": {
+          "auto": "Auto — PNG for crisp text (recommended)"
+        }
+      },
+      "ragEnabled": {
+        "name": "Semantic Memory (RAG)",
+        "hint": "Give the Skald a long-term semantic memory of your saga. Journal entries are embedded into a local in-browser vector store and the most relevant ones are recalled before the Skald answers — improving continuity across sessions. Runs entirely in your browser (no server, no cloud). A small model (~90 MB) downloads once on first use and is cached. Defaults to ON; the AI still works fully when disabled."
+      },
+      "ragContextTokens": {
+        "name": "Memory Context Budget (tokens)",
+        "hint": "Maximum amount of recalled world memory (in tokens, ~4 characters each) injected into each AI request. Higher values give the Skald more continuity but use more of the prompt. Default: 2000."
+      },
+      "ragMaxResults": {
+        "name": "Memory Results per Query",
+        "hint": "How many of the most relevant chronicle entries to recall for each query before trimming to the context budget. Default: 5."
+      },
+      "ragAutoIndex": {
+        "name": "Auto-Index Journals",
+        "hint": "Automatically embed each NPC, location, discovery, world fact, story thread and session chronicle into semantic memory as the Skald scribes it. Turn off to index only manually via the !reindex command. Defaults to ON."
+      },
+      "ragSimilarityThreshold": {
+        "name": "Memory Relevance Threshold",
+        "hint": "Minimum cosine similarity (0–1) for a memory to be considered relevant to a query. Lower values recall more (but looser) matches; higher values recall only strong matches. Default: 0.3."
+      },
+      "ragDebugMode": {
+        "name": "Memory Debug Logging",
+        "hint": "Print verbose semantic-memory (RAG) diagnostics to the browser console (F12): model load, embedding, indexing and search activity. Useful for troubleshooting. Defaults to OFF."
+      }
+    },
+    "keybindings": {
+      "toggleAiMode": {
+        "name": "Toggle AI Mode",
+        "hint": "Turn the Eternal Skald's AI GM on or off. When OFF, '!' messages are treated as ordinary chat. GM only. Default: Alt+Shift+A."
+      }
+    },
+    "commands": {
+      "skald": "Speak with The Eternal Skald.",
+      "oracle": "Roll an Ironsworn oracle and have the Skald interpret it.",
+      "npc": "Generate or roleplay an NPC.",
+      "scene": "Generate a vivid scene/location description.",
+      "lore": "Generate world-building lore and create a Journal Entry.",
+      "combat": "Get tactical narration/advice for the current combat.",
+      "help": "Show the Skald's command runes."
+    },
+    "errors": {
+      "noApiKey": "No Abacus AI API key is set. Open Module Settings → The Eternal Skald and provide your key.",
+      "emptySkald": "Speak, Ironsworn. Usage: !skald <your question or prompt>",
+      "emptyNpc": "Name the one you would meet. Usage: !npc <name or description>",
+      "emptyLore": "What chronicle shall I write? Usage: !lore <topic>"
+    },
+    "notifications": {
+      "providerPresetApplied": "The Eternal Skald: AI Provider set to {provider}. API Endpoint → {endpoint}",
+      "abacusEndpointMigrated": "The Eternal Skald: corrected your Abacus AI endpoint to the working https://routellm.abacus.ai/v1/chat/completions.",
+      "directFallback": "The Eternal Skald: server hook not found — using direct browser→AI mode. This is normal on hosted Foundry. (Configure via Connection Mode in module settings.)"
+    },
+    "ui": {
+      "thinking": "The Eternal Skald listens to the wind…",
+      "arriving": "The Skald arrives.",
+      "noCombat": "There is no battle joined."
+    }
+  }
+}

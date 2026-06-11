@@ -1,0 +1,922 @@
+/* =====================================================================
+ *  THE ETERNAL SKALD — Stylesheet
+ *  ---------------------------------------------------------------------
+ *  Norse / saga aesthetic: deep charcoal background, hammered-iron
+ *  borders, gold/amber accent, weathered serif typography. Designed to
+ *  read clearly against Foundry's default chat panel without overriding
+ *  it system-wide.
+ *
+ *  Variants:
+ *    .es-variant-default | .es-variant-oracle | .es-variant-combat
+ *    .es-variant-npc     | .es-variant-help   | .es-variant-lore
+ * ===================================================================== */
+
+:root {
+  --es-bg-1:   #1a1410;
+  --es-bg-2:   #0f0b08;
+  --es-fg:     #e8dec4;
+  --es-muted:  #a89878;
+  --es-gold:   #d6a85a;
+  --es-gold-2: #f0c878;
+  --es-iron:   #4a4036;
+  --es-rune:   #b8924c;
+
+  --es-oracle-bg:  #1a1820;
+  --es-combat-bg:  #2a1612;
+  --es-combat-edge:#7a2520;
+  --es-npc-bg:     #16201a;
+  --es-help-bg:    #181216;
+  --es-lore-bg:    #14130b;
+}
+
+/* ------------------------------------------------------------------ */
+/*  CORE CARD                                                          */
+/* ------------------------------------------------------------------ */
+
+.eternal-skald-card {
+  background:
+    linear-gradient(180deg, var(--es-bg-1) 0%, var(--es-bg-2) 100%);
+  color: var(--es-fg);
+  border: 1px solid var(--es-iron);
+  border-radius: 4px;
+  box-shadow:
+    inset 0 0 0 1px rgba(214, 168, 90, 0.12),
+    0 2px 4px rgba(0, 0, 0, 0.4);
+  font-family: "IM Fell English", "Palatino Linotype", "Book Antiqua",
+               Palatino, Georgia, serif;
+  padding: 10px 12px 12px;
+  margin: 2px 0;
+  position: relative;
+}
+
+/* Hammered double-line border via pseudo-element */
+.eternal-skald-card::before {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border: 1px solid rgba(214, 168, 90, 0.25);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------ */
+/*  BANNER (alias + flanking runes)                                    */
+/* ------------------------------------------------------------------ */
+
+.eternal-skald-card .es-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+  border-bottom: 1px dashed rgba(214, 168, 90, 0.35);
+  font-variant: small-caps;
+  letter-spacing: 0.08em;
+}
+
+.eternal-skald-card .es-rune {
+  color: var(--es-rune);
+  font-size: 1.05em;
+  text-shadow: 0 0 6px rgba(214, 168, 90, 0.35);
+  font-family: "Noto Sans Runic", "Segoe UI Symbol", serif;
+}
+
+.eternal-skald-card .es-alias {
+  color: var(--es-gold);
+  font-weight: 700;
+  font-size: 1.05em;
+  text-shadow: 0 1px 0 #000;
+}
+
+/* ------------------------------------------------------------------ */
+/*  TITLE & BODY                                                       */
+/* ------------------------------------------------------------------ */
+
+.eternal-skald-card .es-title {
+  margin: 0 0 6px;
+  color: var(--es-gold-2);
+  font-size: 1.05em;
+  font-style: italic;
+  text-align: center;
+  border-bottom: 1px solid rgba(214, 168, 90, 0.15);
+  padding-bottom: 4px;
+}
+
+.eternal-skald-card .es-body {
+  font-size: 0.95em;
+  line-height: 1.45;
+}
+
+.eternal-skald-card .es-body p {
+  margin: 0 0 0.6em;
+}
+.eternal-skald-card .es-body p:last-child { margin-bottom: 0; }
+
+.eternal-skald-card .es-body strong  { color: var(--es-gold-2); }
+.eternal-skald-card .es-body em      { color: #e3d4a8; }
+.eternal-skald-card .es-body code    {
+  background: rgba(214, 168, 90, 0.08);
+  padding: 1px 4px;
+  border-radius: 2px;
+  color: var(--es-gold-2);
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 0.88em;
+}
+
+/* ------------------------------------------------------------------ */
+/*  VARIANTS                                                           */
+/* ------------------------------------------------------------------ */
+
+.eternal-skald-card.es-variant-oracle {
+  background: linear-gradient(180deg, var(--es-oracle-bg) 0%, #100c14 100%);
+  border-color: #4a3a6a;
+}
+.eternal-skald-card.es-variant-oracle::before {
+  border-color: rgba(160, 130, 220, 0.25);
+}
+.eternal-skald-card.es-variant-oracle .es-rune,
+.eternal-skald-card.es-variant-oracle .es-alias { color: #c8b0f0; }
+.eternal-skald-card.es-variant-oracle .es-title  { color: #d8c4ff; }
+
+.eternal-skald-card.es-variant-combat {
+  background: linear-gradient(180deg, var(--es-combat-bg) 0%, #150806 100%);
+  border-color: var(--es-combat-edge);
+  box-shadow:
+    inset 0 0 0 1px rgba(220, 90, 60, 0.18),
+    0 2px 4px rgba(0, 0, 0, 0.5);
+}
+.eternal-skald-card.es-variant-combat::before {
+  border-color: rgba(220, 90, 60, 0.30);
+}
+.eternal-skald-card.es-variant-combat .es-rune,
+.eternal-skald-card.es-variant-combat .es-alias { color: #e8a060; }
+.eternal-skald-card.es-variant-combat .es-title  { color: #f0c0a0; }
+
+.eternal-skald-card.es-variant-npc {
+  background: linear-gradient(180deg, var(--es-npc-bg) 0%, #0c1410 100%);
+  border-color: #345040;
+}
+.eternal-skald-card.es-variant-npc::before {
+  border-color: rgba(120, 200, 150, 0.22);
+}
+.eternal-skald-card.es-variant-npc .es-rune,
+.eternal-skald-card.es-variant-npc .es-alias { color: #b4e3c4; }
+.eternal-skald-card.es-variant-npc .es-title  { color: #d4f0e0; }
+
+.eternal-skald-card.es-variant-help {
+  background: linear-gradient(180deg, var(--es-help-bg) 0%, #0a0808 100%);
+  border-color: var(--es-iron);
+}
+
+.eternal-skald-card.es-variant-lore {
+  background: linear-gradient(180deg, var(--es-lore-bg) 0%, #0a0905 100%);
+  border-color: #6a5028;
+}
+.eternal-skald-card.es-variant-lore .es-title { color: #f0d480; }
+
+/* ------------------------------------------------------------------ */
+/*  ORACLE TABLE                                                       */
+/* ------------------------------------------------------------------ */
+
+.es-oracle-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 2px 0;
+  font-size: 0.92em;
+}
+.es-oracle-label  { color: var(--es-muted); font-variant: small-caps; letter-spacing: 0.05em; }
+.es-oracle-roll   { color: var(--es-gold-2); font-family: "JetBrains Mono", Consolas, monospace; }
+
+.es-oracle-result {
+  background: rgba(214, 168, 90, 0.08);
+  border-left: 3px solid var(--es-gold);
+  padding: 6px 8px;
+  margin: 4px 0 2px;
+  font-size: 1.05em;
+  color: var(--es-gold-2);
+}
+
+/* ------------------------------------------------------------------ */
+/*  HELP TABLE                                                         */
+/* ------------------------------------------------------------------ */
+
+.es-help-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92em;
+  margin: 4px 0 6px;
+}
+.es-help-table td {
+  padding: 3px 6px;
+  vertical-align: top;
+  border-bottom: 1px solid rgba(214, 168, 90, 0.12);
+}
+.es-help-table td:first-child {
+  white-space: nowrap;
+  width: 28%;
+}
+.es-help-table code {
+  background: rgba(214, 168, 90, 0.10);
+  color: var(--es-gold-2);
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+.es-help-aside {
+  font-size: 0.85em;
+  color: var(--es-muted);
+  margin: 4px 0 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  COMBAT ROLL CARD                                                   */
+/* ------------------------------------------------------------------ */
+
+.es-combat-roll {
+  background: rgba(220, 90, 60, 0.06);
+  border-left: 3px solid var(--es-combat-edge);
+  padding: 6px 8px;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 0.88em;
+  line-height: 1.5;
+  color: #f0d4b8;
+}
+.es-combat-roll strong { color: var(--es-gold-2); }
+
+/* ------------------------------------------------------------------ */
+/*  NPC STAT BLOCK                                                     */
+/* ------------------------------------------------------------------ */
+
+.es-npc-stats {
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 0.82em;
+  color: var(--es-muted);
+  background: rgba(180, 227, 196, 0.06);
+  border-left: 3px solid #6aa080;
+  padding: 4px 8px;
+  margin-bottom: 6px;
+  white-space: pre-wrap;
+}
+
+/* ------------------------------------------------------------------ */
+/*  SYSTEM NOTICE (light, unobtrusive)                                 */
+/* ------------------------------------------------------------------ */
+
+.eternal-skald-system {
+  font-style: italic;
+  color: #b0a888;
+  font-size: 0.92em;
+  border-left: 2px solid var(--es-rune);
+  padding: 2px 8px;
+  margin: 2px 0;
+  background: rgba(184, 146, 76, 0.05);
+}
+.eternal-skald-system strong { color: var(--es-gold-2); }
+
+/* ------------------------------------------------------------------ */
+/*  PARENT MESSAGE TWEAKS                                              */
+/* ------------------------------------------------------------------ */
+
+/* When a chat message carries an Eternal Skald card, soften the
+   surrounding default header to keep the card the visual focus. */
+.chat-message.eternal-skald-msg .message-sender,
+.chat-message.eternal-skald-msg .message-metadata {
+  opacity: 0.65;
+  font-size: 0.85em;
+}
+
+
+/* ------------------------------------------------------------------ */
+/*  IRONSWORN MOVE SUGGESTION CARD (v2.2.0)                            */
+/* ------------------------------------------------------------------ */
+
+/* "suggest" card variant — a warm, inviting amber-tinted panel that
+   reads as an actionable prompt rather than passive narration. */
+.eternal-skald-card.es-variant-suggest {
+  background: linear-gradient(180deg, #221a10 0%, #140d07 100%);
+  border-color: var(--es-rune);
+  box-shadow: 0 0 0 1px rgba(184, 146, 76, 0.18) inset;
+}
+
+.es-move-suggest p {
+  margin: 4px 0;
+}
+
+.es-move-suggest .es-move-name {
+  font-size: 1.08em;
+  letter-spacing: 0.02em;
+}
+.es-move-suggest .es-move-name strong { color: var(--es-gold-2); }
+
+.es-move-stat {
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 0.85em;
+  color: var(--es-gold);
+  background: rgba(214, 168, 90, 0.12);
+  border: 1px solid rgba(214, 168, 90, 0.3);
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-left: 4px;
+}
+
+/* --- Inline entity links in narration (v0.5.1) --- */
+/* Clickable Ironsworn move references woven into the Skald's prose. */
+.es-entity-link.es-move-link {
+  color: var(--es-gold-2, #e8c178);
+  cursor: pointer;
+  text-decoration: none;
+  border-bottom: 1px dotted rgba(214, 168, 90, 0.55);
+  white-space: nowrap;
+}
+.es-entity-link.es-move-link:hover {
+  color: var(--es-gold, #d6a85a);
+  border-bottom-color: var(--es-gold, #d6a85a);
+}
+.es-entity-link.es-move-link > i {
+  font-size: 0.82em;
+  margin-right: 3px;
+  opacity: 0.8;
+}
+
+/* --- Interpreted-action confirmation card (v0.10.34) ---
+ * Buttons offered when the AI maps a free-form action to one or more moves. */
+.es-action-move-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 2px;
+}
+.es-action-move-btn {
+  flex: 0 1 auto;
+  padding: 4px 10px;
+  font-size: 0.92em;
+  color: var(--es-gold-2, #e8c178);
+  background: rgba(40, 30, 18, 0.55);
+  border: 1px solid rgba(214, 168, 90, 0.55);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.es-action-move-btn:hover {
+  color: var(--es-gold, #d6a85a);
+  background: rgba(60, 45, 24, 0.75);
+  border-color: var(--es-gold, #d6a85a);
+}
+.es-action-confirm-note,
+.es-action-confirm-why {
+  font-size: 0.85em;
+  opacity: 0.75;
+  margin: 4px 0 0;
+}
+
+/* --- Asset bonus advisory list (v0.10.38 — Phase 4) ---
+ * Compact, non-intrusive suggestion list shown before a move resolves when
+ * an asset may grant an applicable bonus. Purely advisory. */
+.es-asset-advisory {
+  margin: 4px 0 2px;
+  padding-left: 1.1em;
+  list-style: none;
+  font-size: 0.92em;
+}
+.es-asset-advisory li {
+  margin: 2px 0;
+  line-height: 1.45;
+}
+
+/* --- Inline move suggestion line (v0.10.8) ---
+ * Reverts the separate "A Move Beckons" / "What Comes Next" button-cards back
+ * to a subtle, inline clickable link woven into the narration prose. */
+.es-inline-suggest {
+  margin: 6px 0 2px;
+  font-style: italic;
+  opacity: 0.92;
+  line-height: 1.5;
+}
+.es-inline-suggest .es-move-reason {
+  font-style: italic;
+  opacity: 0.8;
+}
+.es-entity-link.es-move-choose-link {
+  color: var(--es-gold-2, #e8c178);
+  cursor: pointer;
+  text-decoration: none;
+  border-bottom: 1px dotted rgba(214, 168, 90, 0.45);
+}
+.es-entity-link.es-move-choose-link:hover {
+  color: var(--es-gold, #d6a85a);
+  border-bottom-color: var(--es-gold, #d6a85a);
+}
+.es-entity-link.es-move-choose-link > i {
+  font-size: 0.82em;
+  margin-right: 3px;
+  opacity: 0.8;
+}
+
+/* --- Inline entity links: oracles / progress tracks / assets (v0.7.0) ---
+ * Same affordance as move links (dotted underline + leading icon), tinted
+ * per kind so the player can tell at a glance what a link will do. */
+.es-entity-link.es-oracle-link,
+.es-entity-link.es-track-link,
+.es-entity-link.es-asset-link {
+  cursor: pointer;
+  text-decoration: none;
+  border-bottom: 1px dotted rgba(214, 168, 90, 0.45);
+  white-space: nowrap;
+}
+.es-entity-link > i {
+  font-size: 0.82em;
+  margin-right: 3px;
+  opacity: 0.8;
+}
+/* Oracles — mystical violet. */
+.es-entity-link.es-oracle-link        { color: #c4a6e8; }
+.es-entity-link.es-oracle-link:hover  { color: #d9c2f5; border-bottom-color: #c4a6e8; }
+/* Progress tracks — iron green. */
+.es-entity-link.es-track-link         { color: #9ec99a; }
+.es-entity-link.es-track-link:hover   { color: #bfe0bb; border-bottom-color: #9ec99a; }
+/* Assets — parchment blue. */
+.es-entity-link.es-asset-link         { color: #8fb8d6; }
+.es-entity-link.es-asset-link:hover   { color: #b3d4ec; border-bottom-color: #8fb8d6; }
+
+/* Progress-track quick card (shown when a track link is clicked). */
+.es-track-card .es-track-name   { margin: 0 0 4px; }
+.es-track-rank {
+  color: var(--es-muted);
+  font-variant: small-caps;
+  letter-spacing: 0.04em;
+  margin-left: 4px;
+}
+.es-track-progress { margin: 0 0 6px; }
+.es-track-ticks    { color: var(--es-muted); font-size: 0.88em; }
+
+.es-move-reason {
+  color: var(--es-muted);
+  font-size: 0.92em;
+  border-left: 2px solid var(--es-iron);
+  padding-left: 8px;
+}
+
+.es-move-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.es-btn {
+  flex: 1 1 auto;
+  min-width: 120px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.92em;
+  line-height: 1.3;
+  color: var(--es-fg);
+  background: linear-gradient(180deg, #2c2114 0%, #1a130b 100%);
+  border: 1px solid var(--es-iron);
+  border-radius: 5px;
+  padding: 7px 10px;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.es-btn:hover {
+  border-color: var(--es-gold);
+  color: var(--es-gold-2);
+  background: linear-gradient(180deg, #3a2c18 0%, #221809 100%);
+}
+.es-btn:active { transform: translateY(1px); }
+
+.es-btn-roll {
+  border-color: var(--es-rune);
+  color: var(--es-gold-2);
+  font-weight: 600;
+}
+.es-btn-roll:hover {
+  border-color: var(--es-gold-2);
+  box-shadow: 0 0 8px rgba(214, 168, 90, 0.25);
+}
+
+/* "Mark Complete / Fulfill Vow" button on a progress-track card. */
+.es-btn-complete {
+  border-color: #4a7c59;
+  color: #8fd19e;
+  font-weight: 600;
+}
+.es-btn-complete:hover {
+  border-color: #8fd19e;
+  color: #b6e6c2;
+  box-shadow: 0 0 8px rgba(120, 200, 140, 0.3);
+}
+
+.es-track-complete-note {
+  margin: 8px 0 2px;
+  color: #8fd19e;
+}
+
+/* ------------------------------------------------------------------ */
+/*  FOLLOW-UP (POST-ROLL) SUGGESTION CARD                             */
+/* ------------------------------------------------------------------ */
+/* Stack each follow-up move (its Roll button + reason) vertically so the
+   two suggestions and the "roll any other move" option read as a list. */
+.es-followup-buttons {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.es-followup-move {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.es-followup-move .es-btn-roll {
+  width: 100%;
+  text-align: left;
+}
+
+.es-followup-move .es-move-reason {
+  margin: 0 0 2px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  MOVE SELECTOR DIALOG                                               */
+/* ------------------------------------------------------------------ */
+
+.es-move-selector .form-group {
+  margin-bottom: 10px;
+}
+.es-move-selector label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 3px;
+  color: var(--es-gold);
+}
+.es-move-selector select {
+  width: 100%;
+  padding: 4px 6px;
+}
+.es-move-selector optgroup {
+  font-style: italic;
+  color: var(--es-muted);
+}
+
+/* ------------------------------------------------------------------ */
+/*  STREAMING (v0.3.3)                                                 */
+/*  Thinking indicator + live-stream cursor while tokens arrive, and   */
+/*  the inline error state used when a stream cannot recover.          */
+/* ------------------------------------------------------------------ */
+
+.eternal-skald-card .es-thinking {
+  color: var(--es-muted);
+  font-style: italic;
+  opacity: 0.85;
+  animation: es-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes es-pulse {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 0.95; }
+}
+
+/* A soft blinking caret appended to the body while streaming. */
+.eternal-skald-card.es-streaming .es-body > p:last-child::after {
+  content: "▌";
+  color: var(--es-gold);
+  margin-left: 1px;
+  animation: es-blink 1s step-end infinite;
+}
+
+@keyframes es-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0; }
+}
+
+.eternal-skald-card .es-error {
+  color: #e0a0a0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  AUTO-JOURNALING CHRONICLE (v0.4.0)                                 */
+/*  Bottom-right toast stack for new journal entries, plus the styling */
+/*  for the !journals / !mysteries / !remind chat listings.            */
+/* ------------------------------------------------------------------ */
+
+/* Toast host: fixed to the bottom-right, stacks newest at the bottom. */
+#es-journal-toasts {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+  max-width: 320px;
+}
+
+.es-journal-toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: linear-gradient(180deg, rgba(28, 24, 18, 0.96), rgba(18, 15, 11, 0.96));
+  border: 1px solid var(--es-gold, #c9a55a);
+  color: var(--es-fg, #e8e2d4);
+  font-size: 0.82rem;
+  line-height: 1.3;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  /* Start hidden + nudged right; the .es-jt-show class fades it in. */
+  opacity: 0;
+  transform: translateX(24px);
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+.es-journal-toast.es-jt-show {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.es-journal-toast .es-jt-icon { font-size: 1rem; }
+.es-journal-toast .es-jt-text strong { color: var(--es-gold, #c9a55a); }
+
+/* --- Browser-based RAG / semantic-memory progress card (v0.5.0) ----- */
+.es-journal-toast.es-rag-progress {
+  align-items: flex-start;
+  min-width: 240px;
+}
+.es-journal-toast.es-rag-progress .es-jt-text {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+.es-rag-label { display: block; }
+.es-rag-bar {
+  display: block;
+  width: 100%;
+  height: 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  overflow: hidden;
+}
+.es-rag-bar-fill {
+  display: block;
+  height: 100%;
+  width: 0%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--es-gold, #c9a55a), #e7cf94);
+  transition: width 0.3s ease;
+}
+.es-journal-toast.es-rag-fail {
+  border-color: #b5482f;
+}
+.es-journal-toast.es-rag-fail .es-rag-bar-fill {
+  background: linear-gradient(90deg, #b5482f, #d97c5f);
+}
+
+/* Inline "semantic recall" badge shown on !remind cards. */
+.es-rag-badge {
+  display: inline-block;
+  margin-left: 0.4em;
+  padding: 0.05em 0.5em;
+  font-size: 0.72em;
+  font-variant: small-caps;
+  letter-spacing: 0.04em;
+  color: #1a1610;
+  background: var(--es-gold, #c9a55a);
+  border-radius: 10px;
+  vertical-align: middle;
+}
+
+/* Chat listings produced by !journals / !mysteries / !remind. */
+.eternal-skald-card .es-journal-head {
+  margin: 0.5em 0 0.2em;
+  border-bottom: 1px solid rgba(201, 165, 90, 0.35);
+  padding-bottom: 2px;
+}
+.eternal-skald-card .es-journal-count {
+  color: var(--es-muted, #9a917f);
+  font-weight: normal;
+}
+.eternal-skald-card .es-journal-list {
+  margin: 0.2em 0 0.6em;
+  padding-left: 1.2em;
+}
+.eternal-skald-card .es-journal-list li { margin: 0.12em 0; }
+
+/* Map vision / scouting POI list (v0.10.23) */
+.eternal-skald-card .es-poi-list {
+  margin: 0.2em 0 0.6em;
+  padding-left: 1.2em;
+  list-style: none;
+}
+.eternal-skald-card .es-poi-list li {
+  margin: 0.3em 0;
+  padding-left: 0.4em;
+  border-left: 2px solid var(--es-rule, rgba(154, 145, 127, 0.35));
+}
+.eternal-skald-card .es-poi-loc {
+  color: var(--es-muted, #9a917f);
+  font-size: 0.85em;
+  font-style: italic;
+}
+/* (v0.10.24) Low-confidence map sightings + transcribed map text labels. */
+.eternal-skald-card .es-poi-conf {
+  color: var(--es-warn, #b9893f);
+  font-size: 0.78em;
+  font-style: italic;
+}
+.eternal-skald-card .es-map-label {
+  display: inline-block;
+  margin: 0.1em 0.2em 0.1em 0;
+  padding: 0.05em 0.45em;
+  border: 1px solid var(--es-rule, rgba(154, 145, 127, 0.35));
+  border-radius: 0.8em;
+  font-size: 0.82em;
+  white-space: nowrap;
+}
+
+.es-journal-stamp {
+  color: var(--es-muted, #9a917f);
+  font-size: 0.8rem;
+  margin: 0.4em 0 0.2em;
+}
+.es-journal-foot {
+  color: var(--es-muted, #9a917f);
+  font-size: 0.78rem;
+  font-style: italic;
+  margin-top: 0.6em;
+}
+.es-journal-sep {
+  border: none;
+  border-top: 1px dashed rgba(201, 165, 90, 0.4);
+  margin: 0.6em 0;
+}
+
+
+
+/* ===================================================================== */
+/*  Living Chronicle v0.8.0 — templates, connections, timeline, web      */
+/* ===================================================================== */
+
+/* --- Structured entity fields (rendered inside journal pages) -------- */
+.es-entity-fields {
+  margin: 0.4em 0;
+  padding-left: 1.2em;
+}
+.es-entity-fields li {
+  margin: 0.2em 0;
+  line-height: 1.45;
+}
+.es-entity-fields li strong {
+  color: var(--es-gold, #d6a85a);
+  font-variant: small-caps;
+  letter-spacing: 0.03em;
+}
+.es-entity-desc {
+  margin: 0.3em 0 0.5em;
+  line-height: 1.5;
+}
+
+/* --- Connections block appended to entity journal pages -------------- */
+.es-connections {
+  margin-top: 0.6em;
+}
+.es-connections .es-connections-head {
+  margin: 0.3em 0 0.2em;
+  color: var(--es-gold, #d6a85a);
+}
+.es-connections .es-connections-list {
+  margin: 0.2em 0 0.4em;
+  padding-left: 1.2em;
+}
+.es-connections .es-connections-list li { margin: 0.14em 0; }
+
+/* --- Timeline card (!timeline) --------------------------------------- */
+.eternal-skald-card .es-timeline {
+  list-style: none;
+  margin: 0.4em 0;
+  padding: 0;
+  border-left: 2px solid rgba(201, 165, 90, 0.35);
+}
+.eternal-skald-card .es-timeline-event {
+  position: relative;
+  margin: 0 0 0.7em;
+  padding: 0 0 0.3em 0.9em;
+}
+.eternal-skald-card .es-timeline-event::before {
+  content: "";
+  position: absolute;
+  left: -5px;
+  top: 0.35em;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--es-gold, #d6a85a);
+  box-shadow: 0 0 4px rgba(214, 168, 90, 0.7);
+}
+.eternal-skald-card .es-timeline-when {
+  color: var(--es-muted, #a89878);
+  font-size: 0.82rem;
+  font-variant: small-caps;
+  letter-spacing: 0.03em;
+  margin-bottom: 0.15em;
+}
+.eternal-skald-card .es-timeline-chan {
+  display: inline-block;
+  margin-left: 0.4em;
+  padding: 0 0.4em;
+  font-size: 0.72rem;
+  color: #1a1610;
+  background: var(--es-rune, #b8924c);
+  border-radius: 8px;
+  vertical-align: middle;
+}
+.eternal-skald-card .es-timeline-ents { margin: 0.1em 0; }
+.eternal-skald-card .es-timeline-fact,
+.eternal-skald-card .es-timeline-mystery,
+.eternal-skald-card .es-timeline-decision {
+  font-size: 0.9rem;
+  line-height: 1.4;
+  margin: 0.06em 0;
+}
+.eternal-skald-card .es-timeline-mystery { color: #d8c2e8; }
+.eternal-skald-card .es-timeline-decision { color: #cdd8b8; }
+
+/* --- Relationship web (!relationships / !map) ----------------------- */
+.eternal-skald-card .es-rel-group {
+  margin: 0.4em 0 0.7em;
+  padding-left: 0.2em;
+  border-left: 2px solid rgba(201, 165, 90, 0.25);
+}
+.eternal-skald-card .es-rel-name {
+  margin: 0 0 0.2em;
+  padding-left: 0.5em;
+}
+.eternal-skald-card .es-rel-list {
+  margin: 0.1em 0 0.3em;
+  padding-left: 1.6em;
+}
+.eternal-skald-card .es-rel-list li { margin: 0.12em 0; }
+
+/* --- Template dialog (!template) ------------------------------------- */
+.es-template-dialog .form-group {
+  margin: 0.4em 0;
+}
+.es-template-dialog label {
+  display: block;
+  font-variant: small-caps;
+  letter-spacing: 0.03em;
+  color: var(--es-gold, #d6a85a);
+  margin-bottom: 0.15em;
+}
+.es-template-dialog label .notes {
+  font-variant: normal;
+  letter-spacing: normal;
+  color: var(--es-muted, #a89878);
+  font-size: 0.8rem;
+}
+.es-template-dialog input[type="text"],
+.es-template-dialog textarea,
+.es-template-dialog select {
+  width: 100%;
+  box-sizing: border-box;
+}
+.es-template-dialog hr {
+  border: none;
+  border-top: 1px dashed rgba(201, 165, 90, 0.4);
+  margin: 0.5em 0;
+}
+
+
+/* ==================================================================== */
+/* (v0.9.0) Contradiction detection advisory                            */
+/* The "Chronicle Frowns" card lists facts that may conflict with       */
+/* established lore. Rendered inside the existing .es-variant-lore card, */
+/* so we only style the conflict list itself with a gentle warning tint. */
+/* ==================================================================== */
+.es-contradiction-list {
+  list-style: none;
+  margin: 0.4em 0 0;
+  padding: 0;
+}
+.es-contradiction-list li {
+  position: relative;
+  margin: 0.3em 0;
+  padding: 0.35em 0.5em 0.35em 1.6em;
+  background: rgba(122, 37, 32, 0.16); /* derived from --es-combat-edge */
+  border-left: 3px solid var(--es-combat-edge, #7a2520);
+  border-radius: 3px;
+  color: var(--es-fg, #e8dec4);
+  font-size: 0.92em;
+  line-height: 1.4;
+}
+.es-contradiction-list li::before {
+  content: "\26A0"; /* ⚠ warning sign */
+  position: absolute;
+  left: 0.5em;
+  top: 0.35em;
+  color: var(--es-gold-2, #f0c878);
+  font-size: 0.9em;
+}
