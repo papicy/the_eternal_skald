@@ -1364,6 +1364,19 @@ export const IronswornController = {
       return this._executeMilestone(opts.actor ?? this.getActiveCharacter());
     }
 
+    // 0c. DISCOVER A SITE — a no-roll Ironsworn: Delve move with no rollable
+    //     stat. It used to dead-end at the "no dialog and no rollable stat"
+    //     error below. Route it to the AI site generator, which rolls a random
+    //     Theme + Domain (preserving Delve DNA), enriches them into a
+    //     mysterious site and creates a site progress track — degrading to a
+    //     manual-oracle fallback if the AI is unavailable. The dynamic import
+    //     keeps this controller free of top-level dependencies (see the
+    //     "importing Settings would be circular" note elsewhere in this file).
+    if (this._isDiscoverSiteMove(dataswornId, move?.name)) {
+      const { SiteGenerator } = await import("./narrative/generators.js");
+      return SiteGenerator.discover({ ...opts, actor: opts.actor ?? this.getActiveCharacter() });
+    }
+
     // 1. Preferred: the system pre-roll dialog.
     if (dataswornId && this.hasPrerollDialog()) {
       try {
@@ -2047,6 +2060,18 @@ export const IronswornController = {
     if (/\/reach_a_milestone$/.test(id)) return true;
     const n = String(name ?? "").toLowerCase().trim();
     return n === "reach a milestone";
+  },
+
+  /**
+   * Is this the Ironsworn: Delve "Discover a Site" move?  It rolls no dice and
+   * has no rollable stat, so it is handled by the AI site generator rather than
+   * the action/progress roll paths.
+   */
+  _isDiscoverSiteMove(dsid, name) {
+    const id = String(dsid ?? "").toLowerCase();
+    if (/\/discover_a_site$/.test(id)) return true;
+    const n = String(name ?? "").toLowerCase().trim();
+    return n === "discover a site";
   },
 
   /**

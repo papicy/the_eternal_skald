@@ -5,6 +5,10 @@ import { buildSystemPrompt } from "../ai/prompt-builder.js";
 import { Memory, Chat, escapeHtml, formatMarkdown, callSkaldStreaming } from "../chat/display.js";
 import { JournalSystem } from "../chronicle/journal-system.js";
 import { IronswornData } from "../ironsworn-data.js";
+import { IronswornController } from "../ironsworn-controller.js";
+import {
+  rollThemeAndDomain, buildSitePrompt, parseSiteResponse, buildFallbackSite
+} from "./site-oracle.js";
 // Call-time cross-import (safe cycle): RagBridge still lives in eternal-skald.js.
 import { RagBridge } from "../eternal-skald.js";
 
@@ -335,5 +339,139 @@ export const LoreGenerator = {
       folder = null;
     }
     return folder;
+  }
+};
+
+/* ===================================================================== */
+/*  §8c  AI "DISCOVER A SITE" GENERATOR                                   */
+/*  --------------------------------------------------------------------- */
+/*  Handles the no-roll Ironsworn: Delve "Discover a Site" move. It rolls  */
+/*  a random Theme + Domain (preserving Delve DNA — see site-oracle.js),   */
+/*  asks the Skald to enrich them into a mysterious site, then realises    */
+/*  the result as a Foundry progress-track Item plus an optional journal   */
+/*  page. AI only *adds flavour* to the rolled scaffold; it never decides  */
+/*  the player's choices. Fully degrades to a manual-oracle fallback when  */
+/*  the AI is disabled or unreachable, and is permission-gated so it       */
+/*  never writes documents a user cannot create.                          */
+/* ===================================================================== */
+
+export const SiteGenerator = {
+  /**
+   * Discover a Site. Always posts *something* to chat (AI-enriched or the
+   * manual-oracle fallback) and, where permitted, creates a Delve site as a
+   * progress track. Returns a triggerMove-compatible result so the LOCKED
+   * controller branch and integration narration both stay on the happy path.
+   *
+   * @param {object} [opts]
+   * @param {Actor}  [opts.actor] - the discovering character
+   * @param {string} [opts.rank]  - optional explicit rank override
+   * @returns {Promise<{ok: boolean, method: string, site?: object, id?: string}>}
+   */
+  async discover(opts = {}) {
+    const rolled = rollThemeAndDomain();
+    if (opts.rank) rolled.rank = opts.rank;
+    const actor = opts.actor ?? IronswornController.getActiveCharacter();
+
+    let site;
+    let aiUsed = false;
+    try {
+      if (Settings.get("aiMode")) {
+        let context = "";
+        try { context = IronswornController.describeCharacter(actor) || ""; } catch (_) {}
+        let memory = "";
+        try { memory = await RagBridge.fetchMemory(`${rolled.theme} ${rolled.domain} site delve`); } catch (_) {}
+        const task = "Discover and describe a mysterious Ironsworn: Delve site. Output ONLY the requested JSON object.";
+        const reply = await Client.chat([
+          { role: "system", content: buildSystemPrompt({ task, memory }) },
+          { role: "user", content: buildSitePrompt(rolled, context) }
+        ], { temperature: 0.9, maxTokens: 900 });
+        const parsed = parseSiteResponse(reply, rolled);
+        if (parsed.ok) { site = parsed.site; aiUsed = true; }
+      }
+    } catch (err) {
+      console.warn(LOG_PREFIX, "Discover a Site: AI unreachable, using manual oracle fallback", err);
+    }
+    if (!site) site = buildFallbackSite(rolled);
+
+    // Present the site to the players (never auto-decide for them).
+    await Chat.postSkald(this._renderSite(site, aiUsed), {
+      variant: "lore",
+      title: `Discover a Site: ${site.name}`
+    });
+
+    // Realise the site as a progress track, if the user may create items.
+    let created = null;
+    if (actor && (game.user.isGM || game.user.can?.("ITEM_CREATE"))) {
+      try {
+        const description = this._renderSiteHtml(site);
+        created = await IronswornController.createProgressTrack(
+          actor,
+          { name: site.name.slice(0, 100), trackType: "delve", rank: site.rank, description }
+        );
+      } catch (e) {
+        console.warn(LOG_PREFIX, "Discover a Site: could not create progress track", e);
+      }
+    }
+
+    // Inscribe the full site in the chronicle, if the user may create journals.
+    if (game.user.can?.("JOURNAL_CREATE") || game.user.isGM) {
+      try { await this._inscribe(site); } catch (e) {
+        console.warn(LOG_PREFIX, "Discover a Site: journal inscription failed", e);
+      }
+    }
+
+    if (created?.ok) {
+      await Chat.postSystem(
+        `<em>A new site track was raised: <strong>${escapeHtml(created.name)}</strong> [${escapeHtml(site.rank)}]</em>`,
+        { gmWhisper: true }
+      );
+    }
+    return { ok: true, method: "discover-site", site, id: created?.id ?? null };
+  },
+
+  /** Render the chat-card markdown for a site. */
+  _renderSite(site, aiUsed) {
+    const list = (label, items) =>
+      (items && items.length) ? `\n**${label}:**\n${items.map(i => `- ${i}`).join("\n")}` : "";
+    const tail = aiUsed ? "" : "\n\n*(The Skald was silent; rolled from the bones alone — consult your Theme and Domain cards.)*";
+    return formatMarkdown(
+      `**${site.name}** — *${site.theme} ${site.domain}* [${site.rank}]\n\n${site.summary}` +
+      list("Features", site.features) +
+      list("Denizens", site.denizens) +
+      list("Areas", site.areas) +
+      list("Opportunities", site.opportunities) +
+      list("Threats", site.threats) +
+      list("Unanswered", site.questions) +
+      tail
+    );
+  },
+
+  /** Render stored HTML for the progress-track description / journal page. */
+  _renderSiteHtml(site) {
+    const ul = (label, items) =>
+      (items && items.length)
+        ? `<p><strong>${escapeHtml(label)}:</strong></p><ul>${items.map(i => `<li>${escapeHtml(i)}</li>`).join("")}</ul>`
+        : "";
+    return `<p><em>${escapeHtml(site.theme)} ${escapeHtml(site.domain)}</em> — rank <strong>${escapeHtml(site.rank)}</strong></p>` +
+      `<p>${escapeHtml(site.summary)}</p>` +
+      ul("Features", site.features) + ul("Denizens", site.denizens) +
+      ul("Areas", site.areas) + ul("Opportunities", site.opportunities) +
+      ul("Threats", site.threats) + ul("Unanswered Questions", site.questions);
+  },
+
+  /** Inscribe the discovered site as a JournalEntry under the chronicle folder. */
+  async _inscribe(site) {
+    const folder = await LoreGenerator._getOrCreateFolder();
+    const content = `<h2>${escapeHtml(site.name)}</h2>${this._renderSiteHtml(site)}`;
+    const entry = await JournalEntry.create({
+      name: site.name.slice(0, 80),
+      folder: folder?.id ?? null,
+      pages: [{ name: site.name.slice(0, 80), type: "text", text: { content, format: 1 } }],
+      flags: { [MODULE_ID]: { generated: true, site: true, theme: site.theme, domain: site.domain } }
+    });
+    if (entry) {
+      JournalSystem.ingestMetadata?.({ kind: "site", name: site.name, theme: site.theme, domain: site.domain });
+    }
+    return entry;
   }
 };
