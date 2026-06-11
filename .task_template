@@ -34,7 +34,7 @@ Use docs/engineering-brief.md and docs/repository-map.md as authoritative
 5. Patch (diff or specific changes)
 
 ## Token Budget
-INVESTIGATE: 10k | IMPLEMENT: 20k
+INVESTIGATE: 1k | IMPLEMENT: 5k
 
 ## Approval Required For
 - [ ] New dependencies
