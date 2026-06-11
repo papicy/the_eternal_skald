@@ -1173,8 +1173,9 @@ export const Integration = {
 
   /** Toast for a progress mark on a combat track. */
   _notifyProgress(trackName, boxes) {
-    try { ui.notifications?.info(`${SKALD_NAME}: progress on ${trackName} — ${boxes}/10 boxes.`); } catch (_) {}
-    this._dbg(`notify: progress on ${trackName} → ${boxes}/10`);
+    const b = Math.max(0, Math.min(10, Number(boxes) || 0));
+    try { ui.notifications?.info(`${SKALD_NAME}: progress on ${trackName} — ${b}/10 boxes (${b * 10}%).`); } catch (_) {}
+    this._dbg(`notify: progress on ${trackName} → ${b}/10 (${b * 10}%)`);
   },
 
   /**
@@ -2129,6 +2130,38 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
   },
 
   /**
+   * (v0.13.0 — narrative pacing) Build progress-%-aware pacing guidance for the
+   * journey narration prompt. Keeps the fiction aligned with the track so the
+   * Skald never describes ARRIVING before the journey is nearly charted. Pure
+   * advisory text — no mechanical effect. RAW-faithful: arrival is resolved only
+   * by the "Reach Your Destination" progress roll.
+   * @param {number} boxes filled progress boxes (0–10)
+   * @returns {string} a guidance clause for the autoSummary
+   */
+  _journeyPacingNote(boxes) {
+    const b   = Math.max(0, Math.min(10, Number(boxes) || 0));
+    const pct = b * 10;
+    const at  = `(${b}/10, ${pct}%)`;
+    if (b <= 3) {
+      return `PACING ${at}: the journey has only just begun — narrate an early leg or first complication. ` +
+             `Treat this waypoint as a DRAMATIC BEAT (a hardship, choice, or discovery), NOT a geographic milestone. ` +
+             `Do NOT describe arriving at — or even sighting — the destination yet.`;
+    }
+    if (b <= 6) {
+      return `PACING ${at}: the journey is well underway — escalate the stakes mid-trek. ` +
+             `This waypoint is a dramatic complication, not the destination. ` +
+             `The party is still far from arrival; do NOT describe reaching the destination.`;
+    }
+    if (b <= 8) {
+      return `PACING ${at}: the journey nears its end — you MAY foreshadow the destination on the horizon, ` +
+             `but the party has NOT arrived. Arrival is resolved only by the "Reach Your Destination" roll.`;
+    }
+    return `PACING ${at}: the journey is all but charted — the destination is in sight. ` +
+           `Do NOT auto-narrate the arrival; instead prompt the player to roll "Reach Your Destination" ` +
+           `to resolve HOW the arrival goes.`;
+  },
+
+  /**
    * Deterministically enact the journey side of "Undertake a Journey" so that
    * "Reach Your Destination" always has an open track to roll against:
    *   • If no open journey track exists, OPEN one (named from the player's
@@ -2198,12 +2231,28 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
       if (pr?.ok) {
         this._notifyProgress(pr.track, pr.boxes);
         notes.push(`advanced ${pr.track} (now ${pr.boxes}/10 boxes)`);
+        // (v0.13.0) Progress-aware narrative pacing so the fiction stays aligned
+        // with the track and never "arrives" before the journey is nearly full.
+        notes.push(this._journeyPacingNote(pr.boxes));
         // (fix — journey completion) A journey that has reached full progress
         // (10/10) is finished; close it deterministically so it stops being
         // reused by later journeys (which caused the grouping bug).
         const done = await this._autoCompleteIfFull(actor, track.id, "journey");
         if (done) notes.push(`reached destination “${pr.track}” (10/10 — auto-completed)`);
       }
+    } else if (track && !hit) {
+      // (v0.13.0) MISS on "Undertake a Journey" — RAW: mark NO progress. The
+      // party is stuck until an obstacle is resolved. Steer the narration to a
+      // complication that must be overcome (a side-challenge, Pay the Price, or
+      // a fresh Face Danger) rather than quietly advancing toward the goal.
+      const cur   = Number(foundry.utils.getProperty(track, "system.current") ?? 0);
+      const boxes = Math.max(0, Math.min(10, Math.floor(cur / 4)));
+      notes.push(
+        `MISS on the journey "${track.name}" (${boxes}/10, ${boxes * 10}%) — NO progress marked. ` +
+        `The party is HALTED by an obstacle; narrate a complication or cost they must resolve ` +
+        `(e.g. Pay the Price, Face Danger, or a short side-challenge) before they can travel on. ` +
+        `Do NOT advance toward the destination this turn.`
+      );
     }
     return notes.join("; ");
   },

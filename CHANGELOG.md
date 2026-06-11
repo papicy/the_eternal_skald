@@ -13,6 +13,32 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.13.0] — 2026-06-11
+
+### Added
+- **Journey narrative pacing.** The Skald now keeps the *fiction* aligned with a
+  journey's **progress track**, fixing the long-standing "you arrive at the
+  destination at 2/10 progress" disconnect. The mechanics were already RAW-correct;
+  this release adds **progress-%-aware narrative guidance** so the storyteller
+  never describes arrival before the journey is nearly charted.
+  - New `_journeyPacingNote(boxes)` helper feeds banded pacing guidance
+    (0–30% / 40–60% / 70–80% / 90–100%) into the post-roll narration prompt after
+    every successful **Undertake a Journey**, instructing the AI to treat each
+    waypoint as a **dramatic beat** — not a geographic milestone — and to withhold
+    arrival until ~7/10 boxes (arrival is resolved only by **Reach Your
+    Destination**).
+  - **Miss handling** on *Undertake a Journey* (previously silent): RAW-correct, no
+    progress is marked, and the narration is steered to a complication/cost the
+    party must resolve before travelling on.
+  - Static **"JOURNEY PACING"** doctrine added to the AI system prompt so guidance
+    holds even on manual-narration turns.
+  - **Progress %** is now surfaced in the UI: `!progress` lists each journey as
+    `X/10 (Y%)` with a one-line pacing hint, and progress toasts show the
+    percentage.
+  - Purely additive and RAW-faithful — no data-model, settings, API, or lifecycle
+    change; existing worlds and in-flight journeys are unaffected.
+  - Implements Patches 1–4 of `docs/PROPOSAL-journey-narrative-pacing.md`.
+
 ## [0.12.0] — 2026-06-11
 
 ### Added

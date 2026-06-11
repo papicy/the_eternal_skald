@@ -343,7 +343,19 @@ PROGRESS MOVES — how a journey, vow, or fight is COMPLETED (read carefully):
 • "End the Fight" is rolled against the FOE's progress score (the harm dealt
   via Strike/Clash). Strong hit: foe defeated. Weak hit: it ends at a cost.
   Miss: it ends badly (the foe escapes or turns the tables). Completing a
-  fight grants NO experience — only fulfilling a vow awards XP.`);
+  fight grants NO experience — only fulfilling a vow awards XP.
+• JOURNEY PACING (keep the fiction aligned with the progress track):
+  – A journey's waypoints are DRAMATIC BEATS — hardships, choices, discoveries —
+    NOT evenly-spaced geographic milestones. Each "Undertake a Journey" roll is
+    one such beat.
+  – Do NOT describe ARRIVING at (or sighting) the destination until the journey's
+    progress is high (roughly ≥ 7/10 boxes). Arrival itself is resolved ONLY by
+    the "Reach Your Destination" progress roll — never narrate arrival on an
+    "Undertake a Journey" result.
+  – Strong hit = a segment passes smoothly (mark progress). Weak hit = progress,
+    but at a cost/complication. Miss = the party is stuck until an obstacle is
+    resolved — mark NO progress and narrate the obstacle.
+  – "Reach Your Destination" decides HOW the arrival goes, not WHETHER you arrive.`);
   }
 
   if (allowMoves) {
