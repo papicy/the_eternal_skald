@@ -17,7 +17,7 @@
 | 1 | Max files changed per task | **3 files** |
 | 2 | Max net new/changed lines per file | **50 lines** |
 | 3 | Token budget for an INVESTIGATE task | **1,000 tokens** |
-| 4 | Token budget for an IMPLEMENT task | **2,000 tokens** |
+| 4 | Token budget for an IMPLEMENT task | **1,000 tokens** |
 | 5 | Architectural change without an approval gate | **FORBIDDEN** |
 
 Exceeding any limit **REQUIRES** an explicit approval gate (see §6). Do not "round up."
