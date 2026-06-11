@@ -13,6 +13,50 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.11.0] — 2026-06-11
+
+### Fixed
+- **"End the Fight" is now a real progress move.** The combat progress move
+  *End the Fight* was recognized by name but never routed through the
+  progress-move roll path, so invoking it did nothing useful — it had no
+  rollable stat and no track to roll against. The Skald now treats it exactly
+  like the other progress moves (*Fulfill Your Vow*, *Reach Your Destination*):
+  it resolves the player's **active combat foe track**, rolls the move against
+  the foe's **progress score** (filled boxes = `floor(system.current / 4)`,
+  capped 0–10), and reports a strong hit / weak hit / miss. On a **strong hit**
+  the foe is defeated and the combat track is completed (cleared) just as
+  *Fulfill Your Vow* closes a vow; a **weak hit** or **miss** leaves the fight
+  open and is narrated as still in progress.
+  - `_isProgressMove()` now matches `end_the_fight` by Datasworn id and
+    `"end the fight"` by name.
+  - `rollProgressMove()` resolves `kind: "combat"` for the move and looks up the
+    active combat track via `getActiveCombat()` / `getActiveCombatTrack()`,
+    re-reading the live Foundry Item before rolling. The "no open track" guard
+    no longer fires for combat (the active-fight resolution handles it).
+  - The auto-completion flow prefers the controller's `_lastProgressTrack`
+    (validated: `kind === "combat"`, same actor, item still open) before falling
+    back to the active combat lookup, so a strong hit closes the correct foe.
+  - `MOVE_CATALOG` now declares `stats: ["progress"]` for End the Fight (was an
+    empty stat list), keeping its metadata consistent with the other progress
+    moves.
+
+### Changed
+- **AI guidance and move reference updated.** The Skald's prompt now lists *End
+  the Fight* among the key moves and documents all three progress moves
+  (including that End the Fight rolls against the foe's progress score), with an
+  explicit note that **ending a fight grants no experience** — true to Ironsworn
+  rules, only fulfilling a vow awards XP. Added an *End the Fight* entry to the
+  in-module move reference data.
+
+### Notes
+- **No XP is awarded for ending a fight.** This is intentional and rules-accurate
+  — the existing vow-XP logic is untouched. Behavior for *Fulfill Your Vow* and
+  *Reach Your Destination* is preserved exactly; all GM-guard checks remain
+  coupled with their state mutations. Covered by an extended regression test
+  (`test/progress-track-writes.test.mjs`) verifying all three progress moves are
+  recognized and that combat moves like *Strike* / *Clash* / *Enter the Fray*
+  are not misclassified.
+
 ## [0.10.40] — 2026-06-11
 
 ### Fixed
