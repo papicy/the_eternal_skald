@@ -37,6 +37,16 @@ for (const n of readdirSync(SCRIPTS).sort()) {
 }
 const FILES = [MAIN, ...subFiles];
 
+// Pre-existing top-level sibling modules (NOT part of the decomposed graph, so
+// they are not scanned for missing imports themselves). However, the refactored
+// modules legitimately depend on the symbols these siblings EXPORT
+// (IronswornData, IronswornController, BrowserRAG, VectorStore). A refactored
+// file that references such an exported symbol without importing it is a runtime
+// ReferenceError — so their exported names must be in the global symbol table.
+const SIBLING_FILES = ["ironsworn-data.js", "ironsworn-controller.js", "browser-rag.js"]
+  .map((n) => join(SCRIPTS, n))
+  .filter((p) => { try { return statSync(p).isFile(); } catch { return false; } });
+
 /**
  * Replace the CONTENTS of all string/template literals and comments with spaces
  * (preserving newlines and delimiters) using a proper char scanner. Regex-based
@@ -119,13 +129,35 @@ function importedNames(src) {
   return out;
 }
 
-// Global symbol table = union of every module's top-level defs.
+// Extract the names a module EXPORTS (named exports only):
+//   export const X = ... | export function X | export class X | export { A, B as C }
+function exportedNames(src) {
+  const out = new Set();
+  const reDecl = /export\s+(?:async\s+)?(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)/g;
+  let m;
+  while ((m = reDecl.exec(src))) out.add(m[1]);
+  const reList = /export\s*\{([^}]*)\}/g;
+  while ((m = reList.exec(src))) {
+    for (const part of m[1].split(",")) {
+      const name = part.trim().split(/\s+as\s+/).pop().trim();
+      if (name && name !== "default") out.add(name);
+    }
+  }
+  return out;
+}
+
+// Global symbol table = union of every module's top-level defs, PLUS the
+// exported symbols of the pre-existing sibling modules (so missing imports of
+// IronswornData / IronswornController / BrowserRAG / VectorStore are caught).
 const fileSrc = new Map();
 const ALL = new Set();
 for (const f of FILES) {
   const src = readFileSync(f, "utf8");
   fileSrc.set(f, src);
   for (const d of topLevelDefs(src)) ALL.add(d);
+}
+for (const f of SIBLING_FILES) {
+  for (const e of exportedNames(readFileSync(f, "utf8"))) ALL.add(e);
 }
 
 let problems = 0;

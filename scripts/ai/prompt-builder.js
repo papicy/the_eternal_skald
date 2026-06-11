@@ -4,6 +4,7 @@ import { Settings } from "../core/settings.js";
 // cycle is safe. Repoint when Integration -> narrative/ (step 9) and JournalSystem -> chronicle/ (step 6).
 import { Integration } from "../narrative/integration.js";
 import { JournalSystem } from "../chronicle/journal-system.js";
+import { IronswornController } from "../ironsworn-controller.js";
 
 /**
  * Builds the system prompt that establishes the Eternal Skald persona,

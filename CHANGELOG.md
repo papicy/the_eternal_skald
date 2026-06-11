@@ -13,6 +13,27 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.39] — 2026-06-11
+
+### Fixed
+- **Critical runtime error in `!skald-help` (and other commands).** The Phase 2
+  modular refactor left several modules referencing exported symbols from the
+  pre-existing sibling modules (`ironsworn-data.js`, `ironsworn-controller.js`,
+  `browser-rag.js`) without importing them, causing `ReferenceError` at
+  call-time. Fixed missing imports:
+  - `chat/commands.js` — added `IronswornData`, `IronswornController`, `BrowserRAG`
+    (fixes `ReferenceError: IronswornData is not defined` at `commands.js:170`
+    when running `!skald-help`).
+  - `ai/prompt-builder.js` — added `IronswornController`.
+  - `core/settings.js` — added `IronswornController`.
+
+### Changed
+- **Hardened the static import checker** (`test/check-imports.mjs`) to include the
+  exported symbols of the pre-existing sibling modules in its global symbol table,
+  so a refactored file that uses `IronswornData` / `IronswornController` /
+  `BrowserRAG` / `VectorStore` without importing it is now flagged. This class of
+  bug previously slipped past the checker.
+
 ## [0.10.30] — 2026-06-10
 
 ### Fixed
