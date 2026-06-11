@@ -1,5 +1,12 @@
 the-eternal-skald.zip
 
+# Dependencies
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
 # Auto-generated document previews (not source)
 TEST.docx
 TEST.pdf

@@ -63,7 +63,7 @@ As of **v0.3.0**, the Skald integrates directly with the official [**foundry-iro
 In Foundry VTT: **Setup → Add-on Modules → Install Module**. Paste this manifest URL:
 
 ```
-https://raw.githubusercontent.com/papicy/eternal_skald/main/module.json
+https://raw.githubusercontent.com/papicy/the_eternal_skald/main/module.json
 ```
 
 Click **Install**, then activate the module in your world.
@@ -654,6 +654,37 @@ The current architecture loads a server-side hook via Node's `--import` flag:
 1. **Delete any old proxy** — if you were running `skald-proxy.js` or had systemd/PM2 units for it, remove them.
 2. **Update your startup command** — the `--import` path is `scripts/eternal-skald-server.mjs` (older builds used `proxy/skald-hook.mjs`).
 3. **Remove the old Proxy URL setting** — it no longer exists. The module has only one networking path now.
+
+---
+
+## Architecture & Refactoring (Phase 2)
+
+This release ships a fully decomposed, modular codebase. The original client logic
+lived in a single ~11,000-line `scripts/eternal-skald.js` monolith. It has been
+refactored into focused ES modules with **zero behavioral change**.
+
+**What changed:**
+
+- The monolith was reduced from **~11,048 lines to an 801-line entry point**
+  (`scripts/eternal-skald.js`) that wires the module together.
+- Logic was extracted into cohesive ES modules under `scripts/`:
+  - `scripts/core/` — settings, constants, shared utilities, and state management
+  - `scripts/ai/` — AI client, prompt assembly, and model/networking calls
+  - `scripts/chat/` — chat message handling and command parsing
+  - `scripts/chronicle/` — chronicle/journal persistence and rendering
+  - `scripts/vision/` — image/vision-related features
+  - `scripts/narrative/` — narrative generation and story logic
+  - `scripts/hooks/` — Foundry hook registration and lifecycle wiring
+- Modules use native `import`/`export`, loaded via the `esmodules` entry in
+  `module.json` (`scripts/eternal-skald.js`).
+
+**Quality gates:**
+
+- **20/20 test files pass** with **971 assertions** green.
+- Behavior is preserved — this is a structural refactor only, not a feature change.
+
+See [`REFACTOR_COMPLETE.md`](REFACTOR_COMPLETE.md) in the repository root for the
+full breakdown of the decomposition, module-by-module notes, and the commit history.
 
 ---
 
