@@ -13,6 +13,21 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.10.40] — 2026-06-11
+
+### Fixed
+- **Help card content cut off at the bottom.** The `!skald-help` card lists 20
+  commands plus an intro and oracle aside, making it taller than the chat panel.
+  In any container that doesn't provide its own scroll (pop-out chat, fixed-height
+  panels, or simply a card taller than the viewport), the lower commands
+  (`!timeline`, `!relationships`, `!template`, `!link-style`, `!reset`, `!scout`)
+  were clipped with no way to reach them. The command list is now wrapped in a
+  bounded, internally scrollable container (`.es-help-scroll`,
+  `max-height: 55vh; overflow-y: auto`), so the whole card always fits in view and
+  the command list scrolls within the card — no content is ever cut off. A
+  saga-themed thin scrollbar is applied. Purely a CSS/markup presentation fix; no
+  behavioral change.
+
 ## [0.10.39] — 2026-06-11
 
 ### Fixed

@@ -175,7 +175,7 @@ export const Commands = {
 
     const body = `
       <p>I am <strong>${SKALD_NAME}</strong>, your saga-singer at this table. Speak to me with these runes:</p>
-      <table class="es-help-table"><tbody>${tableRows}</tbody></table>
+      <div class="es-help-scroll"><table class="es-help-table"><tbody>${tableRows}</tbody></table></div>
       <p class="es-help-aside"><em>Oracles available:</em> ${knownOracles}.</p>
       <p class="es-help-aside"><em>GM-only:</em> Combat auto-control may be toggled in <strong>Module Settings → The Eternal Skald</strong>.</p>
     `;

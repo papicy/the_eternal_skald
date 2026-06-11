@@ -229,6 +229,36 @@
   margin: 4px 0 0;
 }
 
+/* Keep the (long) command list self-contained so the card always fits in the
+   chat panel and never gets clipped by the surrounding container: the list
+   scrolls internally once it grows past a sensible height. */
+.es-help-scroll {
+  max-height: 55vh;
+  overflow-y: auto;
+  margin: 4px 0 6px;
+  /* offset the table's own top/bottom margin so spacing stays consistent */
+  padding-right: 2px;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--es-iron) transparent;
+}
+.es-help-scroll > .es-help-table {
+  margin: 0;
+}
+.es-help-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.es-help-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.es-help-scroll::-webkit-scrollbar-thumb {
+  background: var(--es-iron);
+  border-radius: 4px;
+}
+.es-help-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--es-rune);
+}
+
 /* ------------------------------------------------------------------ */
 /*  COMBAT ROLL CARD                                                   */
 /* ------------------------------------------------------------------ */
