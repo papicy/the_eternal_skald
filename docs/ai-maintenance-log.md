@@ -345,3 +345,71 @@ RESIDUAL RISK: LOW. New behaviour fires only for the two named Delve moves. Site
               DialogV2 → classic Dialog → null (clean abort). Foundry runtime not exercised
               headlessly (no Foundry in CI) — verified via the mocked-dialog unit suite +
               load-smoke + import check.
+
+
+
+### [2026-06-11 20:55 EEST] — Fix RAG "Browser cache is not available" failure over HTTP
+AGENT:        Abacus AI maintenance agent
+TASK TYPE:    IMPLEMENT (bug fix)
+TOKEN BUDGET: 10,000  |  USED: within budget  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md + repository-map.md (prior context this session)
+  [x] task classified — IMPLEMENT (Option A, user-approved)
+  [x] target file(s)+line(s) located (evidence below)
+  [x] <= 3 files / <= 50 changed lines per file — YES (1 code file, +13 net; 1 doc append)
+  [x] additive & backwards-compatible — only relaxes an over-aggressive setting
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] no architectural boundary crossed — change confined to browser-rag.js init()
+  [x] regression test added/extended — full suite re-run (see TESTS); no new behaviour testable headlessly (browser-only `caches` global)
+  [x] rollback plan defined
+
+PROBLEM:      RAG semantic memory hard-fails on first use with
+              "Browser cache is not available in this environment" when Foundry
+              is served over plain HTTP on a non-localhost host. RAG then stays
+              disabled for the whole session (_initFailed sticky).
+
+EVIDENCE (brief §4 format):
+  CLAIM:      browser-rag.js unconditionally opted into the Cache Storage API.
+  EVIDENCE:   scripts/browser-rag.js:259 (pre-fix) :: init() set
+              transformers.env.useBrowserCache = true with no guard.
+  CONFIDENCE: HIGH
+  BASIS:      read the line directly.
+
+  CLAIM:      The Cache Storage API (`caches`) only exists in a secure context
+              (HTTPS or localhost); over HTTP on a LAN/remote host it is
+              undefined and transformers.js throws the observed error from
+              within pipeline(), surfaced by the catch at line ~282.
+  EVIDENCE:   scripts/browser-rag.js:264 (pipeline) → catch at :281-282.
+  CONFIDENCE: HIGH
+  BASIS:      MDN secure-context requirement for CacheStorage; matches the
+              exact thrown message text.
+
+CHANGE:       Gated `useBrowserCache` on `typeof caches !== "undefined"`,
+              mirroring the module's existing IndexedDB guard
+              (VectorStore.supported()). When the cache exists → enable it and
+              log an info line; when absent → set it false and warn that RAG is
+              using an in-memory fallback (model re-downloads each session) with
+              a hint to serve over HTTPS/localhost for persistence. RAG now
+              works in all contexts instead of hard-failing on HTTP.
+FILES TOUCHED (<= 3):
+  - scripts/browser-rag.js          (+13 / -1, init() cache guard + logging)
+  - docs/ai-maintenance-log.md      (append-only)
+TESTS:        No new test file — the trigger is the browser-only `caches`
+              global, which is not present in the framework-free Node runner
+              (Node has no `caches`, so the fallback branch is what executes
+              under test; the secure-context branch cannot be exercised
+              headlessly without a browser). Verified instead via:
+SUITE:        GREEN — `npm test` = 22 files / all passed, 0 failed.
+              node --check scripts/browser-rag.js: PASS.
+              check-imports: PASS.  load-smoke: PASS (browser-rag.js imports cleanly).
+GATE:         None required — single non-LOCKED file, +13 net (under the 50-line
+              cap), additive and backwards-compatible. Option A approved by user.
+ROLLBACK:     git revert <this commit-sha> — restores the unconditional
+              useBrowserCache = true. No data/schema migration involved.
+RESIDUAL RISK: LOW. The change only relaxes an over-aggressive setting: the
+              HTTPS/localhost path is unchanged (caches exists → still true). In
+              insecure contexts the ~90 MB model re-downloads per session
+              (slower first query, more bandwidth) but RAG functions instead of
+              failing. Does not address unrelated load failures (CDN blocked by
+              CSP/offline) — those remain graceful soft-fails by design.
