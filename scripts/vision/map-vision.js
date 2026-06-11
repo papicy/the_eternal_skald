@@ -374,10 +374,60 @@ export const MapVision = {
   },
 
   /**
+   * (v0.11.2) Best-effort field recovery from malformed or TRUNCATED JSON.
+   * The vision model occasionally returns JSON that the token limit cut off
+   * mid-array, so JSON.parse and the balanced-brace fallback both fail. Rather
+   * than dumping the raw braces into the Scouting card, pull out the readable
+   * string fields (summary, terrain, labels) with tolerant regexes. The labels
+   * regex deliberately accepts an UNTERMINATED array so a cut-off list still
+   * yields whatever labels were captured. Never throws.
+   *
+   * @returns {{summary:string, terrain:string, labels:string[]}}
+   */
+  _salvageFields(raw) {
+    const result = { summary: "", terrain: "", labels: [] };
+    const text = String(raw ?? "");
+    const unescape = (s) => {
+      try { return JSON.parse(`"${s}"`); }
+      catch (_) {
+        return String(s)
+          .replace(/\\"/g, '"')
+          .replace(/\\n/g, " ")
+          .replace(/\\t/g, " ")
+          .replace(/\\\\/g, "\\")
+          .trim();
+      }
+    };
+    const strField = (key) => {
+      const m = text.match(new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`, "i"));
+      return m ? unescape(m[1]).trim() : "";
+    };
+    result.summary = strField("summary");
+    result.terrain = strField("terrain");
+    // Tolerate an unterminated array (truncated output): match up to "]" OR EOL.
+    const lm = text.match(/"labels"\s*:\s*\[([\s\S]*?)(?:\]|$)/i);
+    if (lm) {
+      const seen = new Set();
+      const re = /"((?:[^"\\]|\\.)*)"/g;
+      let mm;
+      while ((mm = re.exec(lm[1])) !== null) {
+        const s = unescape(mm[1]).trim();
+        if (!s) continue;
+        const k = s.toLowerCase();
+        if (seen.has(k)) continue;
+        seen.add(k);
+        result.labels.push(s.slice(0, 80));
+        if (result.labels.length >= 40) break;
+      }
+    }
+    return result;
+  },
+
+  /**
    * Parse the model's reply into `{ summary, terrain, labels[], pois[] }`.
    * Tolerant of markdown code fences and surrounding prose; never throws.
-   * Falls back to stashing the raw text as the summary if no JSON can be
-   * recovered.
+   * Falls back to salvaging individual fields (or, for non-JSON prose, the raw
+   * text as the summary) when no complete JSON can be recovered.
    *
    * (v0.10.24) Also captures the transcribed `labels` array and a per-POI
    * `confidence` level, and accepts options:
@@ -397,6 +447,20 @@ export const MapVision = {
       if (m) { try { obj = JSON.parse(m[0]); } catch (_) { obj = null; } }
     }
     if (!obj || typeof obj !== "object") {
+      // (v0.11.2) The model returned malformed or TRUNCATED JSON — e.g. the
+      // token limit cut it off mid-array, so both JSON.parse and the
+      // balanced-brace fallback fail. Rather than dumping the raw braces into
+      // the Scouting card (which surfaced as a wall of raw JSON in chat),
+      // salvage the individual string fields so the card still renders cleanly.
+      const looksLikeJson = /"\s*(summary|terrain|labels|pois)\s*"\s*:/i.test(raw);
+      if (looksLikeJson) {
+        const recovered = this._salvageFields(raw);
+        out.summary = recovered.summary;
+        out.terrain = recovered.terrain;
+        out.labels = recovered.labels.slice(0, 40);
+        return out;
+      }
+      // Genuinely free-form prose (no JSON shape) — safe to show as the summary.
       out.summary = raw.slice(0, 600);
       return out;
     }

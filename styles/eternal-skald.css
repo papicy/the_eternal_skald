@@ -735,6 +735,27 @@
 }
 .eternal-skald-card .es-journal-list li { margin: 0.12em 0; }
 
+/* (v0.11.2) Long chronicle entry names must WRAP inside the card instead of
+   running off the right margin (e.g. "The Forgotten Mysteries of the Ancient…").
+   Foundry content/entity links default to `white-space: nowrap`, so we relax
+   that for links rendered inside Skald list cards and let the list items break
+   long words. Scoped to Skald cards so the rest of Foundry is unaffected. */
+.eternal-skald-card .es-journal-list li,
+.eternal-skald-card .es-poi-list li {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.eternal-skald-card .es-journal-list a.content-link,
+.eternal-skald-card .es-journal-list a.entity-link,
+.eternal-skald-card .es-journal-list a,
+.eternal-skald-card .es-poi-list a.content-link,
+.eternal-skald-card .es-poi-list a.entity-link,
+.eternal-skald-card .es-poi-list a {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 /* Map vision / scouting POI list (v0.10.23) */
 .eternal-skald-card .es-poi-list {
   margin: 0.2em 0 0.6em;

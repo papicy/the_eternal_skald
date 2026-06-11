@@ -13,6 +13,33 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.11.2] — 2026-06-11
+
+### Fixed
+- **`!scout` no longer dumps raw JSON into chat.** The map-vision model returns
+  its analysis as a JSON object, but when the reply was **truncated by the token
+  limit** (an unterminated object/array), both `JSON.parse` and the
+  balanced-brace fallback failed and `_parseAnalysis` stashed the *entire raw
+  JSON string* into the card's summary — surfacing as a wall of
+  `{ "summary": …, "labels": [ … ` text in the Scouting card. A new
+  `_salvageFields()` helper now recovers the readable fields (summary, terrain,
+  and whatever **complete** map labels were transcribed) from malformed or
+  truncated JSON using tolerant regexes, so the Scouting card always renders
+  cleanly. Genuinely free-form (non-JSON) replies are still shown verbatim as
+  the summary, exactly as before.
+- **Long chronicle entry names no longer clip at the right margin.** In the
+  `!journals` and `!mysteries` lists, entry names are rendered as Foundry
+  content links, which default to `white-space: nowrap`. Long names such as
+  *"The Forgotten Mysteries of the Ancient…"* ran off the right edge of the
+  card. The list links (and the scouting POI list) now **wrap within the card**
+  via `white-space: normal` + `overflow-wrap: anywhere`, scoped to Skald cards
+  so the rest of Foundry's UI is unaffected.
+
+### Notes
+- Both are presentation/robustness fixes with no behavioural change. Covered by
+  new regression tests in `test/map-vision.test.mjs` (truncated-JSON salvage and
+  end-to-end `_parseAnalysis` recovery); all test gates remain green (20/20).
+
 ## [0.11.1] — 2026-06-11
 
 ### Changed

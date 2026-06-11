@@ -205,6 +205,58 @@ const parseAnalysis = (() => {
 }
 
 /* --------------------------------------------------------------------- *
+ * [4b] MapVision._salvageFields() — recover fields from TRUNCATED /
+ *      malformed JSON (v0.11.2). The vision model sometimes returns JSON
+ *      cut off by the token limit; the scout card must NOT dump raw braces.
+ * --------------------------------------------------------------------- */
+const salvageFields = (() => {
+  const b = bodyOf("_salvageFields(raw) {");
+  // eslint-disable-next-line no-new-func
+  const fn = new Function("raw", `return (function(raw) ${b}).call(null, raw);`);
+  return (raw) => fn(raw);
+})();
+{
+  // The reported bug: JSON truncated mid-labels-array.
+  const truncated = '{ "summary": "A vast, rugged continental map of the northern realms.", ' +
+    '"terrain": "Diverse terrain of fjords, mountains and frozen wastes.", ' +
+    '"labels": [ "NORTHGALE OCEAN", "THE SHATTERED ISLES", "Svaldur Keep", "The Ashen Hill';
+  const r = salvageFields(truncated);
+  eq(r.summary, "A vast, rugged continental map of the northern realms.", "[4b] salvages summary from truncated JSON");
+  eq(r.terrain, "Diverse terrain of fjords, mountains and frozen wastes.", "[4b] salvages terrain from truncated JSON");
+  eq(r.labels.length, 3, "[4b] salvages only the COMPLETE (quoted) labels; drops the cut-off one");
+  ok(r.labels[0] === "NORTHGALE OCEAN" && r.labels[2] === "Svaldur Keep", "[4b] salvaged labels are correct");
+  ok(!r.summary.includes("{") && !r.terrain.includes("{"), "[4b] salvaged fields never contain raw braces");
+}
+{
+  // Escaped quotes inside a salvaged string are un-escaped.
+  const esc = '{ "summary": "The \\"frozen\\" north", "terrain": "ice", "labels": ["A", "B"]}';
+  const r = salvageFields(esc);
+  eq(r.summary, 'The "frozen" north', "[4b] un-escapes embedded quotes");
+  eq(r.labels.length, 2, "[4b] salvages a complete labels array");
+}
+{
+  // End-to-end through _parseAnalysis: truncated JSON must yield clean fields,
+  // NOT a summary full of raw JSON. _parseAnalysis delegates to _salvageFields
+  // via `this`, so bind a context that provides it.
+  const parseWithCtx = (() => {
+    const b = bodyOf("_parseAnalysis(text, opts = {}) {");
+    // eslint-disable-next-line no-new-func
+    const fn = new Function("text", "opts", `return (function(text, opts) ${b}).call(this, text, opts);`);
+    const ctx = { _salvageFields: salvageFields };
+    return (t, opts = {}) => fn.call(ctx, t, opts);
+  })();
+  const truncated = '{ "summary": "Map of the realm.", "terrain": "Hills.", "labels": [ "Northgale", "Stoneward';
+  const a = parseWithCtx(truncated);
+  eq(a.summary, "Map of the realm.", "[4b] _parseAnalysis salvages summary from truncated JSON");
+  eq(a.terrain, "Hills.", "[4b] _parseAnalysis salvages terrain from truncated JSON");
+  ok(!a.summary.includes("{") && !a.summary.includes('"labels"'), "[4b] _parseAnalysis summary has no raw JSON");
+  eq(a.labels.length, 1, "[4b] _parseAnalysis keeps the one complete label");
+  // Free-form prose (no JSON shape) is still kept verbatim as the summary.
+  const prose = parseWithCtx("Just a rambling description, no structure here.");
+  ok(prose.summary.startsWith("Just a rambling"), "[4b] non-JSON prose still kept as summary (no salvage)");
+}
+
+/* --------------------------------------------------------------------- *
  * [5] MapVision._buildVisionMessages() — OpenAI-compatible multimodal shape.
  * --------------------------------------------------------------------- */
 const buildMessages = (() => {
