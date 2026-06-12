@@ -190,6 +190,39 @@ export const Client = {
   },
 
   /**
+   * (v0.14.4 / P2) fetch() wrapped with an AbortController timeout so a
+   * stalled upstream can't hang the UI for 60+ seconds. The timer guards the
+   * connection + response-headers phase only: it is cleared the instant
+   * fetch() resolves, so an in-flight SSE token stream or a long body download
+   * is NEVER aborted mid-flight. Timeout is configurable via the
+   * "requestTimeout" world setting (seconds); falls back to 30s if unset or
+   * invalid. On timeout we throw a clear, localised-ish error and always clear
+   * the timer (no leaked handles), degrading exactly like any network error.
+   * @param {string} resource - URL or path to fetch.
+   * @param {object} [options] - standard fetch() init; `signal` is injected.
+   * @returns {Promise<Response>}
+   */
+  async _fetch(resource, options = {}) {
+    const secs = Number(Settings.get("requestTimeout"));
+    const ms = (Number.isFinite(secs) && secs > 0) ? secs * 1000 : 30000;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    try {
+      return await fetch(resource, { ...options, signal: controller.signal });
+    } catch (e) {
+      if (e?.name === "AbortError") {
+        throw new Error(
+          `The Skald's request timed out after ${ms / 1000}s — the AI endpoint ` +
+          `did not respond in time. Try again, or raise "Request Timeout" in settings.`
+        );
+      }
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+  },
+
+  /**
    * (v0.10.12) Call the AI endpoint DIRECTLY from the browser, bypassing
    * the server hook. Sends the raw OpenAI-style chat-completions body with
    * an `Authorization: Bearer <apiKey>` header straight to `endpoint`.
@@ -207,7 +240,7 @@ export const Client = {
   async _directChat(payload, endpoint, apiKey) {
     let response;
     try {
-      response = await fetch(endpoint, {
+      response = await this._fetch(endpoint, {
         method:  "POST",
         headers: {
           "Content-Type":  "application/json",
@@ -374,7 +407,7 @@ export const Client = {
   async _directChatStream(payload, endpoint, apiKey, handlers = {}) {
     let response;
     try {
-      response = await fetch(endpoint, {
+      response = await this._fetch(endpoint, {
         method:  "POST",
         headers: {
           "Content-Type":  "application/json",
@@ -473,7 +506,7 @@ export const Client = {
 
     let response = null;
     try {
-      response = await fetch(API_PATH, {
+      response = await this._fetch(API_PATH, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ apiKey, endpoint, payload })
@@ -590,7 +623,7 @@ export const Client = {
 
     let response = null;
     try {
-      response = await fetch(STREAM_PATH, {
+      response = await this._fetch(STREAM_PATH, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ apiKey, endpoint, payload })

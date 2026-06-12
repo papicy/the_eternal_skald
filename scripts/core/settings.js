@@ -65,6 +65,20 @@ export const Settings = {
       default: true
     });
 
+    // (v0.14.4 / P2) Request timeout in seconds. An AbortController in
+    // ai/client.js aborts any AI fetch whose connection/response-headers phase
+    // stalls longer than this, so a dead upstream can't hang the UI for the
+    // upstream's full 60s. Cleared the instant headers arrive, so live SSE
+    // streams and long downloads are never cut off. World-scoped, GM-only.
+    game.settings.register(MODULE_ID, "requestTimeout", {
+      name: "Request Timeout (seconds)",
+      hint: "How long the Skald waits for the AI endpoint to start responding before giving up. Prevents a stalled request from hanging the UI. The timer only covers the initial connection; an active streaming reply is never interrupted. Default: 30.",
+      scope: "world",
+      config: true,
+      type: Number,
+      default: 30
+    });
+
     // (v0.9.1) AI Provider preset dropdown. Picking a known provider
     // auto-fills the API Endpoint below with that provider's OpenAI-compatible
     // chat-completions URL — the user still supplies their own API key and
