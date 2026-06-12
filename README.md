@@ -4,7 +4,7 @@ An AI-powered storyteller, oracle interpreter, and tactical enemy controller for
 
 Powered by the **Abacus AI ChatLLM** platform (Gemini 3.0 Flash by default).
 
-> ⚠️ **Alpha / Development Version (v0.10.27)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
+> ⚠️ **Alpha / Development Version (v0.14.0)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
 
 As of **v0.3.0**, the Skald integrates directly with the official [**foundry-ironsworn**](https://foundryvtt.com/packages/foundry-ironsworn) system: it reads your character's stats and meters, *suggests* the right Ironsworn move, triggers the system's own dice mechanics on one click, narrates the official strong-hit / weak-hit / miss outcome, and can optionally apply mechanical effects. See [Ironsworn Integration](#ironsworn-integration) below. The module still works standalone in any system — Ironsworn features simply activate when the system is present.
 
@@ -117,7 +117,7 @@ node --import "./Data/modules/the-eternal-skald/scripts/eternal-skald-server.mjs
 When Foundry starts, you should see this in the console/logs:
 
 ```
-⚔️  Skald | v0.6.0 — server hook active. /skald-api/* routes ready.
+⚔️  Skald | v0.14.0 — server hook active. /skald-api/* routes ready.
 ```
 
 ### 3. Set your API key
@@ -139,7 +139,7 @@ http://your-foundry:30000/skald-api/health
 You should see:
 
 ```json
-{"status":"ok","service":"The Eternal Skald","version":"0.6.0"}
+{"status":"ok","service":"The Eternal Skald","version":"0.14.0"}
 ```
 
 If you get a 404 or Foundry's normal HTML page, the `--import` flag isn't taking effect. Double-check:
@@ -608,7 +608,7 @@ const cached = skald.mapVision.getCached(scene);              // { ts, model, po
 **"The Eternal Skald server hook is not loaded (404)"**
 This only appears if **Connection Mode** is set to **Server hook only** and the `--import` flag isn't in your Foundry startup command (or the path is wrong). On **Auto** (the default) the Skald silently falls back to direct browser→AI mode instead, so you won't see this error. To use the hook, see [Setup step 2](#2-optional-add---import-to-your-foundry-startup); otherwise switch Connection Mode to **Auto** or **Direct (browser → AI)**.
 
-**No `⚔️ Skald | v0.6.0` line in Foundry's console output**
+**No `⚔️ Skald | v0.14.0` line in Foundry's console output**
 The hook file isn't being loaded. Check the path is absolute and correct. Run it in a terminal to see Node.js errors.
 
 **"No Abacus AI API key is set"**
@@ -644,6 +644,24 @@ The Eternal Skald follows [Semantic Versioning](https://semver.org/) with a deli
 In short: until you see `1.0.0`, treat every release as a development build.
 
 > **Note on earlier tags:** Some early builds were mistakenly published under `2.x` (e.g. `v2.0.0`, `v2.2.0`, `v2.2.1`). Those version numbers were never appropriate for a pre-release project and have been retired. The correct lineage is `0.1.x` → `0.2.0` → `0.2.2` (see [CHANGELOG.md](CHANGELOG.md)).
+
+### Bumping the version (maintainers)
+
+`module.json` is the **single source of truth** for the module version, and `package.json` is kept in lock-step with it. A small helper script updates both at once so they can never drift apart:
+
+```bash
+npm run version:bump 0.15.0            # update both manifests + create a commit
+npm run version:bump 0.15.0 --no-commit  # update the files only (no commit)
+```
+
+The script (`tools/bump-version.mjs`, zero dependencies, Node 18+):
+
+- **validates** the argument is a proper [SemVer](https://semver.org/) version (`MAJOR.MINOR.PATCH`, with optional `-prerelease` / `+build`) and refuses anything else;
+- does a **targeted** edit of only the `"version"` field in each manifest, so the rest of every file — including `module.json`'s long HTML description — is preserved exactly;
+- **fails closed**: it verifies both files exist and that each edit still produces valid JSON *before* writing anything, so a bad run leaves your tree untouched;
+- by default creates a `chore: bump version to vX.Y.Z` commit, staging **only** `module.json` and `package.json` (never your unrelated working changes). Pass `--no-commit` to skip the commit.
+
+After bumping, push and tag the release as usual. The `version-consistency` test suite (`npm test`) guards against any version drift creeping back into the README or the source-file banners.
 
 ---
 
