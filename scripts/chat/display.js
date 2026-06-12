@@ -208,6 +208,15 @@ export function parseMetadata(text) {
 }
 
 /**
+ * Defensively scroll the chat log to the bottom so a freshly posted /
+ * growing streaming message stays visible. No-ops if the chat UI or the
+ * scrollBottom API is unavailable (older Foundry, headless tests).
+ */
+function scrollChatToBottom() {
+  try { ui?.chat?.scrollBottom?.(); } catch (_e) { /* non-fatal */ }
+}
+
+/**
  * The streaming counterpart to a "post a Skald reply" call (v0.3.3).
  *
  * It posts a chat message IMMEDIATELY with a thinking indicator, then
@@ -253,6 +262,9 @@ export async function callSkaldStreaming(messages, opts = {}) {
     data.whisper = game.users.filter(u => u.isGM).map(u => u.id);
   }
   const message = await ChatMessage.create(data);
+  // Bring the placeholder into view immediately so the player sees the
+  // narration begin (Foundry doesn't always auto-scroll on create).
+  scrollChatToBottom();
 
   // 2) Throttled in-place updater.
   const THROTTLE_MS = 140;
@@ -272,6 +284,8 @@ export async function callSkaldStreaming(messages, opts = {}) {
     updating = true;
     try {
       await message.update({ content: cardHtml });
+      // Keep the growing message in view as tokens stream in.
+      scrollChatToBottom();
     } catch (e) {
       console.warn(LOG_PREFIX, "stream message.update failed:", e?.message || e);
     } finally {

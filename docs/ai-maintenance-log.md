@@ -1529,3 +1529,56 @@ RESIDUAL RISK: Scene/token writes (including player tokens) are a new, higher-bl
               the default-OFF settings the module's runtime behaviour is byte-for-byte
               unchanged, and module load is never affected (the new file is imported
               transitively and touches nothing at eval time beyond defining an object).
+
+
+---
+
+### [2026-06-12 14:00 EEST] — Auto-scroll chat log during streaming narration
+AGENT:        Abacus.AI Agent
+TASK TYPE:    IMPLEMENT
+TOKEN BUDGET: 20,000  |  USED: ~16,000  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md + repository-map.md
+  [x] task classified (IMPLEMENT)
+  [x] target file(s)+line(s) located (evidence below)
+  [x] <= 3 files / <= 50 changed lines per file (1 file, +14 lines)
+  [x] additive & backwards-compatible
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] no architectural boundary crossed (chat/ presentation only)
+  [x] regression test added (test/streaming-autoscroll.test.mjs)
+  [x] rollback plan defined
+
+PROBLEM:      When AI narration started streaming, the chat log was not scrolled
+              to reveal the new message, and as tokens streamed in the growing
+              card was pushed below the visible area — the player could not watch
+              the narration fill in real time.
+
+EVIDENCE (brief §4 format):
+  CLAIM:      Streaming posts a placeholder ChatMessage then rewrites it in place
+              via throttled message.update, with no scroll-into-view anywhere.
+  EVIDENCE:   scripts/chat/display.js:237-332 :: callSkaldStreaming / renderNow
+  CONFIDENCE: HIGH
+  BASIS:      read the exact lines directly.
+
+  CLAIM:      chat/display.js is the OPEN presentation layer; adding a UI scroll
+              call here crosses no architectural boundary.
+  EVIDENCE:   docs/repository-map.md:? :: chat/display.js row (🟢 OPEN)
+  CONFIDENCE: HIGH
+  BASIS:      read ownership table directly.
+
+CHANGE:       Added a defensive module-level helper scrollChatToBottom() that
+              calls ui?.chat?.scrollBottom?.() inside try/catch (no-ops when the
+              chat UI / API is absent). Invoked (1) immediately after the
+              placeholder ChatMessage.create so the message is visible from the
+              start, and (2) after each successful in-place message.update so the
+              growing narration stays in view as it streams.
+FILES TOUCHED (1):
+  - scripts/chat/display.js  (+14 / -0 lines)
+TESTS:        test/streaming-autoscroll.test.mjs (added) — RESULT: 8 passed, 0 failed
+SUITE:        npm test -> PASS (33 files passed, 0 failed)
+GATE:         none
+ROLLBACK:     git revert <commit-sha>  (single commit)
+RESIDUAL RISK: scrollBottom fires on every throttled update (~140ms); if a user
+              had manually scrolled up mid-stream they would be pulled back to
+              bottom. Acceptable for the requested behaviour; none other identified.
