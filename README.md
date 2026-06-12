@@ -117,7 +117,7 @@ node --import "./Data/modules/the-eternal-skald/scripts/eternal-skald-server.mjs
 When Foundry starts, you should see this in the console/logs:
 
 ```
-⚔️  Skald | v0.6.0 — server hook active. /skald-api/* routes ready.
+⚔️  Skald | v0.14.0 — server hook active. /skald-api/* routes ready.
 ```
 
 ### 3. Set your API key
@@ -139,7 +139,7 @@ http://your-foundry:30000/skald-api/health
 You should see:
 
 ```json
-{"status":"ok","service":"The Eternal Skald","version":"0.6.0"}
+{"status":"ok","service":"The Eternal Skald","version":"0.14.0"}
 ```
 
 If you get a 404 or Foundry's normal HTML page, the `--import` flag isn't taking effect. Double-check:
@@ -608,7 +608,7 @@ const cached = skald.mapVision.getCached(scene);              // { ts, model, po
 **"The Eternal Skald server hook is not loaded (404)"**
 This only appears if **Connection Mode** is set to **Server hook only** and the `--import` flag isn't in your Foundry startup command (or the path is wrong). On **Auto** (the default) the Skald silently falls back to direct browser→AI mode instead, so you won't see this error. To use the hook, see [Setup step 2](#2-optional-add---import-to-your-foundry-startup); otherwise switch Connection Mode to **Auto** or **Direct (browser → AI)**.
 
-**No `⚔️ Skald | v0.6.0` line in Foundry's console output**
+**No `⚔️ Skald | v0.14.0` line in Foundry's console output**
 The hook file isn't being loaded. Check the path is absolute and correct. Run it in a terminal to see Node.js errors.
 
 **"No Abacus AI API key is set"**

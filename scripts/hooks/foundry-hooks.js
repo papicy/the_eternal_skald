@@ -53,7 +53,12 @@ import { BrowserRAG } from "../browser-rag.js";
 // --- init: register settings AND chat-command hooks -------------------
 console.log("The Eternal Skald | Registering Hooks.once('init') …");
 Hooks.once("init", () => {
-  console.log(LOG_PREFIX, "init hook fired — initialising module …");
+  // (fix — version drift) Authoritative startup banner: the version is read from
+  // the module manifest (module.json) via game.modules, which is guaranteed
+  // populated inside the init hook. This is the reliable, always-correct version
+  // log (the top-level breadcrumb in eternal-skald.js may fire before the manifest
+  // is ready). Single source of truth — never goes stale on a version bump.
+  console.log(LOG_PREFIX, `init hook fired — initialising module v${game.modules.get(MODULE_ID)?.version ?? "?"} …`);
   try {
     Settings.register();
     console.log(LOG_PREFIX, "Settings registered.");
