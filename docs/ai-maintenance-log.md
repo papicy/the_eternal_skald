@@ -939,3 +939,62 @@ de-pin, and the `version:bump` tool) were not yet on `main`.
 ### Residual risk / rollback
 Low. Changes are version-string alignment only; no behavioural code changed in this
 step. Rollback = revert the merge commit on `main`.
+
+
+
+---
+
+### [2026-06-12 14:53 EEST] — P0 latency: HTTP keep-alive on the upstream forwarder
+
+```
+AGENT:        Abacus.AI Agent (Claude)
+TASK TYPE:    IMPLEMENT
+TOKEN BUDGET: 20,000  |  USED: ~16,000  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md + repository-map.md
+  [x] task classified (IMPLEMENT)
+  [x] target file(s)+line(s) located (evidence below)
+  [x] <= 3 code files / <= 50 changed lines per file
+  [x] additive & backwards-compatible
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] architectural boundary crossed (server hook LOCKED) — GATE recorded below
+  [x] regression test added (test/keepalive-agent.test.mjs)
+  [x] rollback plan defined
+
+PROBLEM:      The upstream forwarder opened a fresh TCP/TLS connection on every
+              LLM call (no keep-alive Agent), adding ~50-150ms handshake overhead
+              per request — the highest-ROI, smallest-diff latency win (P0).
+
+EVIDENCE (brief §4 format):
+  CLAIM:      forward() used Node's default agent (keepAlive=false); opts had no `agent`.
+  EVIDENCE:   scripts/eternal-skald-server.mjs:179-192 :: forward (opts/lib.request)
+  CONFIDENCE: HIGH
+  BASIS:      read lines directly — opts set no `agent` before this change.
+
+  CLAIM:      forwardStream() had the same gap.
+  EVIDENCE:   scripts/eternal-skald-server.mjs:269-283 :: forwardStream (opts/lib.request)
+  CONFIDENCE: HIGH
+  BASIS:      read lines directly — identical opts with no `agent`.
+
+CHANGE:       Added module-scoped keep-alive Agents (HTTP_AGENT/HTTPS_AGENT from a
+              shared KEEPALIVE_OPTS = { keepAlive:true, keepAliveMsecs:30_000,
+              maxSockets:64 }) plus an agentFor(url) selector, and wired
+              `agent: agentFor(url)` into BOTH forwarder opts blocks. No wire
+              contract change to /skald-api/chat[-stream]; degrades safely (Node
+              opens a fresh socket if a pooled one is unusable).
+FILES TOUCHED (3 code; +2 manifests via official bump tool):
+  - scripts/eternal-skald-server.mjs   (+12 / -0 lines)
+  - test/keepalive-agent.test.mjs      (+90 / -0 lines, new file)
+  - docs/ai-maintenance-log.md         (this entry)
+  - module.json + package.json         (0.14.1 → 0.14.2 via tools/bump-version.mjs, separate release commit)
+TESTS:        test/keepalive-agent.test.mjs — RESULT: 6 passed, 0 failed
+SUITE:        npm test -> PASS (25 files passed, 0 failed); load-smoke PASS
+GATE:         GATE-P0-KEEPALIVE — approved by repository owner (user), recorded in
+              this entry. Edits the 🔴 LOCKED server hook (§5.1) by explicit approval.
+ROLLBACK:     git revert <feature commit sha>  (single-commit revert of the
+              keep-alive change; version bump is its own separate commit).
+RESIDUAL RISK: Low. keep-alive sockets are bounded (maxSockets 64, 30s idle) and
+              Node transparently replaces stale sockets; no behavioural/contract
+              change. Worst case is identical to prior per-call connection behaviour.
+```
