@@ -1644,3 +1644,59 @@ RESIDUAL RISK: Near-bottom is measured each throttle frame (~140ms); a very larg
               stickiness for one frame, but the next frame re-measures near ~0px
               and resumes. Live in-client scroll behaviour not exercised here
               (no Foundry runtime); covered by structural + behavioural tests.
+
+
+---
+
+### [2026-06-13 13:10 EEST] — Release: bump version 0.16.0 → 0.16.1 (smart auto-scroll)
+AGENT:        Abacus.AI Agent
+TASK TYPE:    DOCUMENT
+TOKEN BUDGET: 8,000  |  USED: ~6,000  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md + repository-map.md
+  [x] task classified (DOCUMENT — version/release metadata only, no code logic)
+  [x] target file(s)+line(s) located (evidence below)
+  [x] <= 3 files / <= 50 changed lines per file (module.json, package.json, README.md — 1 line each)
+  [x] additive & backwards-compatible (patch bump; no API/behaviour change)
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] no architectural boundary crossed
+  [x] regression guard: existing test/version-consistency.test.mjs covers this
+  [x] rollback plan defined
+
+PROBLEM:      Ship the smart auto-scroll work (commits 2950e0d, 5b6988b) as a
+              released patch version. Module version was 0.16.0.
+
+EVIDENCE (brief §4 format):
+  CLAIM:      module.json is the single source of truth; package.json + README
+              version references must match or version-consistency fails.
+  EVIDENCE:   test/version-consistency.test.mjs:36-117 :: checks [1],[5],[6]
+  CONFIDENCE: HIGH
+  BASIS:      read the test directly; ran the suite (33/33 pass post-bump).
+
+  CLAIM:      tools/bump-version.mjs updates ONLY module.json + package.json,
+              not the README version claims.
+  EVIDENCE:   tools/bump-version.mjs:88-101 :: TARGETS array
+  CONFIDENCE: HIGH
+  BASIS:      read the tool directly.
+
+CHANGE:       Ran `node tools/bump-version.mjs 0.16.1 --no-commit` (module.json +
+              package.json 0.16.0 → 0.16.1). Hand-updated the three current-version
+              claims in README.md the tool does not touch: the Alpha badge (L7),
+              the server-hook banner example (L120), the /skald-api/health example
+              (L142), plus the matching troubleshooting banner (L611). Illustrative
+              `version:bump 0.16.0` command examples (L653-654) left as-is (not
+              version claims; not test-checked) to avoid GUARDED-README churn.
+              Chose PATCH (not minor) — auto-scroll is a UX refinement to the
+              existing streaming display, not a new headline feature.
+FILES TOUCHED (3):
+  - module.json   (version field, 1 line)
+  - package.json  (version field, 1 line)
+  - README.md     (4 current-version references)
+TESTS:        full suite — RESULT: 33 files passed, 0 failed (incl. version-consistency)
+SUITE:        npm test -> PASS
+GATE:         none — version bumping is an explicitly-supported op (bump tool +
+              version-consistency test expect module.json version to change). It is
+              NOT in the §5.1 locked contract surface (id/esmodules/compatibility).
+ROLLBACK:     git revert <bump-commit-sha>   (single commit)
+RESIDUAL RISK: none identified — no runtime code changed.
