@@ -34,7 +34,20 @@
  *      §13 HOOK REGISTRATIONS
  * ===================================================================== */
 
-console.log("=== The Eternal Skald v0.6.0 — module file loaded ===");
+// (fix — version drift) Derive the version from the module manifest (module.json,
+// the single source of truth) instead of a hardcoded literal that silently went
+// stale (was "v0.6.0" while the module shipped 0.14.0). game.modules is normally
+// already populated by the time esmodules load; if not yet available this early,
+// fall back to "?" rather than a number that could itself drift. The authoritative
+// banner is also logged from the init hook (foundry-hooks.js), where the manifest
+// is guaranteed ready.
+const __skaldVersion = (() => {
+  try {
+    const v = globalThis.game?.modules?.get?.("the-eternal-skald")?.version;
+    return typeof v === "string" ? v : "?";   // guard: only ever stringify a real version
+  } catch { return "?"; }
+})();
+console.log(`=== The Eternal Skald v${__skaldVersion} — module file loaded ===`);
 
 import { IronswornData } from "./ironsworn-data.js";
 import { IronswornController } from "./ironsworn-controller.js";
