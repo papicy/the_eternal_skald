@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "test": "node test/run-all.mjs",
-    "test:file": "node"
+    "test:file": "node",
+    "version:bump": "node tools/bump-version.mjs"
   },
   "engines": {
     "node": ">=18"

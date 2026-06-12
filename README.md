@@ -645,6 +645,24 @@ In short: until you see `1.0.0`, treat every release as a development build.
 
 > **Note on earlier tags:** Some early builds were mistakenly published under `2.x` (e.g. `v2.0.0`, `v2.2.0`, `v2.2.1`). Those version numbers were never appropriate for a pre-release project and have been retired. The correct lineage is `0.1.x` → `0.2.0` → `0.2.2` (see [CHANGELOG.md](CHANGELOG.md)).
 
+### Bumping the version (maintainers)
+
+`module.json` is the **single source of truth** for the module version, and `package.json` is kept in lock-step with it. A small helper script updates both at once so they can never drift apart:
+
+```bash
+npm run version:bump 0.15.0            # update both manifests + create a commit
+npm run version:bump 0.15.0 --no-commit  # update the files only (no commit)
+```
+
+The script (`tools/bump-version.mjs`, zero dependencies, Node 18+):
+
+- **validates** the argument is a proper [SemVer](https://semver.org/) version (`MAJOR.MINOR.PATCH`, with optional `-prerelease` / `+build`) and refuses anything else;
+- does a **targeted** edit of only the `"version"` field in each manifest, so the rest of every file — including `module.json`'s long HTML description — is preserved exactly;
+- **fails closed**: it verifies both files exist and that each edit still produces valid JSON *before* writing anything, so a bad run leaves your tree untouched;
+- by default creates a `chore: bump version to vX.Y.Z` commit, staging **only** `module.json` and `package.json` (never your unrelated working changes). Pass `--no-commit` to skip the commit.
+
+After bumping, push and tag the release as usual. The `version-consistency` test suite (`npm test`) guards against any version drift creeping back into the README or the source-file banners.
+
 ---
 
 ## Upgrading from older builds
