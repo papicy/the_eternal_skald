@@ -850,3 +850,61 @@ root cause of all drift seen so far. Two low-risk options were proposed to the u
 + the README badge from one command, and/or (2) rely on the now-expanded test guards
 (CI-friendly) to *fail loudly* on any drift. Runtime strings are already immune
 (derived from `module.json` since commit `90129df`).
+
+
+
+---
+
+## 2026-06-12 12:30 EEST — New utility: version-bump automation (`tools/bump-version.mjs`)
+
+**Agent:** Foundry Repository Steward
+**Category:** SAFE (new dev-only utility — not in the Foundry runtime path)
+**Branch:** `fix/journey-mechanics`
+**Trigger:** User requested a version-bump script to prevent the manual-bump drift
+that was the root cause of every version inconsistency fixed earlier (commits
+`90129df`, `219e70e`).
+
+### What was added
+- **`tools/bump-version.mjs`** — a zero-dependency Node ESM script (Node 18+,
+  core modules only, matching the project's "no build step" contract). It is placed
+  in a new `tools/` directory rather than `scripts/` so it stays cleanly separate
+  from the Foundry runtime ES modules (`module.json` only loads
+  `scripts/eternal-skald.js`; `tools/` is dev-only and never shipped to the client).
+  - Accepts a version argument: `npm run version:bump 0.15.0`.
+  - Validates strict **SemVer** (`MAJOR.MINOR.PATCH` + optional `-prerelease` /
+    `+build`); rejects anything else.
+  - Updates the `"version"` field in **`module.json`** (single source of truth) and
+    **`package.json`** (kept in lock-step).
+  - **Targeted regex replace** of only the `"version": "..."` member — NOT a
+    JSON.parse → JSON.stringify round-trip — so the rest of each file is preserved
+    byte-for-byte. This matters because `module.json` carries a very large HTML
+    `description` (the full changelog) that a re-serialise would reflow/escape.
+  - **Fails closed:** checks both files exist; computes each edit in memory and
+    verifies it still parses as valid JSON and carries the new version *before*
+    writing anything — so an aborted run never leaves a half-edited tree.
+  - By default creates a `chore: bump version to vX.Y.Z` commit, staging **only**
+    `module.json` + `package.json` (never `git add -A`, so unrelated working-tree
+    changes are never swept in). `--no-commit` skips the commit; it also degrades
+    gracefully (warns, exits 0) if not run inside a git work tree.
+- **`package.json`** — added `"version:bump": "node tools/bump-version.mjs"` to the
+  `scripts` block (the only change to that file besides the version field itself).
+- **`README.md`** — new "Bumping the version (maintainers)" subsection under
+  *Versioning & Release Strategy* documenting usage, flags, and the safety design.
+
+### Verification
+- `node --check tools/bump-version.mjs` → PASS.
+- Error paths (no arg / bad semver `1.2` / garbage / already-current `0.14.0`) all
+  print a clear message and exit 1 **without touching any file**.
+- Happy path tested with `--no-commit` at `0.15.0` and `1.0.0-beta.1`: confirmed both
+  manifests updated and — critically — `git diff module.json` showed **only** the
+  single `"version"` line changed (the `v0.14.0` text inside the HTML description was
+  left untouched). Reverted to `0.14.0` afterward, so no real bump was committed.
+- `node test/run-all.mjs` → **24 files, 0 failed** (unchanged; the tool is not part
+  of the suite, but the suite confirms nothing else regressed).
+
+### Residual risk / rollback
+Minimal. The tool only ever rewrites two `"version"` fields and is never loaded by
+Foundry. It does not enforce monotonic version increase (it is a "set version" tool),
+which is intentional so a maintainer can correct a mistaken bump; the SemVer guard
+still prevents malformed values. Rollback = delete `tools/bump-version.mjs` and the
+one `package.json` script line.
