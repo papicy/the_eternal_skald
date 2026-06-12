@@ -908,3 +908,34 @@ Foundry. It does not enforce monotonic version increase (it is a "set version" t
 which is intentional so a maintainer can correct a mistaken bump; the SemVer guard
 still prevents malformed values. Rollback = delete `tools/bump-version.mjs` and the
 one `package.json` script line.
+
+---
+
+## 2026-06-12 13:05 EEST — Merge version work into `main`; reconcile to 0.14.1
+
+### Context
+`fix/journey-mechanics` (PR #6) had already been merged into `main` (`5205ae5`),
+after which `main` was manually bumped to **0.14.1** via commit `8904794` — but that
+manual edit touched **only `module.json`**, leaving `package.json` and the README
+version references stale at `0.14.0`. Meanwhile three follow-up commits on
+`fix/journey-mechanics` (runtime version single-source, README badge sync + header
+de-pin, and the `version:bump` tool) were not yet on `main`.
+
+### Change
+- Merged `fix/journey-mechanics` into `main` (`--no-ff`). The merge was conflict-free:
+  the branch never touches `module.json` and `main`'s only post-branch change was to
+  `module.json`, so `main`'s `0.14.1` version is preserved.
+- Reconciled the pre-existing `0.14.0`/`0.14.1` drift left by `8904794`: set
+  `package.json` to `0.14.1` and updated the four README references (alpha badge,
+  server-hook banner, `/skald-api/health` example, troubleshooting line) to `0.14.1`.
+  `module.json` remains the single source of truth and was left untouched at `0.14.1`.
+
+### Verification
+- `node test/version-consistency.test.mjs` → 17 passed, 0 failed (the same guard
+  caught the stale `0.14.0` drift before the fix).
+- `node test/run-all.mjs` → 24 files passed, 0 failed.
+- `grep` for merge-conflict markers across the tree → none.
+
+### Residual risk / rollback
+Low. Changes are version-string alignment only; no behavioural code changed in this
+step. Rollback = revert the merge commit on `main`.
