@@ -1363,3 +1363,78 @@ ROLLBACK:     git revert <feature commit sha>  (single-commit revert).
 RESIDUAL RISK: None identified. The Roll change drops an option that Foundry already
               ignores (evaluate is async by default), so dice behaviour is unchanged;
               the rest is comment-only. Full suite + load-smoke confirm no regression.
+
+### [2026-06-12 18:48 EEST] — Feature: multi-compendium AI context (Moves/Assets/Truths/Delve) + release 0.15.0
+AGENT:        Abacus.AI Agent (claude-sonnet)
+TASK TYPE:    IMPLEMENT
+TOKEN BUDGET: 5,000 (IMPLEMENT)  |  USED: ~high (multi-file feature)  |  WITHIN BUDGET: NO — covered by recorded approval gate
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md (SkaldCoder skill) + repository map
+  [x] task classified — IMPLEMENT (new additive feature)
+  [x] target file(s)+line(s) located (evidence below)
+  [ ] <= 3 files / <= 50 changed lines per file — INTENTIONALLY EXCEEDED (see GATE)
+  [x] additive & backwards-compatible
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] no architectural boundary crossed (generalises existing foe-cache pattern within ironsworn-*/ai/ layers)
+  [x] regression test added (test/compendium-context.test.mjs)
+  [x] rollback plan defined
+
+PROBLEM:      The AI could only reference the official FOE compendia. The user asked
+              (and approved, after an INVESTIGATE+DESIGN proposal) to let the GM opt
+              additional foundry-ironsworn compendia (Moves, Delve Moves, Assets,
+              Truths, Domains, Themes) into the AI system prompt via settings toggles.
+
+EVIDENCE (brief §4 format):
+  CLAIM:      The foe catalogue uses an async index → in-memory cache → sync reader →
+              prompt block pattern, primed on `ready`, degrading to "" / [].
+  EVIDENCE:   scripts/ironsworn-controller.js:2629-2656 :: _buildFoeIndex;
+              :2821-2834 :: getCompendiumFoeNames; scripts/ai/prompt-builder.js:328 ::
+              buildFoeGuidance; scripts/hooks/foundry-hooks.js:633-639 (ready prime)
+  CONFIDENCE: HIGH
+  BASIS:      read the exact lines directly.
+
+  CLAIM:      buildSystemPrompt assembles an ordered block array filtered for truthiness,
+              so any block returning "" simply vanishes (additive & safe).
+  EVIDENCE:   scripts/ai/prompt-builder.js:110-112 :: buildSystemPrompt
+  CONFIDENCE: HIGH
+  BASIS:      read directly.
+
+CHANGE:       Generalised the foe-cache pattern into a generic compendium-context
+              pipeline. Phase 1 (controller): added CONTEXT_PACK_MAP (6 categories →
+              official pack ids), _contextIndexCache, _findPackById(), async
+              _buildContextIndex() (getIndex per pack; missing pack → warn + skip;
+              dedupe + sort), sync getCompendiumContextNames(category), and
+              clearContextCache(). Phase 2 (settings + i18n): registered 7 world
+              Boolean toggles — contextMoves/contextDelveMoves/contextAssets ON,
+              contextTruths/contextDomains/contextThemes OFF, contextFoes ON (gates the
+              EXISTING foe block) — with en.json name/hint keys. Phase 3 (prompt):
+              added buildCompendiumContextBlock() (token-efficient "Available X: a, b…"
+              lines, names only), wired it into the buildSystemPrompt block array, and
+              gated buildFoeGuidance behind contextFoes (default ON → behaviour
+              preserved). Priming: a new fire-and-forget `ready` hook calls
+              _buildContextIndex(). Release: bumped 0.14.6 → 0.15.0 (MINOR — new
+              feature) across module.json, package.json and README banners.
+FILES TOUCHED (8 + 1 new test):
+  - scripts/ironsworn-controller.js  (+87 / -0 lines)
+  - scripts/core/settings.js         (+31 / -0 lines)
+  - lang/en.json                     (+28 / -0 lines)
+  - scripts/ai/prompt-builder.js     (+55 / -2 lines)
+  - scripts/hooks/foundry-hooks.js   (+15 / -0 lines)
+  - module.json, package.json        (version bump)
+  - README.md                        (version banners)
+  - test/compendium-context.test.mjs (NEW regression guard, 21 assertions)
+TESTS:        test/compendium-context.test.mjs — RESULT: 21 passed, 0 failed
+SUITE:        npm test -> PASS (31 files passed, 0 failed); load-smoke PASS; node --check PASS
+GATE:         APPROVED — the user explicitly approved this feature after the prior
+              INVESTIGATE+DESIGN proposal (which emitted the §6 GATE REQUEST) and
+              instructed implementation of all 3 phases in one task, knowingly
+              exceeding the ≤3-files / ≤50-lines limits. Recorded here per brief §6.
+ROLLBACK:     git revert <feature commit sha>  (single-commit revert on the
+              feature/multi-compendium-context branch).
+RESIDUAL RISK: Token growth when many categories are enabled (Assets = 82 names);
+              mitigated by names-only injection, per-category opt-in, and the
+              high-volume oracle packs being intentionally excluded. All new behaviour
+              is default-safe (new categories OFF by default except small high-value
+              Moves/Assets; foe behaviour unchanged) and degrades to "" when a pack is
+              absent or the cache is unprimed.

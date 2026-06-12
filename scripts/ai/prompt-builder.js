@@ -107,7 +107,12 @@ GUIDELINES:
   // session-chronicle prompt stay lean and unhinted.
   const contextBlock = extras.allowMoves ? buildContextSuggestionBlock() : "";
 
-  return [persona, rulesDigest, guidance, memoryBlock, ironswornBlock, journalBlock, contextBlock]
+  // (v0.15.0) Optional official-compendium NAME catalogues (Moves / Assets /
+  // Truths / Delve content), per the AI Compendium Context world settings.
+  // Reads a cached snapshot; returns "" when every category is OFF/unprimed.
+  const compendiumBlock = buildCompendiumContextBlock();
+
+  return [persona, rulesDigest, guidance, compendiumBlock, memoryBlock, ironswornBlock, journalBlock, contextBlock]
     .filter(Boolean)
     .join("\n\n") + taskAddendum;
 }
@@ -369,6 +374,51 @@ RULES FOR CREATING FOES:
   [[EFFECT: create_combat Hrafn the Oathbreaker formidable unique]].
 • When unsure, prefer the closest catalogue foe over inventing one. Reserve
   custom 'unique' foes for genuine story-defining antagonists, not routine mobs.`;
+  } catch (_) {
+    return "";
+  }
+}
+
+/**
+ * Build the optional AI COMPENDIUM CONTEXT block (v0.15.0).
+ *
+ * For each compendium category the GM has opted in (via the contextMoves /
+ * contextDelveMoves / contextAssets / contextTruths / contextDomains /
+ * contextThemes world settings), emit a single token-efficient line listing
+ * the official entry NAMES (never full text), e.g.:
+ *
+ *   Available Ironsworn Moves: Face Danger, Secure an Advantage, …
+ *
+ * Reads the synchronous snapshot primed by IronswornController._buildContextIndex()
+ * on `ready`, so it returns "" until the compendia are indexed (or when every
+ * category is OFF / unavailable). Purely additive and degrades gracefully.
+ *
+ * @returns {string} the catalogue block, or "" when nothing is enabled/primed.
+ */
+export function buildCompendiumContextBlock() {
+  try {
+    if (!IronswornController || typeof IronswornController.getCompendiumContextNames !== "function") return "";
+    // setting key → [enabled-by-default category, human label]
+    const CATEGORIES = [
+      ["contextMoves",      "moves",      "Ironsworn Moves"],
+      ["contextDelveMoves", "delvemoves", "Ironsworn Delve Moves"],
+      ["contextAssets",     "assets",     "Assets"],
+      ["contextTruths",     "truths",     "Setting Truths"],
+      ["contextDomains",    "domains",    "Delve Domains"],
+      ["contextThemes",     "themes",     "Delve Themes"]
+    ];
+    const lines = [];
+    for (const [setting, category, label] of CATEGORIES) {
+      if (Settings.get(setting) === false) continue;
+      const names = IronswornController.getCompendiumContextNames(category);
+      if (!Array.isArray(names) || names.length === 0) continue;
+      lines.push(`Available ${label}: ${names.join(", ")}`);
+    }
+    if (lines.length === 0) return "";
+    return `\
+OFFICIAL IRONSWORN COMPENDIUM REFERENCE — use these REAL names verbatim when
+they fit; do not invent alternatives for content that already exists below:
+${lines.join("\n")}`;
   } catch (_) {
     return "";
   }
@@ -705,7 +755,10 @@ supply directives here; those are applied automatically after dice rolls.`);
   // AI picks REGULAR foes from real compendium entries instead of inventing
   // names. Returns "" until the foe index is primed (on `ready`), so it simply
   // appears once the compendia are indexed.
-  if (allowEffects || allowTrackEffects) {
+  // (v0.15.0) Gated behind the contextFoes world setting (default ON, so
+  // existing behaviour is preserved). When a GM turns it OFF the catalogue is
+  // omitted and foe creation still works via on-demand compendium lookup.
+  if ((allowEffects || allowTrackEffects) && Settings.get("contextFoes") !== false) {
     const foeGuidance = buildFoeGuidance();
     if (foeGuidance) parts.push(foeGuidance);
   }

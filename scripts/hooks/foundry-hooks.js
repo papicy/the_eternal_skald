@@ -653,3 +653,18 @@ Hooks.once("ready", () => {
   } catch (_) { /* defensive */ }
 });
 
+// --- Compendium context index priming (v0.15.0) ---------------------
+// The AI Compendium Context feature embeds token-efficient NAME catalogues
+// (Moves / Assets / Truths / Delve content) into the system prompt. The
+// prompt builder is synchronous and reads a cached snapshot, so prime the
+// generic context index once the world is ready (when the compendia are
+// available). Fire-and-forget and fully defensive — if anything fails the
+// prompt simply omits the catalogues and everything else keeps working.
+Hooks.once("ready", () => {
+  try {
+    if (IronswornController?.isActive?.() && typeof IronswornController._buildContextIndex === "function") {
+      IronswornController._buildContextIndex().catch(() => { /* defensive — catalogues stay off */ });
+    }
+  } catch (_) { /* defensive */ }
+});
+

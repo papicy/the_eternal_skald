@@ -877,6 +877,37 @@ export const Settings = {
       },
       default: "auto"
     });
+
+    /* ---- AI Compendium Context (v0.15.0) -------------------------------
+     * Opt additional foundry-ironsworn compendia into the AI system prompt
+     * as token-efficient NAME catalogues (names only, never full text), so
+     * the Skald references real official Moves / Assets / Truths / Delve
+     * content instead of inventing them. Each is an independent world toggle;
+     * the prompt builder reads a cached snapshot and omits any category that
+     * is OFF or not yet primed. Purely additive and degrades gracefully.
+     * Defaults: Moves, Delve Moves, Assets and Foes ON (small, high value);
+     * Truths, Domains and Themes OFF. `contextFoes` gates the EXISTING foe
+     * catalogue block, preserving today's behaviour when left ON.
+     */
+    const CTX_DEFAULTS = {
+      contextMoves:      true,
+      contextDelveMoves: true,
+      contextAssets:     true,
+      contextTruths:     false,
+      contextDomains:    false,
+      contextThemes:     false,
+      contextFoes:       true
+    };
+    for (const [key, def] of Object.entries(CTX_DEFAULTS)) {
+      game.settings.register(MODULE_ID, key, {
+        name: game.i18n.localize(`ETERNAL_SKALD.settings.${key}.name`),
+        hint: game.i18n.localize(`ETERNAL_SKALD.settings.${key}.hint`),
+        scope: "world",
+        config: true,
+        type: Boolean,
+        default: def
+      });
+    }
   },
 
   /** Convenience accessor — returns undefined if the setting isn't ready. */
