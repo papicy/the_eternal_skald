@@ -765,3 +765,88 @@ RESIDUAL RISK: LOW. game.modules.get(id).version is the documented Foundry v13/v
               functional behaviour, setting, endpoint, or contract changed — only
               the source of a display string. Header doc-comments remain historical
               by design (documented above).
+
+
+
+---
+
+## 2026-06-12 11:42 EEST — Version-drift follow-up: stale doc & header version references
+
+**Agent:** Foundry Repository Steward
+**Category:** SAFE (documentation / inert comments only — no runtime behaviour)
+**Branch:** `fix/journey-mechanics`
+**Trigger:** User re-requested "fix versioning" after the prior runtime-version fix
+(commit `90129df`). A full-repository audit was run to find every remaining
+version reference that *presents itself as the current version* yet had gone stale.
+
+### Audit method
+`git grep -nE 'v?[0-9]+\.[0-9]+\.[0-9]+'` across the entire tree, then classified
+every hit as one of: (a) authoritative source, (b) historical/provenance (keep),
+or (c) stale current-version reference (fix).
+
+### Findings
+**Authoritative (correct):** `module.json` = `package.json` = **0.14.0**. ✅
+
+**Stale current-version references — FIXED:**
+1. `README.md:7` — the top-of-page badge **"Alpha / Development Version (v0.10.27)"**
+   advertised the wrong current version. → synced to **0.14.0**.
+2. Per-file header banner title lines pinned stale module versions that had drifted
+   independently:
+   - `scripts/eternal-skald.js`        → was `v0.10.30`
+   - `scripts/eternal-skald-server.mjs` → was `(v0.6.0)`
+   - `scripts/ironsworn-controller.js`  → was `(v0.10.21)`
+   - `scripts/browser-rag.js`           → was `(v0.6.0)`
+   **Decision reversed from prior entry.** The prior log treated these as
+   "last-edited-at" annotations and left them. Re-examination of `CHANGELOG.md`
+   (entry **[0.10.18]**, which explicitly "syncs the stale `v0.6.0` header comment
+   in `eternal-skald.js` to the real version") shows the project's own intent is for
+   these banners to reflect the module version — so leaving four different stale
+   values is the very drift we are eliminating. Rather than re-pin them (which would
+   only drift again), the module version token was **removed** from each banner title
+   line and replaced with a one-line note: *"(Module version lives in module.json —
+   the single source of truth.)"* The Foundry-engine marker `v14` on the client banner
+   is intentionally preserved (it is the VTT version, not the module version).
+
+**Intentionally NOT changed (historical / provenance — correct as-is):**
+- `CHANGELOG.md` release entries and compare-link tags.
+- `README.md` "**New in vX.Y.Z**" headlines and inline "(vX.Y.Z)" feature-provenance
+  notes; `module.json` `description` changelog HTML.
+- ~250 inline `(vX.Y.Z)` provenance comments throughout `scripts/**` — these document
+  *when a feature was introduced* and are accurate history, not the current version.
+
+**Reported, NOT auto-edited (point-in-time snapshot):**
+- `DEPLOYMENT.md` records a past deploy (Release tag `v0.10.38`, `version 0.10.38`,
+  commit `e3c4a90`, "20/20 test files", "55 files"). It is a historical deployment
+  receipt and is now stale on several axes (version, test-file count is 24, etc.).
+  It was **not** hand-edited because doing so would fabricate unverified deployment
+  facts (current `main` SHA, HTTP-200 checks, file counts). Recommendation: regenerate
+  it from real verification output at the next release rather than editing by hand.
+
+### Regression guards (test/version-consistency.test.mjs)
+Extended from 11 → **17 assertions**:
+- **[6]** the README "Alpha / Development Version (vX.Y.Z)" badge must equal
+  `module.json.version` (fails on future drift).
+- **[7]** none of the four source header banner title lines may pin a `vX.Y.Z`
+  module-version token (fails if anyone re-introduces one). `v14` is unaffected
+  because the guard inspects only the `THE ETERNAL SKALD …` title line for an
+  `X.Y.Z` triple.
+
+### Verification
+- `node --check` on all four edited scripts → PASS.
+- `node test/version-consistency.test.mjs` → 17 passed, 0 failed.
+- `node test/run-all.mjs` → **24 files, 0 failed**.
+- `node test/check-imports.mjs` → clean. `node test/load-smoke.mjs` → clean
+  (prints safe `v?` under the mock `game`; real version shows in live Foundry).
+
+### Residual risk / rollback
+Zero runtime risk — all edits are comments or Markdown prose. Rollback = revert the
+single commit. The new test guards will now catch any future re-introduction of a
+stale version literal in the README badge or the source header banners.
+
+### Recommendation (version management)
+There is still **no automated version-sync mechanism**; bumps are manual, which is the
+root cause of all drift seen so far. Two low-risk options were proposed to the user:
+(1) a tiny `npm run version:set <v>` script that writes `module.json` + `package.json`
++ the README badge from one command, and/or (2) rely on the now-expanded test guards
+(CI-friendly) to *fail loudly* on any drift. Runtime strings are already immune
+(derived from `module.json` since commit `90129df`).

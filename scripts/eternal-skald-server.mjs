@@ -1,5 +1,6 @@
 /* =====================================================================
- *  THE ETERNAL SKALD — Server-Side Hook (v0.6.0)
+ *  THE ETERNAL SKALD — Server-Side Hook
+ *  (Module version lives in module.json — the single source of truth.)
  *  ---------------------------------------------------------------------
  *
  *  Usage:
