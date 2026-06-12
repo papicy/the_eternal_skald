@@ -6,6 +6,7 @@ import { Memory, Chat, escapeHtml, formatMarkdown, stripDirectivesForDisplay, ca
 import { EntityLinker } from "../chronicle/entity-linking.js";
 import { JournalSystem } from "../chronicle/journal-system.js";
 import { OracleInterpreter } from "./generators.js";
+import { TokenControl } from "./token-control.js";
 import { IronswornController } from "../ironsworn-controller.js";
 // Call-time cross-imports (safe cycle): CombatController & RagBridge still live in
 // eternal-skald.js and are only referenced inside Integration methods (never module-eval).
@@ -393,6 +394,18 @@ export const Integration = {
       return name ? { kind: "create_character", name } : null;
     }
 
+    // ---- Token control (v0.16.0) ----
+    // [[EFFECT: move_token <token> to <x>,<y>]]   — absolute move (animated)
+    // [[EFFECT: move_token <token> <n> <direction>]] — relative move
+    // [[EFFECT: remove_token <token>]]            — delete from the scene
+    // The whole verb is captured verbatim; TokenControl re-parses & applies it,
+    // and the action is GATED by the default-OFF `tokenControlAiTriggers` setting.
+    if (firstWord === "move_token" || lc.startsWith("move token") ||
+        firstWord === "remove_token" || lc.startsWith("remove token") ||
+        firstWord === "delete_token" || lc.startsWith("delete token")) {
+      return { kind: "token_op", body };
+    }
+
     // "progress <Track Name> <+N | rank>" and its by-title alias
     // "mark_progress <Track Title> [+N | rank]" / 'mark_progress "Track Title"'.
     // mark_progress is meant for advancing a NAMED vow/journey from the
@@ -686,6 +699,19 @@ export const Integration = {
                 );
               }
             }
+          } else if (action === "token-undo") {
+            // (v0.16.0) Token Control panel — undo the last token operation.
+            const res = await TokenControl.undo();
+            if (!res?.ok) ui.notifications?.info(`${SKALD_NAME}: ${res?.error ?? "Nothing to undo."}`);
+          } else if (action === "token-remove-selected") {
+            // (v0.16.0) Remove the GM's currently selected token (player tokens
+            // still prompt for confirmation inside removeToken).
+            const res = await TokenControl.removeToken("selected");
+            if (!res?.ok && !res?.cancelled) ui.notifications?.info(`${SKALD_NAME}: ${res?.error ?? "Could not remove token."}`);
+          } else if (action === "token-nudge") {
+            // (v0.16.0) Nudge the selected token one grid square in a direction.
+            const res = await TokenControl.nudgeSelected(btn.dataset.dir);
+            if (!res?.ok) ui.notifications?.info(`${SKALD_NAME}: ${res?.error ?? "Could not move token."}`);
           } else if (action === "journal-accept" || action === "journal-reject") {
             // (v0.14.0) AI chronicle-edit proposal. The full job payload was
             // stashed in the message flags by JournalSystem._postProposalCard.
@@ -2615,6 +2641,26 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
               this._auditWrite("GRANT_XP", { name: eff.reason || "", boxes: eff.amount }, true, `+${r.amount} XP (${r.mode})`);
             } else {
               this._auditWrite("GRANT_XP", { name: eff.reason || "", boxes: eff.amount }, false, r?.error);
+            }
+            break;
+          }
+          case "token_op": {
+            // [[EFFECT: move_token/remove_token ...]] (v0.16.0). Routed to the
+            // dedicated TokenControl layer, which is itself gated by the
+            // default-OFF `tokenControlAiTriggers` setting and never removes a
+            // player-owned token without GM confirmation.
+            if (!TokenControl.aiTriggersEnabled()) {
+              this._auditWrite("TOKEN_OP", { name: eff.body }, false, "disabled (tokenControlAiTriggers=off)");
+              break;
+            }
+            r = await TokenControl.runFromDirective(eff.body);
+            if (r?.ok) {
+              applied.push(`token: ${eff.body}`);
+              this._auditWrite("TOKEN_OP", { name: eff.body }, true, r.type || "done");
+            } else if (r?.cancelled) {
+              this._auditWrite("TOKEN_OP", { name: eff.body }, false, "cancelled by GM");
+            } else {
+              this._auditWrite("TOKEN_OP", { name: eff.body }, false, r?.error);
             }
             break;
           }
