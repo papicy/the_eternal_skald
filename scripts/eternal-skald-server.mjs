@@ -1,5 +1,6 @@
 /* =====================================================================
- *  THE ETERNAL SKALD — Server-Side Hook (v0.6.0)
+ *  THE ETERNAL SKALD — Server-Side Hook
+ *  (Module version lives in module.json — the single source of truth.)
  *  ---------------------------------------------------------------------
  *
  *  Usage:
@@ -75,8 +76,21 @@
 
 import http  from "node:http";
 import https from "node:https";
+import { readFileSync } from "node:fs";
 
-const VERSION    = "0.6.0";
+// (fix — version drift) Derive the version from module.json (the single source of
+// truth) instead of a hardcoded literal that silently went stale (was "0.6.0"
+// while the module shipped 0.14.0). This value feeds the User-Agent header, the
+// /skald-api/health status payload, and the startup banner, so a stale literal
+// mis-reported the running version on all three. module.json sits one directory
+// above this file (repo-root). Falls back to "0" only if the manifest can't be
+// read — never a wrong, hardcoded number. Keeps the "zero npm dependencies"
+// contract (node:fs is a core module).
+const VERSION    = (() => {
+  try {
+    return JSON.parse(readFileSync(new URL("../module.json", import.meta.url), "utf8")).version || "0";
+  } catch { return "0"; }
+})();
 const PREFIX     = "/skald-api/";
 const MAX_BODY   = 2 * 1024 * 1024;   // 2 MiB inbound limit
 const MAX_RESP   = 8 * 1024 * 1024;   // 8 MiB upstream response limit
