@@ -1071,3 +1071,81 @@ RESIDUAL RISK: Low. Worst case (non-SSE upstream or older server hook) degrades 
               streamingEnabled=false or passing opts.buffered=true restores the exact
               prior buffered behaviour. No wire-contract or directive grammar change.
 ```
+
+
+
+
+
+### [2026-06-12 16:20 EEST] — P2 latency/reliability: AbortController request timeouts on all AI fetches
+AGENT:        Abacus.AI Agent (coding)
+TASK TYPE:    IMPLEMENT
+TOKEN BUDGET: 20,000  |  USED: ~17,000  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md + repository-map.md (+ SKILL.md)
+  [x] task classified: IMPLEMENT (budget 20,000)
+  [x] target file(s)+line(s) located (evidence below)
+  [x] <= 3 files / <= 50 changed lines per file (client.js +37/-4; settings.js +14/-0)
+  [x] additive & backwards-compatible
+  [x] no setting/flag/directive/i18n key removed or renamed (only a NEW setting added)
+  [x] no architectural boundary crossed (change stays inside ai/ + a core/ setting registration)
+  [x] regression test added (test/request-timeout.test.mjs)
+  [x] rollback plan defined
+
+PROBLEM:      P2 from the latency analysis. None of the AI fetches in ai/client.js
+              had a client-side timeout, so a stalled upstream could hang the UI
+              until the server hook's 60s ceiling — and on the direct browser→AI
+              path, potentially indefinitely.
+
+EVIDENCE (brief §4 format):
+  CLAIM:      All four fetch call sites issued fetch() with no AbortController/signal
+              and no timeout, relying solely on the server hook's 60s ceiling.
+  EVIDENCE:   scripts/ai/client.js:210,377,476,593 (pre-change) :: _directChat,
+              _directChatStream, chat, chatStream — fetch() calls without `signal`
+  CONFIDENCE: HIGH
+  BASIS:      read lines directly + grep "fetch(" before editing.
+
+  CLAIM:      The server-side timeout is 60s and lives only in the forwarder, not
+              the browser client, so the client had no independent bound.
+  EVIDENCE:   scripts/eternal-skald-server.mjs:97,207-212 :: TIMEOUT_MS / req.setTimeout
+  CONFIDENCE: HIGH
+  BASIS:      read lines directly during the P0/analysis pass.
+
+  CLAIM:      Settings.get returns undefined on a missing key (defensive), so a new
+              setting can be read with a numeric fallback without crashing.
+  EVIDENCE:   scripts/core/settings.js:869-872 :: get(key)
+  CONFIDENCE: HIGH
+  BASIS:      read lines directly.
+
+CHANGE:       (1) Added a `_fetch(resource, options)` helper in the Client object: it
+              reads the configurable timeout (seconds) from the new "requestTimeout"
+              world setting (fallback 30s = 30000ms), creates an AbortController, sets
+              a setTimeout that calls controller.abort(), passes `signal` into fetch(),
+              converts an AbortError into a clear "request timed out after Ns" message,
+              and ALWAYS clears the timer in a `finally` block. The timer is cleared the
+              instant fetch() resolves (response headers in), so an in-flight SSE token
+              stream or a long body download is never aborted mid-flight.
+              (2) Routed all four fetch call sites (_directChat, _directChatStream, chat,
+              chatStream) through `this._fetch(...)`. (3) Registered the new
+              "requestTimeout" Number setting (world-scoped, GM-only, default 30) in
+              core/settings.js. Existing per-site catch blocks treat a timeout exactly
+              like any network error, preserving auto-mode fallback behaviour.
+FILES TOUCHED (3; +2 manifests via official bump tool):
+  - scripts/ai/client.js               (+37 / -4 lines)
+  - scripts/core/settings.js           (+14 / -0 lines)
+  - test/request-timeout.test.mjs      (new file)
+  - docs/ai-maintenance-log.md         (this entry)
+  - module.json + package.json + README (0.14.3 → 0.14.4 via tools/bump-version.mjs, separate release commit)
+TESTS:        test/request-timeout.test.mjs — RESULT: 14 passed, 0 failed
+SUITE:        npm test -> PASS (27 files passed, 0 failed); load-smoke PASS
+GATE:         none — change stays inside the ai/ layer plus an additive core/ setting,
+              is backwards-compatible, and crosses no §5 boundary. No wire-contract,
+              directive grammar, or existing setting changed.
+ROLLBACK:     git revert <feature commit sha>  (single-commit revert of the timeout
+              change; version bump is its own separate commit).
+RESIDUAL RISK: Low. If the setting is unset/invalid the helper falls back to 30s. The
+              timer guards only the connection/headers phase, so legitimate long
+              streams are unaffected. A timeout surfaces as a normal network-style
+              error and (in auto mode) falls back to the direct path, exactly as a
+              connection failure already did.
+```
