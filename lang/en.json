@@ -251,6 +251,34 @@
       "ragDebugMode": {
         "name": "Memory Debug Logging",
         "hint": "Print verbose semantic-memory (RAG) diagnostics to the browser console (F12): model load, embedding, indexing and search activity. Useful for troubleshooting. Defaults to OFF."
+      },
+      "contextMoves": {
+        "name": "AI Context: Ironsworn Moves",
+        "hint": "Inject the names of the official Ironsworn Moves compendium into the AI prompt (names only, token-efficient) so the Skald references real moves. Defaults to ON."
+      },
+      "contextDelveMoves": {
+        "name": "AI Context: Delve Moves",
+        "hint": "Inject the names of the official Ironsworn: Delve Moves compendium into the AI prompt (names only). Defaults to ON."
+      },
+      "contextAssets": {
+        "name": "AI Context: Assets",
+        "hint": "Inject the names of the official Ironsworn Assets compendium into the AI prompt (names only) so the Skald can reference real assets. Defaults to ON."
+      },
+      "contextTruths": {
+        "name": "AI Context: Setting Truths",
+        "hint": "Inject the titles of the official Ironsworn Setting Truths compendium into the AI prompt (names only) for worldbuilding flavour. Defaults to OFF."
+      },
+      "contextDomains": {
+        "name": "AI Context: Delve Domains",
+        "hint": "Inject the names of the official Ironsworn: Delve Domains compendium into the AI prompt (names only). Defaults to OFF."
+      },
+      "contextThemes": {
+        "name": "AI Context: Delve Themes",
+        "hint": "Inject the names of the official Ironsworn: Delve Themes compendium into the AI prompt (names only). Defaults to OFF."
+      },
+      "contextFoes": {
+        "name": "AI Context: Foe Catalogue",
+        "hint": "Embed the official foe catalogue (grouped by rank) into the AI prompt so the Skald draws regular foes from real compendium entries. This controls the existing foe-catalogue behaviour. Defaults to ON."
       }
     },
     "keybindings": {

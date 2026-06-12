@@ -2833,6 +2833,93 @@ export const IronswornController = {
     return out;
   },
 
+  /* =================================================================
+   *  GENERIC COMPENDIUM CONTEXT (v0.15.0)
+   *  Token-efficient name catalogues from arbitrary foundry-ironsworn
+   *  packs (moves, assets, truths, domains, themes …) for the AI prompt.
+   *  Generalises the foe-cache pattern: async index → in-memory cache →
+   *  sync reader. Each category is opt-in via a world setting; the prompt
+   *  builder reads the cached snapshot synchronously and degrades to "".
+   * ================================================================= */
+
+  /** category → official pack id. Bare collection segments also match. */
+  CONTEXT_PACK_MAP: Object.freeze({
+    moves:      "foundry-ironsworn.ironswornmoves",
+    delvemoves: "foundry-ironsworn.ironsworndelvemoves",
+    assets:     "foundry-ironsworn.ironswornassets",
+    truths:     "foundry-ironsworn.ironsworntruths",
+    domains:    "foundry-ironsworn.ironsworndelvedomains",
+    themes:     "foundry-ironsworn.ironsworndelvethemes"
+  }),
+
+  /** In-memory cache: { category: [name, …] }. Cleared on world reload. */
+  _contextIndexCache: null,
+
+  /** Drop the cached context index (e.g. after toggling a category). */
+  clearContextCache() { this._contextIndexCache = null; dbg("clearContextCache: cleared"); },
+
+  /** Find a loaded pack by its mapped id, tolerant of the bare segment. */
+  _findPackById(packId) {
+    const want = String(packId ?? "").toLowerCase();
+    const seg = want.split(".").pop();
+    for (const pack of (game?.packs ?? [])) {
+      const id = String(pack.metadata?.id ?? pack.collection ?? "").toLowerCase();
+      if (id === want || id.split(".").pop() === seg) return pack;
+    }
+    return null;
+  },
+
+  /**
+   * Build (and cache) name lists for every category in CONTEXT_PACK_MAP.
+   * Fully defensive: a missing pack logs a warning and is skipped, so the
+   * rest of the catalogue still loads. De-duplicated and name-sorted.
+   *
+   * @returns {Promise<Object<string,string[]>>}
+   */
+  async _buildContextIndex() {
+    if (this._contextIndexCache && typeof this._contextIndexCache === "object") return this._contextIndexCache;
+    const out = {};
+    for (const [category, packId] of Object.entries(this.CONTEXT_PACK_MAP)) {
+      const pack = this._findPackById(packId);
+      if (!pack) { warn(`_buildContextIndex: pack "${packId}" not found — skipping ${category}`); out[category] = []; continue; }
+      try {
+        const index = await pack.getIndex();
+        const seen = new Set();
+        const names = [];
+        for (const e of index) {
+          const name = String(e?.name ?? "").trim();
+          const key = name.toLowerCase();
+          if (!name || seen.has(key)) continue;
+          seen.add(key);
+          names.push(name);
+        }
+        names.sort((a, b) => a.localeCompare(b));
+        out[category] = names;
+      } catch (e) {
+        warn(`_buildContextIndex: failed to index "${packId}":`, e?.message ?? e);
+        out[category] = [];
+      }
+    }
+    this._contextIndexCache = out;
+    dbg(`_buildContextIndex: indexed ${Object.values(out).reduce((n, a) => n + a.length, 0)} entries across ${Object.keys(out).length} categories`);
+    return out;
+  },
+
+  /**
+   * Synchronous read of a cached category's names. Returns [] until
+   * {@link _buildContextIndex} has primed the cache (on `ready`), so the
+   * prompt builder degrades gracefully.
+   *
+   * @param {string} category one of CONTEXT_PACK_MAP's keys
+   * @returns {string[]}
+   */
+  getCompendiumContextNames(category) {
+    const c = this._contextIndexCache;
+    if (!c || typeof c !== "object") return [];
+    const list = c[category];
+    return Array.isArray(list) ? list.slice() : [];
+  },
+
   /**
    * True iff `enemyName` confidently matches a foe in the OFFICIAL foe
    * compendia (the two packs above). Used for the optional "this regular foe
