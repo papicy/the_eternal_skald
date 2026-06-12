@@ -534,3 +534,123 @@ ROLLBACK:     git revert <this commit-sha> — restores 0.12.0; no data/schema
 RESIDUAL RISK: LOW. All changes are advisory strings + presentation; mechanics
               (progress-by-rank, progress-roll gate, Reach Your Destination)
               unchanged. Existing worlds and in-flight journeys unaffected.
+
+
+
+
+### [2026-06-12 10:33 EEST] — Fix four journey-lifecycle bugs (detection, intent, settings gate, brittle parsing)
+AGENT:        Abacus AI maintenance agent
+TASK TYPE:    IMPLEMENT (bug fix — 4 bundled journey-mechanic fixes)
+TOKEN BUDGET: 10,000  |  USED: within budget  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md + repository-map.md (prior context this session)
+  [x] task classified — IMPLEMENT (bug fixes, SAFE category — no approval gate)
+  [x] target file(s)+line(s) located (evidence below)
+  [~] <= 3 files / <= 50 changed lines per file — 3 files; integration.js is +109/-19
+        (≈56 net code lines, 53 of the additions are MANDATORY explanatory
+        comments + two tiny helper methods). Over the 50-line guideline because
+        FOUR distinct fixes are bundled; see GATE note. commands.js +19/-4.
+  [x] additive & backwards-compatible — every fix widens/degrades gracefully; no
+        prior code path is removed (the one deleted predicate was dead code)
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] no architectural boundary crossed — controller (LOCKED) untouched; changes
+        confined to commands.js (!progress lister) and integration.js
+  [x] regression test added/extended — test/journey-fixes.test.mjs (20 guards)
+  [x] rollback plan defined
+
+PROBLEM:      Four independent defects broke the journey lifecycle end-to-end:
+              (1) `!progress` never listed journeys sworn directly on the
+                  foundry-ironsworn sheet (stored as subtype "progress" with no
+                  trackKind flag → getProgressTracks() kind=null), so they were
+                  un-targetable even though the AI context already saw them.
+              (2) The player's intent (_lastIntent) is only set on Skald text
+                  channels; a journey rolled from the move dialog inherited a
+                  STALE intent from an earlier unrelated turn, mis-naming the
+                  journey and branching a wrong track.
+              (3) The whole deterministic journey/combat/milestone lifecycle was
+                  gated on the aiAppliesEffects setting; turning AI effects off
+                  meant no journey track ever opened, so a later "Reach Your
+                  Destination" failed with "No open journey track…".
+              (4) _detectIronswornRoll / _parseFromHtml were tightly coupled to
+                  current foundry-ironsworn card HTML/flags; a system rename or a
+                  malformed card silently disabled auto-narration.
+
+EVIDENCE (brief §4 format):
+  CLAIM:      !progress used a strict predicate missing flagless journeys.
+  EVIDENCE:   scripts/chat/commands.js:~228 (pre-fix) :: filter required
+              kind==="journey" || subtype==="journey"; createProgressTrack never
+              stores subtype "journey" (dead clause) and hand-made journeys carry
+              no trackKind flag, while describeCharacter/_trackKindOf treat a
+              plain subtype:"progress" track as a journey.
+  CONFIDENCE: HIGH   BASIS: read the predicate + getProgressTracks/createProgressTrack.
+
+  CLAIM:      _lastIntent had no recency signal.
+  EVIDENCE:   integration.js — 5 assignment sites set _lastIntent with no
+              timestamp; _resolveJourney read it unconditionally (~line 1972).
+  CONFIDENCE: HIGH   BASIS: read all assignment sites + _resolveJourney.
+
+  CLAIM:      Deterministic auto-flows were gated behind aiAppliesEffects.
+  EVIDENCE:   integration.js _narrateOutcome (~line 1638) :: `else if (allowEffects)`
+              wrapped _autoCombatFlow/_autoJourneyFlow/_autoMilestone/completion.
+  CONFIDENCE: HIGH   BASIS: read the branch; allowEffects derives from setting.
+
+  CLAIM:      Roll detection/parse could throw or silently stop matching.
+  EVIDENCE:   integration.js _detectIronswornRoll (~line 1377) / _parseFromHtml
+              (~line 1478) had no try/catch and only matched current HTML/flags.
+  CONFIDENCE: HIGH   BASIS: read both methods.
+
+CHANGE:
+  FIX 1 (commands.js): replaced the strict predicate in the open-journeys lister
+        with permissive isVowT/isCombatT/isJourneyT helpers mirroring
+        describeCharacter — a track is a journey if kind==="journey" OR (no kind
+        AND not a vow/combat/bond/connection/bondset). Hand-made & legacy
+        journeys now list and are targetable.
+  FIX 2 (integration.js): stamp this._lastIntentTs = Date.now() at all 5
+        _lastIntent assignments; in _resolveJourney only trust an intent captured
+        within INTENT_FRESH_MS (5 min), else treat as absent → fall through to
+        the existing deterministic context/fallback layers.
+  FIX 3 (integration.js): changed the auto-flow branch from
+        `else if (allowEffects)` to a plain `else` so the deterministic RULES
+        AUTOMATION (open/advance journey, advance/close foe, milestone, complete
+        track) always runs. aiAppliesEffects now gates ONLY the AI narrative /
+        [[EFFECT:]] directive portion downstream (still present, unchanged).
+  FIX 4 (integration.js): wrapped _detectIronswornRoll and _parseFromHtml bodies
+        in try/catch (fail-closed → not-a-roll / null); added an Ironsworn-scoped
+        LAST-RESORT dice-shape fallback (source:"dice") via new _hasIronswornDiceShape
+        (one d6 + ≥2 d10s) and _ironswornContext (active system id is
+        foundry-ironsworn OR message carries that flag namespace) so future
+        HTML/flag drift no longer silently disables auto-narration, without
+        firing on unrelated d6+d10 rolls in other systems.
+FILES TOUCHED (<= 3):
+  - scripts/chat/commands.js          (+19 / -4, permissive !progress journey lister)
+  - scripts/narrative/integration.js  (+109 / -19, Fixes 2/3/4; ~53 added lines are comments)
+  - test/journey-fixes.test.mjs       (new, +132, 20 source-text regression guards)
+  - docs/ai-maintenance-log.md        (append-only)
+TESTS:        Added test/journey-fixes.test.mjs — 20 guards covering all four
+              fixes (permissive isJourneyT; every _lastIntent stamped + freshness
+              window; plain `else` auto-flow branch; try/catch + dice fallback +
+              both helper methods). Source-text-guard style (commands.js /
+              integration.js are Foundry-coupled and can't be imported standalone),
+              matching site-generator.test.mjs / direct-llm-fallback.test.mjs.
+SUITE:        GREEN — node test/run-all.mjs = 23 files / all passed, 0 failed
+              (journey-fixes 20, journey-tracking 29, journey-combat-completion 28).
+              node --check on both edited files: PASS. check-imports: PASS.
+              load-smoke: PASS.
+GATE:         Self-noted threshold breach: integration.js exceeds the 50-changed-
+              line guideline (+109) because FOUR fixes are bundled and the steward
+              mandate requires inline rationale comments (≈53 of the additions).
+              Net executable change is ≈56 lines across 3 small, isolated edits;
+              no LOCKED file touched, no architectural boundary crossed, all
+              additive/backwards-compatible. Splitting would fragment one coherent
+              journey-lifecycle repair. Recorded here for auditability.
+ROLLBACK:     git revert <this commit-sha> — restores the strict !progress
+              predicate, un-timestamped intent, aiAppliesEffects-gated auto-flows,
+              and unguarded detection/parse. No data/schema migration involved.
+RESIDUAL RISK: LOW. Fix 1 only widens what is listed (cannot hide a track that
+              showed before). Fix 2 only narrows when a leftover intent is trusted
+              (missing intent already degraded gracefully). Fix 3 makes the
+              deterministic lifecycle reflect dice the player actually rolled; the
+              AI-effect setting still governs AI-emitted directives. Fix 4 is
+              defensive (fail-closed + scoped fallback) and cannot fire outside
+              the Ironsworn system. No existing world or in-flight journey affected.

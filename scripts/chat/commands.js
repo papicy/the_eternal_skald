@@ -226,9 +226,24 @@ export const Commands = {
 
     // Helper: list this actor's OPEN journey tracks (with progress) as a card.
     const listOpenJourneys = () => {
+      // (fix — inconsistent journey detection) Previously this used a STRICT
+      // predicate (kind === "journey" || subtype === "journey") that missed
+      // journeys sworn directly on the foundry-ironsworn sheet: those are stored
+      // as subtype "progress" with NO trackKind flag, so getProgressTracks()
+      // reports kind=null and they never appeared in !progress — even though the
+      // AI context (describeCharacter) and _newestOpenTrackItem already treat
+      // them as journeys. (The subtype === "journey" clause was also dead code,
+      // since createProgressTrack never stores that subtype.) Mirror the SAME
+      // permissive classification describeCharacter uses so hand-made / legacy
+      // journeys are listed and targetable here too.
+      const isVowT     = t => t.kind === "vow" || t.subtype === "vow";
+      const isCombatT  = t => t.kind === "combat" || t.subtype === "foe";
+      const isJourneyT = t =>
+        (t.kind === "journey") ||
+        (!t.kind && !isVowT(t) && !isCombatT(t)
+         && t.subtype !== "bond" && t.subtype !== "connection" && t.subtype !== "bondset");
       const journeys = (IronswornController.getProgressTracks(actor) || []).filter(t => {
-        const isJourney = t.kind === "journey" || String(t.subtype || "").toLowerCase() === "journey";
-        return isJourney && !t.completed;
+        return isJourneyT(t) && !t.completed;
       });
       if (!journeys.length) {
         return Chat.postSkald(
