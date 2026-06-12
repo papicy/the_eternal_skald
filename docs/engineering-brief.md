@@ -67,10 +67,10 @@ output + edits) for that task. Budgets are hard ceilings, not targets.
 
 | Task Type   | Definition | Token Budget | File Reads Allowed |
 |-------------|------------|-------------:|--------------------|
-| `INVESTIGATE` | Read/understand code, locate a symbol, answer a question. **No edits.** | **10,000** | Targeted only |
-| `IMPLEMENT`   | Write a bug fix or a small additive feature. | **20,000** | Targeted only |
-| `TEST`        | Add/adjust a regression test under `test/`. | **15,000** | Targeted only |
-| `DOCUMENT`    | Edit Markdown / comments only. No code logic. | **8,000** | Targeted only |
+| `INVESTIGATE` | Read/understand code, locate a symbol, answer a question. **No edits.** | **1,000** | Targeted only |
+| `IMPLEMENT`   | Write a bug fix or a small additive feature. | **5,000** | Targeted only |
+| `TEST`        | Add/adjust a regression test under `test/`. | **1,000** | Targeted only |
+| `DOCUMENT`    | Edit Markdown / comments only. No code logic. | **1,000** | Targeted only |
 | `REFACTOR`    | Restructure code without behaviour change. | **REQUIRES APPROVAL GATE (§6)** | — |
 
 ### 2.1 Budget Rules
