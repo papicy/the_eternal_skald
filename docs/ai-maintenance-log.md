@@ -998,3 +998,76 @@ RESIDUAL RISK: Low. keep-alive sockets are bounded (maxSockets 64, 30s idle) and
               Node transparently replaces stale sockets; no behavioural/contract
               change. Worst case is identical to prior per-call connection behaviour.
 ```
+
+
+
+### [2026-06-12 15:00 EEST] — P1 latency: make SSE streaming the default chat transport
+AGENT:        Abacus.AI Agent (coding)
+TASK TYPE:    IMPLEMENT
+TOKEN BUDGET: 20,000  |  USED: ~16,000  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md + repository-map.md (+ SKILL.md)
+  [x] task classified: IMPLEMENT (budget 20,000)
+  [x] target file(s)+line(s) located (evidence below)
+  [x] <= 3 files / <= 50 changed lines per file (client.js +16/-1)
+  [x] additive & backwards-compatible
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] no architectural boundary crossed (change stays inside ai/; no Foundry writes)
+  [x] regression test added (test/streaming-default.test.mjs)
+  [x] rollback plan defined
+
+PROBLEM:      P1 from the latency analysis. Client.chat() always used the buffered
+              transport (stream:false), so time-to-first-token equalled
+              time-to-last-token for every non-rendering caller, even though a
+              fully-working SSE path (chatStream) already existed.
+
+EVIDENCE (brief §4 format):
+  CLAIM:      chat() built a buffered (stream:false) payload and never used the SSE path.
+  EVIDENCE:   scripts/ai/client.js:435-441 (pre-change) :: chat (payload stream:false)
+  CONFIDENCE: HIGH
+  BASIS:      read lines directly before editing.
+
+  CLAIM:      A working SSE transport (chatStream → _consumeStreamingResponse) already
+              exists and returns the full reply text even with no render handlers,
+              degrading to buffered JSON for non-SSE responses.
+  EVIDENCE:   scripts/ai/client.js:539-621 (chatStream); 267-360 (_consumeStreamingResponse)
+  CONFIDENCE: HIGH
+  BASIS:      read lines directly.
+
+  CLAIM:      The streamingEnabled world setting already exists and defaults to true,
+              so it is the natural backwards-compat switch.
+  EVIDENCE:   scripts/core/settings.js:59-66 :: register(MODULE_ID,"streamingEnabled")
+  CONFIDENCE: HIGH
+  BASIS:      read lines directly.
+
+  CLAIM:      chatStream() did NOT honour a per-call pinned model (opts.model), unlike
+              chat(), which would have dropped the map-vision multimodal model on delegation.
+  EVIDENCE:   scripts/ai/client.js:542 (pre-change) vs chat() :: model resolution
+  CONFIDENCE: HIGH
+  BASIS:      read lines directly; map-vision.js:654 passes { model, ... } to Client.chat.
+
+CHANGE:       (1) In chat(): after input validation, if streamingEnabled !== false and
+              opts.buffered !== true, `return this.chatStream(messages, opts, {})`. The
+              return contract (Promise<string> of the full reply) is unchanged because
+              chatStream returns the accumulated text and degrades to buffered JSON for
+              non-SSE responses. The original buffered payload/path remains intact for
+              streamingEnabled=false or opts.buffered=true.
+              (2) In chatStream(): resolve model as `opts.model || Settings.get("modelName")
+              || DEFAULT_MODEL` to match chat(), so delegated vision calls keep their model.
+FILES TOUCHED (3; +2 manifests via official bump tool):
+  - scripts/ai/client.js               (+16 / -1 lines)
+  - test/streaming-default.test.mjs    (+118 / -0 lines, new file)
+  - docs/ai-maintenance-log.md         (this entry)
+  - module.json + package.json         (0.14.2 → 0.14.3 via tools/bump-version.mjs, separate release commit)
+TESTS:        test/streaming-default.test.mjs — RESULT: 13 passed, 0 failed
+SUITE:        npm test -> PASS (26 files passed, 0 failed); load-smoke PASS
+GATE:         none — change stays inside the ai/ layer, is additive, gated behind an
+              existing default-on setting, and crosses no §5 boundary.
+ROLLBACK:     git revert <feature commit sha>  (single-commit revert of the streaming-
+              default change; version bump is its own separate commit).
+RESIDUAL RISK: Low. Worst case (non-SSE upstream or older server hook) degrades to the
+              same buffered JSON result via _consumeStreamingResponse. Setting
+              streamingEnabled=false or passing opts.buffered=true restores the exact
+              prior buffered behaviour. No wire-contract or directive grammar change.
+```

@@ -432,6 +432,18 @@ export const Client = {
       throw new Error("Cannot call ChatLLM with empty messages.");
     }
 
+    // (v0.14.3) P1 — Streaming is now the DEFAULT transport. Unless the world
+    // disabled it (streamingEnabled === false) or a caller explicitly opts out
+    // (opts.buffered === true), route buffered callers through the SSE path so
+    // the upstream LLM starts emitting tokens immediately → lower
+    // time-to-first-token. chatStream() returns the full reply text when no
+    // render handlers are supplied and transparently degrades to buffered JSON
+    // if the server returns a non-SSE response, so the return contract — a
+    // Promise<string> of the assistant reply — is identical for every caller.
+    if (Settings.get("streamingEnabled") !== false && opts.buffered !== true) {
+      return this.chatStream(messages, opts, {});
+    }
+
     const payload = {
       model,
       messages,
@@ -539,7 +551,10 @@ export const Client = {
   async chatStream(messages, opts = {}, handlers = {}) {
     const { onChunk, onDone, onError } = handlers;
     const apiKey   = Settings.get("apiKey");
-    const model    = Settings.get("modelName")   || DEFAULT_MODEL;
+    // (v0.14.3) Honour a per-call pinned model (opts.model) exactly as chat()
+    // does, so callers that delegate here (e.g. the map-vision scout) keep
+    // their multimodal model instead of silently falling back to the default.
+    const model    = opts.model || Settings.get("modelName") || DEFAULT_MODEL;
     const endpoint = Settings.get("apiEndpoint") || DEFAULT_ENDPOINT;
 
     if (!apiKey) {
