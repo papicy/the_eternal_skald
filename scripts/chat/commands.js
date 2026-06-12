@@ -8,6 +8,7 @@ import { Memory, Chat, escapeHtml, formatMarkdown, parseMetadata } from "./displ
 import { runConversation, CombatController, SceneContext,
          RagProgress } from "../eternal-skald.js";
 import { Integration } from "../narrative/integration.js";
+import { TokenControl } from "../narrative/token-control.js";
 import { NpcDialogue, OracleInterpreter, LoreGenerator } from "../narrative/generators.js";
 import { MapVision } from "../vision/map-vision.js";
 import { JournalSystem } from "../chronicle/journal-system.js";
@@ -323,6 +324,17 @@ export const Commands = {
   async skald(args) {
     if (!args) {
       return Chat.postSystem(game.i18n.localize("ETERNAL_SKALD.errors.emptySkald"));
+    }
+
+    // ── Token control subcommands (v0.16.0) ────────────────────────────
+    // `!skald move <token> to <x,y>`, `!skald move <token> <n> <dir>`,
+    // `!skald remove <token>`, `!skald undo`. Only fires when the GM has
+    // enabled Token Control AND is the GM — otherwise it returns false and
+    // ordinary narration proceeds, so player input is never shadowed.
+    try {
+      if (await TokenControl.handleChatSubcommand(args)) return;
+    } catch (e) {
+      console.warn(LOG_PREFIX, "[skald] token subcommand failed — falling back to narration", e);
     }
 
     // ── Player move declaration (v0.10.33) ──────────────────────────────

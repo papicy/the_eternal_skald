@@ -279,6 +279,18 @@
       "contextFoes": {
         "name": "AI Context: Foe Catalogue",
         "hint": "Embed the official foe catalogue (grouped by rank) into the AI prompt so the Skald draws regular foes from real compendium entries. This controls the existing foe-catalogue behaviour. Defaults to ON."
+      },
+      "tokenControlEnabled": {
+        "name": "Token Control: Enable",
+        "hint": "Allow the Skald (GM only) to move and remove tokens on the scene, with a 10-step undo. Enables the chat subcommands (!skald move / remove / undo) and the Skald-card buttons. Player-owned tokens always require a confirmation pop-up before removal. Defaults to OFF."
+      },
+      "tokenControlAiTriggers": {
+        "name": "Token Control: AI Narrative Triggers",
+        "hint": "Also let the AI move or remove tokens automatically from the narrative via [[EFFECT: move_token ...]] / [[EFFECT: remove_token ...]] directives. Requires Token Control to be enabled. The AI may never remove a player-owned token without GM confirmation. Defaults to OFF."
+      },
+      "tokenMoveDuration": {
+        "name": "Token Control: Move Animation (ms)",
+        "hint": "Duration in milliseconds of the smooth token-move animation. Lower values are snappier; 0 is effectively instant. Useful for tuning or troubleshooting. Default: 1000."
       }
     },
     "keybindings": {

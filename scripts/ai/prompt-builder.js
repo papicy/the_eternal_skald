@@ -708,6 +708,24 @@ never use a move name ("Fulfill Your Vow" / "Reach Your Destination") as a
 track title.`);
   }
 
+  // (v0.16.0) Token control — only advertised when BOTH the feature and its
+  // AI-trigger opt-in are ON (default OFF), so the AI never emits directives
+  // the GM has not enabled. Defensive: a missing Settings API simply skips it.
+  let _aiTokens = false;
+  try { _aiTokens = Settings.get("tokenControlEnabled") === true && Settings.get("tokenControlAiTriggers") === true; } catch (_) {}
+  if (allowEffects && _aiTokens) {
+    parts.push(`\
+TOKEN CONTROL (move/remove tokens on the battle map, when the fiction clearly
+calls for it — a foe flees, a creature is slain and leaves the field, an ally
+repositions). Use the token's display NAME exactly:
+   [[EFFECT: move_token <Token Name> to <x>,<y>]]   (absolute pixel position)
+   [[EFFECT: move_token <Token Name> <n> <direction>]]  (e.g. "5 feet north";
+        directions: north/south/east/west and the diagonals ne/nw/se/sw)
+   [[EFFECT: remove_token <Token Name>]]            (delete it from the scene)
+Use sparingly and only for non-player tokens; removing a PLAYER's token always
+asks the GM to confirm first. Never move or remove a token without fictional cause.`);
+  }
+
   // (v0.10.6) Track-management directives for the CONVERSATIONAL channels
   // (!skald / !scene / !combat narration), where there is no dice roll to
   // hang effects off. This is a focused, narration-framed counterpart to the
