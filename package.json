@@ -1,6 +1,6 @@
 {
   "name": "the-eternal-skald",
-  "version": "0.14.5",
+  "version": "0.14.6",
   "description": "An AI-powered storyteller, oracle interpreter, and tactical enemy controller for Ironsworn in Foundry VTT.",
   "private": true,
   "type": "module",
