@@ -1363,3 +1363,44 @@ ROLLBACK:     git revert <feature commit sha>  (single-commit revert).
 RESIDUAL RISK: None identified. The Roll change drops an option that Foundry already
               ignores (evaluate is async by default), so dice behaviour is unchanged;
               the rest is comment-only. Full suite + load-smoke confirm no regression.
+
+
+---
+
+### [2026-06-12 14:40 EEST] — Release: bump version 0.14.6 → 0.14.7 (PATCH)
+AGENT:        Abacus AI Agent (SkaldCoder maintenance)
+TASK TYPE:    DOCUMENT (release/version metadata only — no code logic)
+TOKEN BUDGET: 1,000 | WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] task classified (version bump only)
+  [x] target file(s) located (module.json, package.json, README.md)
+  [x] <= 3 files / <= 50 changed lines per file
+  [x] additive & backwards-compatible (metadata only)
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] no architectural boundary crossed
+  [x] regression test exists (test/version-consistency.test.mjs) and passes
+  [x] rollback plan defined
+
+PROBLEM:      The preceding maintenance fixes (deprecated Roll#evaluate
+              modernisation + stale-comment cleanup, this same branch) warrant a
+              PATCH release per SemVer — no new features, no breaking changes.
+
+CHANGE:       Bumped the version 0.14.6 → 0.14.7 via tools/bump-version.mjs
+              (--no-commit) which sets the authoritative "version" field in both
+              module.json and package.json in lock-step. Manually synced the four
+              README version references the version-consistency guard enforces
+              (alpha badge, server-hook banner, /skald-api/health example,
+              troubleshooting console line), since the bump tool does not touch
+              README.
+FILES TOUCHED (3):
+  - module.json   ("version": 0.14.6 → 0.14.7)
+  - package.json  ("version": 0.14.6 → 0.14.7)
+  - README.md     (4 illustrative version references 0.14.6 → 0.14.7)
+TESTS:        test/version-consistency.test.mjs — RESULT: 17 passed, 0 failed
+SUITE:        npm test -> PASS (30 files passed, 0 failed)
+GATE:         none — release metadata only; no code, setting, directive, or wire
+              contract changed.
+ROLLBACK:     git revert <commit-sha>  (single-commit revert).
+RESIDUAL RISK: None identified. Version strings only; the consistency guard locks
+              module.json/package.json/README agreement.
