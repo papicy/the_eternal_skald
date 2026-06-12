@@ -85,5 +85,41 @@ eq(packageJson.version, VERSION, "[1] package.json version matches module.json")
      "[5] README /skald-api/health example shows the current version");
 }
 
+/* --------------------------------------------------------------------- *
+ * [6] README "Alpha / Development Version (vX.Y.Z)" badge must track the
+ *     current module version (it presents itself as the current version,
+ *     so a stale literal here is a real inconsistency — not history).
+ * --------------------------------------------------------------------- */
+{
+  const readme = read("README.md");
+  const m = readme.match(/Alpha \/ Development Version \(v([0-9]+\.[0-9]+\.[0-9]+)\)/);
+  ok(!!m, "[6] README has an 'Alpha / Development Version (vX.Y.Z)' badge");
+  if (m) eq(m[1], VERSION, "[6] README alpha-version badge matches module.json");
+}
+
+/* --------------------------------------------------------------------- *
+ * [7] Per-file header banners must NOT pin a hardcoded module version.
+ *     These decorative banners historically drifted (v0.6.0 / v0.10.21 /
+ *     v0.10.30 while the module shipped 0.14.0). They are now version-
+ *     agnostic; module.json is the single source of truth. This guard
+ *     fails if anyone re-introduces a "vX.Y.Z" token on the title line.
+ * --------------------------------------------------------------------- */
+{
+  const headerFiles = [
+    ["scripts", "eternal-skald.js"],
+    ["scripts", "eternal-skald-server.mjs"],
+    ["scripts", "ironsworn-controller.js"],
+    ["scripts", "browser-rag.js"],
+  ];
+  for (const parts of headerFiles) {
+    const src = read(...parts);
+    // Inspect only the banner title line ("THE ETERNAL SKALD ..."), where the
+    // stale module version used to live. "v14" (Foundry VTT version) is fine.
+    const titleLine = (src.split("\n").find(l => /THE ETERNAL SKALD/.test(l)) || "");
+    ok(!/v[0-9]+\.[0-9]+\.[0-9]+/.test(titleLine),
+       `[7] header banner in ${parts.join("/")} pins no stale module version`);
+  }
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
