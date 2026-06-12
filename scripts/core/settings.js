@@ -908,6 +908,39 @@ export const Settings = {
         default: def
       });
     }
+
+    /* ----------------------------------------------------------------
+     * Token control (v0.16.0) — move / remove / undo of scene tokens.
+     * The WHOLE capability is OFF by default (brief invariant #1). AI
+     * narrative-driven triggers are a second, separate opt-in so a GM can
+     * enable manual control without granting the AI write access. The move
+     * duration is exposed so a GM can tune or troubleshoot the animation.
+     * ---------------------------------------------------------------- */
+    game.settings.register(MODULE_ID, "tokenControlEnabled", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.tokenControlEnabled.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.tokenControlEnabled.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: false
+    });
+    game.settings.register(MODULE_ID, "tokenControlAiTriggers", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.tokenControlAiTriggers.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.tokenControlAiTriggers.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: false
+    });
+    game.settings.register(MODULE_ID, "tokenMoveDuration", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.tokenMoveDuration.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.tokenMoveDuration.hint"),
+      scope: "world",
+      config: true,
+      type: Number,
+      range: { min: 0, max: 5000, step: 100 },
+      default: 1000
+    });
   },
 
   /** Convenience accessor — returns undefined if the setting isn't ready. */

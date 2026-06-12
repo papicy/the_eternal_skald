@@ -1438,3 +1438,94 @@ RESIDUAL RISK: Token growth when many categories are enabled (Assets = 82 names)
               is default-safe (new categories OFF by default except small high-value
               Moves/Assets; foe behaviour unchanged) and degrades to "" when a pack is
               absent or the cache is unprimed.
+
+
+
+---
+
+## 2026-06-12 — Token control: movement, removal, undo (v0.16.0)
+
+TASK TYPE:    IMPLEMENT (gated big-bang — exceeds §0 limits by explicit approval).
+
+PRE-FLIGHT CHECKLIST (§3):
+```
+[x] 1. Read engineering-brief.md (SKILL.md) and repository-map.md in full.
+[x] 2. Classified task: IMPLEMENT, gated (see GATE below).
+[x] 3. Located target files/lines — evidence below.
+[~] 4. Touches > 3 files and > 50 lines/file — EXCEEDS §0 #1/#2 → gated approval (Option B).
+[x] 5. Change is ADDITIVE and backwards-compatible (whole capability default-OFF).
+[x] 6. Does NOT remove/rename any setting, flag, command, directive, or i18n key.
+[~] 7. Crosses an architectural boundary (new scene/token-write surface; edits LOCKED integration.js) → gated.
+[x] 8. Regression test added: test/token-control.test.mjs.
+[x] 9. Rollback plan: revert the single feature commit on feature/token-control.
+```
+
+GATE REQUEST / APPROVAL (§6):
+  TASK:        Add token movement (absolute / relative / animated), token removal with a
+               GM-only confirmation dialog for player-owned tokens, a 10-step undo stack,
+               and three interfaces (chat subcommands, Skald card UI buttons, an AI
+               narrative [[EFFECT: move_token / remove_token]] directive).
+  LIMIT HIT:   §0 #1 (>3 files), §0 #2 (>50 lines/file), §0 #5 + §5.1 (new directive verb;
+               edits to 🔴 LOCKED scripts/narrative/integration.js; new scene/token-write
+               layer — no existing owner; vision/ is read-only per repository-map §2).
+  WHY NEEDED:  CLAIM: No token/scene-write code exists today.
+               EVIDENCE: grep scripts/ for TokenDocument|createEmbeddedDocuments|
+               deleteEmbeddedDocuments|canvas.tokens :: 0 matches. CONFIDENCE: HIGH.
+  SMALLEST SAFE OPTION (offered): phased, per-slice gated rollout. The user chose Option B
+               (single big-bang gate) and approved exceeding the 3-file / 50-line limits.
+  BLAST RADIUS: scene/token documents (incl. player tokens), the LOCKED orchestration
+               spine (integration.js), the AI-directive grammar (additive verb only).
+               Rollback = revert the feature commit on feature/token-control.
+  APPROVED BY: user (explicit "Option B") on 2026-06-12. Self-approval NOT used.
+  USER PARAMS: built-in Foundry animation; GM-configurable move duration setting;
+               GM-only pop-up confirmation for player-token removal (existing dialog style);
+               undo depth up to 10; whole feature disabled by default.
+
+CHANGE:       Added a new self-contained token-control layer that performs scene/token
+              writes from three interfaces, all of them GM-gated, audit-logged, and
+              GM-whispered, and all disabled by default:
+                • MOVEMENT — absolute (move to x,y), relative (N units in a compass /
+                  up/down/left/right direction, converted via the scene grid size), with
+                  Foundry's built-in movement animation at a GM-configurable duration.
+                • REMOVAL — delete a token by id / name / "selected" / "target"; player-
+                  owned tokens always require a GM-only confirmation pop-up (DialogV2 with
+                  a classic-Dialog fallback) before deletion.
+                • UNDO — a 10-step LIFO stack restores the prior position (animated move
+                  back) or re-creates a removed token from its stored toObject() snapshot.
+              Interfaces: (1) chat subcommands `!skald move|remove|undo|tokens` routed
+              from Commands.skald BEFORE the frozen COMMANDS table; (2) Skald card UI
+              buttons via additive [data-skald-action] handlers in
+              Integration.wireSuggestionCard; (3) an AI narrative directive
+              [[EFFECT: move_token / remove_token / delete_token]] parsed in
+              _parseOneEffect and applied in applyEffects, gated behind BOTH the master
+              setting AND a separate tokenControlAiTriggers opt-in. Release: bumped
+              0.15.0 → 0.16.0 (MINOR — new feature) across module.json, package.json and
+              README banners.
+FILES TOUCHED (6 + 1 new module + 1 new test):
+  - scripts/narrative/token-control.js (NEW — 537 lines, the whole capability)
+  - scripts/narrative/integration.js   (+46 / -0  — 🔴 LOCKED; parse + apply + UI wiring)
+  - scripts/core/settings.js           (+33 / -0  — 3 world settings, all default-OFF)
+  - scripts/chat/commands.js           (+12 / -0  — subcommand intercept in Commands.skald)
+  - scripts/ai/prompt-builder.js       (+18 / -0  — directive advertisement, double-gated)
+  - lang/en.json                       (+12 / -0  — i18n names/hints for the 3 settings)
+  - module.json, package.json          (version bump 0.15.0 → 0.16.0)
+  - README.md                          (version banners 0.15.0 → 0.16.0)
+  - test/token-control.test.mjs        (NEW regression guard, 43 assertions / 7 sections)
+TESTS:        test/token-control.test.mjs — RESULT: 43 passed, 0 failed
+SUITE:        npm test -> PASS (32 files passed, 0 failed); version-consistency PASS;
+              node --check PASS on every touched .js file.
+GATE:         APPROVED — Option B (single big-bang gate) explicitly chosen by the user on
+              2026-06-12, knowingly exceeding the ≤3-files / ≤50-lines limits and the
+              LOCKED-file / new-directive boundaries. Recorded above per brief §6.
+ROLLBACK:     git revert <feature commit sha>  (single-commit revert on the
+              feature/token-control branch); or simply leave the three world settings OFF
+              (their default) — with them off the entire layer is inert.
+RESIDUAL RISK: Scene/token writes (including player tokens) are a new, higher-blast-radius
+              surface and integration.js is a LOCKED spine. Mitigations: every write path
+              is _guard()-ed to GM + master-setting-on (chat/UI) and additionally
+              tokenControlAiTriggers-on (AI path); player-token deletion is hard-gated
+              behind a GM confirmation dialog; all actions are audit-logged and
+              GM-whispered; movement is scene-clamped; undo is bounded to 10 steps. With
+              the default-OFF settings the module's runtime behaviour is byte-for-byte
+              unchanged, and module load is never affected (the new file is imported
+              transitively and touches nothing at eval time beyond defining an object).
