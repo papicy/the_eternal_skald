@@ -96,6 +96,17 @@ const MAX_BODY   = 2 * 1024 * 1024;   // 2 MiB inbound limit
 const MAX_RESP   = 8 * 1024 * 1024;   // 8 MiB upstream response limit
 const TIMEOUT_MS = 60_000;             // 60s upstream timeout
 
+/* ── Connection pooling (P0 latency) ─────────────────────────────── *
+ *  Reuse upstream TCP/TLS sockets via keep-alive instead of paying a
+ *  fresh handshake on every LLM call (~50-150ms each). Pure node:http/
+ *  https Agents — no new dependency, no wire-contract change. Degrades
+ *  safely: if a pooled socket is unusable Node transparently opens a new
+ *  one, so behaviour is unchanged on failure.                          */
+const KEEPALIVE_OPTS = { keepAlive: true, keepAliveMsecs: 30_000, maxSockets: 64 };
+const HTTP_AGENT  = new http.Agent(KEEPALIVE_OPTS);
+const HTTPS_AGENT = new https.Agent(KEEPALIVE_OPTS);
+const agentFor = (url) => (url.protocol === "https:" ? HTTPS_AGENT : HTTP_AGENT);
+
 /* ── Logging ─────────────────────────────────────────────────────── */
 
 const TAG = "⚔️  Skald";
@@ -170,6 +181,7 @@ function forward({ apiKey, endpoint, payload }) {
       hostname: url.hostname,
       port:     url.port || (url.protocol === "https:" ? 443 : 80),
       path:     url.pathname + (url.search || ""),
+      agent:    agentFor(url),
       headers: {
         "Content-Type":   "application/json",
         "Content-Length":  body.length,
@@ -259,6 +271,7 @@ function forwardStream({ apiKey, endpoint, payload }, clientRes) {
       hostname: url.hostname,
       port:     url.port || (url.protocol === "https:" ? 443 : 80),
       path:     url.pathname + (url.search || ""),
+      agent:    agentFor(url),
       headers: {
         "Content-Type":   "application/json",
         "Content-Length":  body.length,
