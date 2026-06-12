@@ -1302,3 +1302,64 @@ This completes the P0–P4 latency optimisation series (P0 keep-alive v0.14.2,
 P1 streaming-by-default v0.14.3, P2 request timeouts v0.14.4, P3 RAG corpus
 cache v0.14.5, P4 parallel RAG+context v0.14.6).
 ```
+
+
+---
+
+### [2026-06-12 14:25 EEST] — Modernise Roll#evaluate call & remove stale §-section comments
+AGENT:        Abacus AI Agent (SkaldCoder maintenance)
+TASK TYPE:    IMPLEMENT (API compat) + DOCUMENT (comment cleanup)
+TOKEN BUDGET: 5,000 (IMPLEMENT) | USED: ~well within | WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md + repository-map.md (SKILL.md brief)
+  [x] task classified
+  [x] target file(s)+line(s) located (evidence below)
+  [x] <= 3 files / <= 50 changed lines per file (1 file: +12 / -79, all deletions are comments)
+  [x] additive & backwards-compatible (behaviour-neutral)
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] no architectural boundary crossed
+  [x] regression test added (test/roll-evaluate-api.test.mjs)
+  [x] rollback plan defined
+
+PROBLEM:      (1) CombatController._executeAction used the deprecated Foundry
+              Roll#evaluate({ async: true }) signature (the `async` option was removed
+              in Foundry v12; module targets compat min 13 / verified 14). (2) The
+              file header TOC and inline §1–§13 divider comments referenced subsystems
+              long since extracted to scripts/<subsystem>/, so they were stale.
+
+EVIDENCE (brief §4 format):
+  CLAIM:      Combat dice resolution used the deprecated Roll#evaluate({async:true}).
+  EVIDENCE:   scripts/eternal-skald.js:624-625 :: CombatController._executeAction
+  CONFIDENCE: HIGH
+  BASIS:      read the exact lines; Foundry v12 removed the `async` option
+              (foundryvtt/foundryvtt#9774). Modern form already used at
+              scripts/ironsworn-controller.js:1531-1532 (await action.evaluate()).
+
+  CLAIM:      §1–§13 section comments referenced moved logic (constants, ai client,
+              prompt builder, memory, chat helpers, entity-linking, auto-journaling).
+  EVIDENCE:   scripts/eternal-skald.js header TOC + inline dividers (pre-edit)
+  CONFIDENCE: HIGH
+  BASIS:      read directly; the named code lives in core/, ai/, chat/, chronicle/.
+
+CHANGE:       Replaced `await roll.evaluate({ async: true })` /
+              `await chal.evaluate({ async: true })` with the argument-free awaited
+              form `await roll.evaluate()` / `await chal.evaluate()`. Removed the stale
+              header TOC (replaced with a short accurate "what remains here" note) and
+              the inline §-dividers that pointed at relocated code; for the three blocks
+              whose code is still in this file (Enemy Combat Controller, Scene Context,
+              Map Vision import, Hook Registrations) the divider was kept but the stale
+              §-number stripped, leaving an accurate descriptive label. No functional
+              code or useful comments removed.
+FILES TOUCHED (1):
+  - scripts/eternal-skald.js  (+12 / -79 lines; deletions are comment-only)
+  - test/roll-evaluate-api.test.mjs  (new regression guard)
+TESTS:        test/roll-evaluate-api.test.mjs — RESULT: 22 passed, 0 failed
+SUITE:        npm test -> PASS (31 files passed, 0 failed); load-smoke PASS; node --check PASS
+GATE:         none — change is confined to the entry-point orchestration file, is
+              behaviour-neutral, registers no new setting, alters no directive grammar
+              or wire contract, and crosses no §5 boundary.
+ROLLBACK:     git revert <feature commit sha>  (single-commit revert).
+RESIDUAL RISK: None identified. The Roll change drops an option that Foundry already
+              ignores (evaluate is async by default), so dice behaviour is unchanged;
+              the rest is comment-only. Full suite + load-smoke confirm no regression.

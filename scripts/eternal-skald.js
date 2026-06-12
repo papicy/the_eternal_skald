@@ -19,20 +19,12 @@
  *  This client simply does `fetch("/skald-api/chat", ...)` — same
  *  origin, no CORS, no proxy, no mixed-content. Works everywhere.
  *
- *  Sections:
- *      §1  CONSTANTS & IMPORTS
- *      §2  MODULE SETTINGS
- *      §3  SYSTEM PROMPT BUILDER
- *      §4  API CLIENT (simple fetch to /skald-api/chat)
- *      §5  CONVERSATION MEMORY
- *      §6  CHAT MESSAGE HELPERS
- *      §7  COMMAND HANDLERS
- *      §8  NPC DIALOGUE SYSTEM
- *      §9  ORACLE INTERPRETER
- *      §10 JOURNAL / LORE GENERATOR
- *      §11 ENEMY COMBAT CONTROLLER
- *      §12 SCENE CONTEXT
- *      §13 HOOK REGISTRATIONS
+ *  NOTE: Most subsystems originally outlined here have been extracted into
+ *  dedicated ES-modules under scripts/<subsystem>/ (core/, ai/, chat/,
+ *  chronicle/, narrative/, vision/, hooks/). What remains in this entry
+ *  point is the orchestration layer: a few shared helper singletons, the
+ *  runConversation runner, the enemy CombatController, SceneContext, and
+ *  the hook-registration import.
  * ===================================================================== */
 
 // (fix — version drift) Derive the version from the module manifest (module.json,
@@ -58,21 +50,12 @@ console.log("The Eternal Skald | ironsworn-data.js imported successfully");
 console.log("The Eternal Skald | ironsworn-controller.js imported successfully");
 console.log("The Eternal Skald | browser-rag.js imported successfully");
 
-/* ===================================================================== */
-/*  §1  CONSTANTS                                                         */
-/* ===================================================================== */
-
 import {
   MODULE_ID, SKALD_NAME, LOG_PREFIX,
   DEFAULT_ENDPOINT, DEFAULT_MODEL, LEGACY_ABACUS_ENDPOINT,
   PROVIDER_PRESETS, OPENROUTER_VISION_MODELS, ABACUS_VISION_MODELS,
   PROVIDER_LABELS, COMMANDS
 } from "./core/constants.js";
-
-
-
-/* ===================================================================== */
-
 
 import {
   buildModelChoices, fetchOpenRouterVisionModels, isCatalogueVisionModel
@@ -82,19 +65,7 @@ import { refreshModelDropdowns, migrateLegacyAbacusEndpoint } from "./ai/provide
 import { Client } from "./ai/client.js";
 import { buildSystemPrompt, buildJournalPromptBlock, buildIronswornPromptBlock } from "./ai/prompt-builder.js";
 
-
-
-
-
 import { Settings } from "./core/settings.js";
-
-
-
-/* ===================================================================== */
-/*  §3  SYSTEM PROMPT BUILDER                                             */
-/* ===================================================================== */
-
-
 
 /**
  * Thin host-side bridge to the Browser RAG module (v0.5.0). Centralises the
@@ -316,44 +287,11 @@ export const RagProgress = {
 
 
 
-
-/* ===================================================================== */
-/*  §4  API CLIENT                                                         */
-/* ===================================================================== */
-
-
-/* ===================================================================== */
-/*  §5  CONVERSATION MEMORY                                               */
-/* ===================================================================== */
-
 import { Memory, Chat, escapeHtml, formatMarkdown, stripDirectivesForDisplay, parseMetadata, callSkaldStreaming } from "./chat/display.js";
 import { Commands, extractMessageText, stripHtml, tryCommandFromText } from "./chat/commands.js";
 
-/* ===================================================================== */
-/*  §6  CHAT MESSAGE HELPERS                                              */
-/* ===================================================================== */
-
-
-/* ===================================================================== */
-/*  §6a-b  ENTITY LINKING (v0.5.1)                                        */
-/* ===================================================================== */
-
 import { EntityLinker } from "./chronicle/entity-linking.js";
 import { JournalSystem } from "./chronicle/journal-system.js";
-
-
-/* ===================================================================== */
-/*  §6b  STREAMING DISPLAY (v0.3.3)                                       */
-/* ===================================================================== */
-
-
-
-
-/* ===================================================================== */
-/*  §7  COMMAND HANDLERS                                                  */
-/* ===================================================================== */
-
-
 
 /**
  * Generic conversation runner used by !skald, !scene, !combat. Manages
@@ -451,12 +389,7 @@ import { Integration } from "./narrative/integration.js";
 import { NpcDialogue, OracleInterpreter, LoreGenerator } from "./narrative/generators.js";
 
 /* ===================================================================== */
-/*  §10b AUTO-JOURNALING SYSTEM (v0.4.0)                                  */
-/* ===================================================================== */
-
-
-/* ===================================================================== */
-/*  §11 ENEMY COMBAT CONTROLLER                                           */
+/*  ENEMY COMBAT CONTROLLER                                              */
 /* ===================================================================== */
 
 export const CombatController = {
@@ -621,8 +554,8 @@ ${ctx}`;
       const stat = 2;
       const roll = new Roll(`1d6 + ${stat}`);
       const chal = new Roll("2d10");
-      await roll.evaluate({ async: true });
-      await chal.evaluate({ async: true });
+      await roll.evaluate();
+      await chal.evaluate();
       const c1 = chal.terms[0].results[0].result;
       const c2 = chal.terms[0].results[1].result;
       const total = roll.total;
@@ -782,7 +715,7 @@ ${ctx}`;
 };
 
 /* ===================================================================== */
-/*  §12 SCENE CONTEXT (for !scene)                                        */
+/*  SCENE CONTEXT (for !scene)                                           */
 /* ===================================================================== */
 
 export const SceneContext = {
@@ -804,12 +737,12 @@ export const SceneContext = {
 };
 
 /* ===================================================================== */
-/*  §12b MAP VISION / SCOUTING (v0.10.23)                                 */
+/*  MAP VISION / SCOUTING (v0.10.23)                                     */
 /* ===================================================================== */
 
 import { MapVision } from "./vision/map-vision.js";
 
 /* ===================================================================== */
-/*  §13 HOOK REGISTRATIONS (extracted to hooks/foundry-hooks.js)          */
+/*  HOOK REGISTRATIONS (extracted to hooks/foundry-hooks.js)             */
 /* ===================================================================== */
 import "./hooks/foundry-hooks.js";
