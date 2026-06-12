@@ -1582,3 +1582,65 @@ ROLLBACK:     git revert <commit-sha>  (single commit)
 RESIDUAL RISK: scrollBottom fires on every throttled update (~140ms); if a user
               had manually scrolled up mid-stream they would be pulled back to
               bottom. Acceptable for the requested behaviour; none other identified.
+
+
+---
+
+### [2026-06-13 12:30 EEST] — Smart auto-scroll: follow stream only when user is at bottom
+AGENT:        Abacus.AI Agent
+TASK TYPE:    IMPLEMENT
+TOKEN BUDGET: 20,000  |  USED: ~15,000  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md + repository-map.md
+  [x] task classified (IMPLEMENT)
+  [x] target file(s)+line(s) located (evidence below)
+  [x] <= 3 files / <= 50 changed lines per file (display.js +43/-7 = net 36; 1 test file)
+  [x] additive & backwards-compatible
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] no architectural boundary crossed (chat/ presentation only)
+  [x] regression test extended (test/streaming-autoscroll.test.mjs)
+  [x] rollback plan defined
+
+PROBLEM:      The prior auto-scroll fix forced the chat to the bottom on every
+              streaming update. If a player scrolled up to read earlier messages
+              mid-stream they were yanked back down. Required behaviour: scroll to
+              show the new message and follow the stream ONLY while the user is
+              at/near the bottom; respect a manual scroll-up; resume when they
+              return to the bottom.
+
+EVIDENCE (brief §4 format):
+  CLAIM:      callSkaldStreaming unconditionally called scrollChatToBottom() after
+              the placeholder create and after every throttled message.update.
+  EVIDENCE:   scripts/chat/display.js:264-294 (pre-change) :: callSkaldStreaming / renderNow
+  CONFIDENCE: HIGH
+  BASIS:      read the exact lines directly before editing.
+
+  CLAIM:      Foundry's ChatLog exposes a public scrollBottom() and the scrollable
+              chat-log element, so a near-bottom check via scroll metrics is viable.
+  EVIDENCE:   foundryvtt.com/api ChatLog.scrollBottom (v14) + ol.chat-log element
+  CONFIDENCE: MEDIUM
+  BASIS:      official API docs (web), not executed in a live client here.
+
+CHANGE:       Added CHAT_SCROLL_THRESHOLD_PX (150) and isChatNearBottom(), which
+              reads the chat-log scroller (ol.chat-log / #chat-log / .chat-scroll,
+              jQuery-unwrapped for ≤v12) and returns true only when
+              scrollHeight - scrollTop - clientHeight <= 150px (defaults to true
+              when metrics are unavailable, so headless/old Foundry still "stick").
+              Both scroll points are now GATED on this check, MEASURED BEFORE the
+              DOM grows: (1) stickAtStart captured before ChatMessage.create →
+              scroll only if true; (2) `stick` captured before each message.update
+              → scroll only if true. This makes streaming follow the bottom, stop
+              when the user scrolls up, and resume when they scroll back down.
+FILES TOUCHED (2):
+  - scripts/chat/display.js          (+43 / -7 lines, net +36)
+  - test/streaming-autoscroll.test.mjs (rewritten: 20 assertions)
+TESTS:        test/streaming-autoscroll.test.mjs — RESULT: 20 passed, 0 failed
+SUITE:        npm test -> PASS (33 files passed, 0 failed)
+GATE:         none
+ROLLBACK:     git revert <commit-sha>  (single commit)
+RESIDUAL RISK: Near-bottom is measured each throttle frame (~140ms); a very large
+              single chunk (>150px of rendered height between frames) could drop
+              stickiness for one frame, but the next frame re-measures near ~0px
+              and resumes. Live in-client scroll behaviour not exercised here
+              (no Foundry runtime); covered by structural + behavioural tests.
