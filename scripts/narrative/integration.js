@@ -579,7 +579,9 @@ export const Integration = {
     await Chat.postSkald(formatMarkdown(stripDirectivesForDisplay(clean || reply)), { variant, title });
     // Capture the move's reason (if any) so the next outcome narration can
     // reference the player's intent, without surfacing a card.
-    if (suggestion?.reason) this._lastIntent = suggestion.reason;
+    // (fix — intent staleness) Stamp WHEN the intent was captured so journey
+    // naming can ignore a stale intent left over from an earlier, unrelated turn.
+    if (suggestion?.reason) { this._lastIntent = suggestion.reason; this._lastIntentTs = Date.now(); }
     return { suggestion, clean };
   },
 
@@ -593,7 +595,8 @@ export const Integration = {
    */
   async postSuggestionFromReply(reply) {
     const { suggestion } = this.parseMoveSuggestion(reply);
-    if (suggestion?.reason) this._lastIntent = suggestion.reason;
+    // (fix — intent staleness) Stamp the capture time (see postReplyWithSuggestion).
+    if (suggestion?.reason) { this._lastIntent = suggestion.reason; this._lastIntentTs = Date.now(); }
     return suggestion;
   },
 
@@ -765,13 +768,14 @@ export const Integration = {
       if (decision.action === "roll" && decision.move?.name) {
         // Record the player's actual words as intent so the post-roll narration
         // can reference what they were trying to do.
-        this._lastIntent = text.trim();
+        // (fix — intent staleness) Stamp the capture time for journey naming.
+        this._lastIntent = text.trim(); this._lastIntentTs = Date.now();
         await this.doTriggerMove(decision.move.name, decision.stat || undefined);
         return { handled: true };
       }
 
       if (decision.action === "confirm" && Array.isArray(decision.candidates) && decision.candidates.length) {
-        this._lastIntent = text.trim();
+        this._lastIntent = text.trim(); this._lastIntentTs = Date.now();
         await this._postActionConfirmCard(decision.candidates, { reason: decision.reason, original: text.trim() });
         return { handled: true };
       }
@@ -852,6 +856,9 @@ export const Integration = {
     this._lastIntent = rawIntent
       ? `${moveTag} — ${rawIntent}`
       : moveTag + (this._lastIntent ? ` — ${this._lastIntent}` : "");
+    // (fix — intent staleness) Stamp the capture time so _resolveJourney can
+    // trust this intent (it was set immediately before the roll it describes).
+    this._lastIntentTs = Date.now();
     const actor = IronswornController.getActiveCharacter();
     // (v0.10.38 — Phase 4) Asset bonus advisory: a non-blocking suggestion if
     // one of the character's assets grants a bonus that plausibly applies to
@@ -1368,23 +1375,74 @@ Narrate this milestone briefly and evocatively as the Skald (1–3 sentences), f
    * @returns {{isRoll: boolean, source: string|null}}
    */
   _detectIronswornRoll(message) {
-    const ourFlags = message?.flags?.[MODULE_ID];
-    if (ourFlags?.manualMove) return { isRoll: true, source: "manual" };
+    // (fix — brittle detection) Never let a malformed/unexpected message shape
+    // throw out of detection; fail closed (treat as "not a roll") instead.
+    try {
+      if (!message || typeof message !== "object") return { isRoll: false, source: null };
 
-    // Some/legacy versions DO set namespaced flags — honour them if present.
-    const isFlags = message?.flags?.["foundry-ironsworn"];
-    if (isFlags && (isFlags.moveDfId || isFlags.moveId || isFlags.dsid || isFlags.moveDsId)) {
-      return { isRoll: true, source: "flags" };
+      const ourFlags = message?.flags?.[MODULE_ID];
+      if (ourFlags?.manualMove) return { isRoll: true, source: "manual" };
+
+      // Some/legacy versions DO set namespaced flags — honour them if present.
+      const isFlags = message?.flags?.["foundry-ironsworn"];
+      if (isFlags && (isFlags.moveDfId || isFlags.moveId || isFlags.dsid || isFlags.moveDsId)) {
+        return { isRoll: true, source: "flags" };
+      }
+
+      // Modern system: the roll is serialised into the card HTML.
+      const content = typeof message?.content === "string" ? message.content : "";
+      if (/data-ironswornroll\s*=/.test(content) ||
+          /class\s*=\s*['"][^'"]*\bironsworn-roll\b/.test(content)) {
+        return { isRoll: true, source: "html" };
+      }
+
+      // (fix — resilience to system HTML/flag drift) If a future foundry-ironsworn
+      // release renames the card class / data attribute / flag keys, the checks
+      // above silently stop matching and auto-narration breaks. As a LAST-RESORT
+      // fallback, detect the move-roll by its characteristic DICE SIGNATURE — an
+      // action die (d6) plus at least two challenge dice (d10) — which
+      // _parseFromRolls already relies on. Scoped to the Ironsworn system (active
+      // system id or a foundry-ironsworn flag namespace on the message) so we
+      // never narrate unrelated d6+d10 rolls in other systems.
+      if (this._hasIronswornDiceShape(message) && this._ironswornContext(message)) {
+        return { isRoll: true, source: "dice" };
+      }
+
+      return { isRoll: false, source: null };
+    } catch (e) {
+      this._dbg?.("_detectIronswornRoll guarded against error", e);
+      return { isRoll: false, source: null };
     }
+  },
 
-    // Modern system: the roll is serialised into the card HTML.
-    const content = typeof message?.content === "string" ? message.content : "";
-    if (/data-ironswornroll\s*=/.test(content) ||
-        /class\s*=\s*['"][^'"]*\bironsworn-roll\b/.test(content)) {
-      return { isRoll: true, source: "html" };
-    }
+  /**
+   * (fix — brittle detection) True when the message's attached Foundry Roll(s)
+   * carry the Ironsworn action-roll dice signature: one d6 (action die) and at
+   * least two d10s (challenge dice). Purely structural and defensive.
+   */
+  _hasIronswornDiceShape(message) {
+    try {
+      const rolls = Array.isArray(message?.rolls) ? message.rolls : [];
+      if (!rolls.length) return false;
+      const dice = rolls.flatMap(r => Array.isArray(r?.dice) ? r.dice : []);
+      const d10s = dice.filter(d => d?.faces === 10).length;
+      const d6   = dice.some(d => d?.faces === 6);
+      return d6 && d10s >= 2;
+    } catch (_) { return false; }
+  },
 
-    return { isRoll: false, source: null };
+  /**
+   * (fix — brittle detection) True when we are confident the message belongs to
+   * the Ironsworn system — either the active game system is foundry-ironsworn,
+   * or the message itself carries the foundry-ironsworn flag namespace. Keeps
+   * the dice-shape fallback from firing on unrelated d6+d10 rolls.
+   */
+  _ironswornContext(message) {
+    try {
+      const sysId = (typeof game !== "undefined" && game?.system?.id) ? String(game.system.id) : "";
+      if (sysId === "foundry-ironsworn") return true;
+      return !!message?.flags?.["foundry-ironsworn"];
+    } catch (_) { return false; }
   },
 
   /**
@@ -1418,6 +1476,11 @@ Narrate this milestone briefly and evocatively as the Skald (1–3 sentences), f
 
   /** Parse the serialised `data-ironswornroll` blob (+ rendered text) from card HTML. */
   _parseFromHtml(message) {
+   // (fix — brittle parsing) Guard the whole parse so a malformed card, a
+   // missing DOMParser, or an unexpected node shape can never throw out of the
+   // detection chain — we return null (and the caller falls back to
+   // _parseFromRolls) instead of breaking auto-narration.
+   try {
     const content = typeof message?.content === "string" ? message.content : "";
     if (!content) return null;
 
@@ -1484,6 +1547,10 @@ Narrate this milestone briefly and evocatively as the Skald (1–3 sentences), f
       return { moveName, outcome: "", score: null, challenge: [], match: false, resolved: false };
     }
     return null;
+   } catch (e) {
+    this._dbg?.("_parseFromHtml guarded against error", e);
+    return null;
+   }
   },
 
   /** Fallback: derive an outcome from the attached Foundry Roll dice. */
@@ -1568,7 +1635,19 @@ Narrate this milestone briefly and evocatively as the Skald (1–3 sentences), f
     let autoSummary = "";
     if (opts.mechanicsApplied) {
       autoSummary = String(opts.autoSummary ?? "");
-    } else if (allowEffects) {
+    } else {
+      // (fix — settings gate) The deterministic auto-flows below apply the
+      // MECHANICAL consequences of dice the player explicitly rolled: open/advance
+      // a journey on "Undertake a Journey", advance/close a combat foe, mark a
+      // milestone, and (on a strong-hit progress roll) complete the targeted track.
+      // These are RULES AUTOMATION, not AI-improvised effects, so they must run
+      // regardless of the "AI applies effects" (aiAppliesEffects) setting. Gating
+      // them on that setting (the old `else if (allowEffects)`) silently broke the
+      // whole journey lifecycle when a user turned AI effects off: no journey track
+      // ever opened, so a later "Reach Your Destination" failed with "No open
+      // journey track…". The aiAppliesEffects flag still governs ONLY the AI
+      // NARRATIVE portion below — whether the model may emit, and we apply,
+      // [[EFFECT:…]] directives — which is the behaviour that setting is meant for.
       const autoParts = [];
       try { const c = await this._autoCombatFlow(parsed, actor);  if (c) autoParts.push(c); }
       catch (e) { console.warn(LOG_PREFIX, "_autoCombatFlow failed", e); }
@@ -1893,7 +1972,18 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
    * enough to branch a separate track (vs. conservatively reusing the newest).
    */
   async _resolveJourney(actor) {
-    const intent = String(this._lastIntent || "").trim();
+    // (fix — intent staleness/absence) The player's intent is only captured on
+    // the Skald text channels (!skald / action declarations / doTriggerMove).
+    // When "Undertake a Journey" is rolled straight from the foundry-ironsworn
+    // move dialog NO fresh intent is set, and a leftover intent from an earlier,
+    // unrelated turn would mis-name the journey (and, being "specific", branch a
+    // wrong track). Only trust an intent captured RECENTLY (within the freshness
+    // window); otherwise treat it as absent and fall through to the deterministic
+    // context/fallback layers below. Missing intent already degrades gracefully.
+    const INTENT_FRESH_MS = 5 * 60 * 1000; // 5 minutes — generous enough to span a dialog roll
+    const ts = Number(this._lastIntentTs || 0);
+    const fresh = ts > 0 && (Date.now() - ts) <= INTENT_FRESH_MS;
+    const intent = fresh ? String(this._lastIntent || "").trim() : "";
 
     // ---- Layer 1: deterministic regex extraction ----
     try {
