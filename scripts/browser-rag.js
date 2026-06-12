@@ -185,6 +185,7 @@ export const BrowserRAG = {
   _initFailed: false,      // sticky: don't retry a hard failure every call
   _queryCache: new Map(),  // text → vector (small LRU-ish cache)
   _QUERY_CACHE_MAX: 64,
+  _corpusCache: null,      // cached array of ALL vector records (null = unloaded)
 
   // Serial indexing queue so embedding work never stacks up on the main
   // thread when several journal writes complete back-to-back.
@@ -394,6 +395,7 @@ export const BrowserRAG = {
         vector,
         metadata: { timestamp: Date.now(), ...metadata }
       });
+      this._invalidateCorpus();
       this._debug("indexed record", id, `(${metadata?.type || "?"})`);
       return true;
     } catch (err) {
@@ -489,6 +491,7 @@ export const BrowserRAG = {
     if (!ok) return { indexed: 0, total };
 
     try { await this._store.clear(); } catch (_) {}
+    this._invalidateCorpus();
 
     let indexed = 0;
     for (let i = 0; i < list.length; i++) {
@@ -500,6 +503,30 @@ export const BrowserRAG = {
     }
     this._debug(`reindex complete — ${indexed}/${total} entries embedded.`);
     return { indexed, total };
+  },
+
+  /* ---------------- corpus cache ---------------- */
+
+  /**
+   * Return every stored vector, served from a persistent in-memory cache so a
+   * query never triggers a full O(n) IndexedDB reload. The cache is populated
+   * lazily on first use and invalidated by every write/remove/clear. If the
+   * read fails the cache stays unset, so the next call retries cleanly.
+   */
+  async _getCorpus() {
+    if (Array.isArray(this._corpusCache)) return this._corpusCache;
+    const all = await this._store.getAll();
+    this._corpusCache = Array.isArray(all) ? all : [];
+    this._debug(`corpus cache populated — ${this._corpusCache.length} vectors`);
+    return this._corpusCache;
+  },
+
+  /** Drop the cached corpus; the next search reloads it from IndexedDB. */
+  _invalidateCorpus() {
+    if (this._corpusCache !== null) {
+      this._corpusCache = null;
+      this._debug("corpus cache invalidated");
+    }
   },
 
   /* ---------------- search / retrieval ---------------- */
@@ -525,7 +552,7 @@ export const BrowserRAG = {
       const qVec = await this.embed(q, { cache: true });
       if (!qVec) return [];
 
-      const all = await this._store.getAll();
+      const all = await this._getCorpus();
       if (!all.length) return [];
 
       const scored = [];
@@ -604,14 +631,14 @@ export const BrowserRAG = {
   /** Remove a single entry's vector (e.g. when a journal is deleted). */
   async remove(id) {
     if (!VectorStore.supported() || !id) return false;
-    try { await this._store.delete(String(id)); return true; }
+    try { await this._store.delete(String(id)); this._invalidateCorpus(); return true; }
     catch (_) { return false; }
   },
 
   /** Wipe all stored vectors. */
   async clear() {
     if (!VectorStore.supported()) return false;
-    try { await this._store.clear(); this._queryCache.clear(); return true; }
+    try { await this._store.clear(); this._queryCache.clear(); this._invalidateCorpus(); return true; }
     catch (_) { return false; }
   },
 
