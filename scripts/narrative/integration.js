@@ -1666,7 +1666,7 @@ Narrate this milestone briefly and evocatively as the Skald (1–3 sentences), f
       autoSummary = autoParts.join("; ");
     }
 
-    const ctx = this.gatherContext();
+    // (v0.14.6 / P4) ctx is gathered in parallel with RAG retrieval below.
     const intent = this._lastIntent ? `\nThe player's intent: ${this._lastIntent}` : "";
     const autoLine = autoSummary
       ? `\nMechanical effects ALREADY applied automatically (do NOT re-emit initiative or progress effects for this move): ${autoSummary}`
@@ -1684,8 +1684,15 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
 
     try {
       Memory.push("general", "user", `(${parsed.moveName} → ${parsed.outcome})`);
-      // Recall relevant world memory using the move + the player's intent.
-      const memory = await RagBridge.fetchMemory(`${parsed.moveName} ${this._lastIntent || ""}`.trim());
+      // (v0.14.6 / P4) Parallelise the two INDEPENDENT prep steps so RAG latency
+      // no longer sits in front of context building: the async RAG retrieval
+      // (embedding + IndexedDB vector search) runs concurrently with the
+      // synchronous live game-state gather. Both degrade gracefully to "" on
+      // failure, and Promise.all preserves that — neither path can reject here.
+      const [memory, ctx] = await Promise.all([
+        RagBridge.fetchMemory(`${parsed.moveName} ${this._lastIntent || ""}`.trim()),
+        Promise.resolve().then(() => { try { return this.gatherContext(); } catch (_) { return ""; } })
+      ]);
       const messages = [
         { role: "system", content: buildSystemPrompt({ task, context: ctx, allowEffects, allowFollowups, allowJournal: true, memory }) },
         ...Memory.get("general")

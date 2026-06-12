@@ -1222,3 +1222,83 @@ RESIDUAL RISK: Low. The cache is plain references to the same record objects get
               write/remove/clear, and resets to null on any read error so a transient
               IndexedDB failure can never pin a stale or empty corpus.
 ```
+
+
+---
+
+### [2026-06-12 16:05 EEST] — P4 latency (FINAL): parallelise RAG retrieval with context gathering
+AGENT:        Abacus.AI Agent (coding)
+TASK TYPE:    IMPLEMENT
+TOKEN BUDGET: 20,000  |  USED: ~15,000  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md + repository-map.md (+ SKILL.md)
+  [x] task classified: IMPLEMENT (budget 20,000)
+  [x] target file(s)+line(s) located (evidence below)
+  [x] <= 3 files / <= 50 changed lines per file (integration.js +10/-2)
+  [x] additive & backwards-compatible (identical inputs to buildSystemPrompt; only the ordering of two independent prep steps changes)
+  [x] no setting/flag/directive/i18n key removed or renamed (no new setting needed)
+  [x] no architectural boundary crossed (change stays inside the narrative/ orchestration layer)
+  [x] regression test added (test/parallel-rag.test.mjs)
+  [x] rollback plan defined
+
+PROBLEM:      P4 (final) from the latency analysis. On the move-resolution
+              narration path — the hottest AI path, firing on every dice roll —
+              the two INDEPENDENT prep steps ran sequentially: the synchronous
+              live game-state gather (this.gatherContext(), several Foundry
+              document reads) ran first, and only THEN did the code await the
+              async RAG memory retrieval (RagBridge.fetchMemory() — embedding +
+              IndexedDB vector search). RAG round-trip latency therefore sat on
+              the critical path in front of context building.
+
+EVIDENCE (brief §4 format):
+  CLAIM:      The move-narration path gathered context synchronously, then later
+              awaited RAG retrieval — two independent steps run back-to-back.
+  EVIDENCE:   scripts/narrative/integration.js:1669 (pre-change) :: `const ctx = this.gatherContext();`
+              scripts/narrative/integration.js:1688 (pre-change) :: `const memory = await RagBridge.fetchMemory(...)`
+  CONFIDENCE: HIGH
+  BASIS:      read lines directly before editing.
+
+  CLAIM:      gatherContext() is fully synchronous and independent of RAG memory,
+              and self-guards each read, so it can run concurrently with fetchMemory.
+  EVIDENCE:   scripts/narrative/integration.js:48-74 :: gatherContext() (no await; per-read try/catch; returns string)
+  CONFIDENCE: HIGH
+  BASIS:      read lines directly.
+
+  CLAIM:      RagBridge.fetchMemory() already resolves to "" on any failure, so it
+              never rejects and is safe to place inside Promise.all.
+  EVIDENCE:   scripts/eternal-skald.js:112-122 :: RagBridge.fetchMemory() (try/catch → returns "")
+  CONFIDENCE: HIGH
+  BASIS:      read lines directly.
+
+CHANGE:       Replaced the sequential `const ctx = this.gatherContext();` (now a
+              comment) + standalone `const memory = await RagBridge.fetchMemory(...)`
+              with a single `const [memory, ctx] = await Promise.all([...])`: branch
+              1 is RagBridge.fetchMemory(query); branch 2 defers this.gatherContext()
+              into a microtask (Promise.resolve().then(...)) wrapped in try/catch → ""
+              so neither branch can reject the Promise.all. The synchronous context
+              gather now overlaps the async RAG round-trip instead of preceding it.
+              buildSystemPrompt() still receives identical { context: ctx, memory }
+              inputs, so narration output is unchanged.
+FILES TOUCHED (1; +3 manifests via official bump tool):
+  - scripts/narrative/integration.js   (+10 / -2 lines)
+  - test/parallel-rag.test.mjs         (new file)
+  - docs/ai-maintenance-log.md         (this entry)
+  - module.json + package.json + README (0.14.5 → 0.14.6 via tools/bump-version.mjs, separate release commit)
+TESTS:        test/parallel-rag.test.mjs — RESULT: 11 passed, 0 failed
+SUITE:        npm test -> PASS (29 files passed, 0 failed); load-smoke PASS
+GATE:         none — change is confined to the narrative/ layer, is additive and
+              backwards-compatible, registers no new setting, and crosses no §5
+              boundary. No wire-contract, directive grammar, or setting changed.
+ROLLBACK:     git revert <feature commit sha>  (single-commit revert of the parallel
+              change; version bump is its own separate commit).
+RESIDUAL RISK: Low. Both branches degrade to "" exactly as the sequential code did
+              (fetchMemory's internal catch; gatherContext's own per-read guards plus
+              the added wrapper), Promise.all cannot reject here, and prompt assembly
+              is unchanged — so worst case is identical behaviour to the old path with
+              no concurrency gain, never a regression.
+
+This completes the P0–P4 latency optimisation series (P0 keep-alive v0.14.2,
+P1 streaming-by-default v0.14.3, P2 request timeouts v0.14.4, P3 RAG corpus
+cache v0.14.5, P4 parallel RAG+context v0.14.6).
+```
