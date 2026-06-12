@@ -1149,3 +1149,76 @@ RESIDUAL RISK: Low. If the setting is unset/invalid the helper falls back to 30s
               error and (in auto mode) falls back to the direct path, exactly as a
               connection failure already did.
 ```
+
+
+
+---
+
+### [2026-06-12 15:20 EEST] — P3 latency: cache the RAG vector corpus in memory
+AGENT:        Abacus.AI Agent (coding)
+TASK TYPE:    IMPLEMENT
+TOKEN BUDGET: 20,000  |  USED: ~16,000  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md + repository-map.md (+ SKILL.md)
+  [x] task classified: IMPLEMENT (budget 20,000)
+  [x] target file(s)+line(s) located (evidence below)
+  [x] <= 3 files / <= 50 changed lines per file (browser-rag.js +30/-3)
+  [x] additive & backwards-compatible
+  [x] no setting/flag/directive/i18n key removed or renamed (no new setting needed)
+  [x] no architectural boundary crossed (change stays inside the self-contained browser-rag layer)
+  [x] regression test added (test/rag-cache.test.mjs)
+  [x] rollback plan defined
+
+PROBLEM:      P3 from the latency analysis. BrowserRAG.search() called
+              this._store.getAll() on EVERY query, reloading the entire vector
+              corpus out of IndexedDB each turn — an O(n) deserialization cost
+              per prompt that grows with the size of the chronicle.
+
+EVIDENCE (brief §4 format):
+  CLAIM:      search() reloaded the full corpus from IndexedDB on every call via
+              this._store.getAll(), with no in-memory reuse between queries.
+  EVIDENCE:   scripts/browser-rag.js:528 (pre-change) :: search() — `const all = await this._store.getAll()`
+  CONFIDENCE: HIGH
+  BASIS:      read lines directly + grep "getAll" before editing.
+
+  CLAIM:      VectorStore.getAll() opens a fresh readonly transaction and
+              materialises every record, so its cost scales with corpus size.
+  EVIDENCE:   scripts/browser-rag.js:144-153 :: VectorStore.getAll()
+  CONFIDENCE: HIGH
+  BASIS:      read lines directly.
+
+  CLAIM:      The corpus mutates only through put (indexRecord), delete (remove),
+              and clear (clear/reindexAll), giving a small, well-defined set of
+              invalidation points.
+  EVIDENCE:   scripts/browser-rag.js:391-398 :: indexRecord; :491 :: reindexAll;
+              :605-608 :: remove; :612-615 :: clear
+  CONFIDENCE: HIGH
+  BASIS:      read lines directly + grep "_store.(put|delete|clear)".
+
+CHANGE:       (1) Added a module-scoped `_corpusCache` field (null = unloaded) and a
+              `_getCorpus()` accessor that lazily loads via this._store.getAll() once,
+              caches the array, and serves all later reads from memory. (2) Pointed
+              search() at this._getCorpus() instead of the raw getAll(). (3) Added a
+              tiny `_invalidateCorpus()` helper and called it at every mutation point
+              (indexRecord after put, reindexAll after clear, remove after delete,
+              clear) so a stale corpus is never served. On a read failure _getCorpus()
+              leaves the cache unset, so the next query retries cleanly (graceful
+              degradation — search()'s existing try/catch still returns [] on error).
+FILES TOUCHED (2; +3 manifests via official bump tool):
+  - scripts/browser-rag.js             (+30 / -3 lines)
+  - test/rag-cache.test.mjs            (new file)
+  - docs/ai-maintenance-log.md         (this entry)
+  - module.json + package.json + README (0.14.4 → 0.14.5 via tools/bump-version.mjs, separate release commit)
+TESTS:        test/rag-cache.test.mjs — RESULT: 14 passed, 0 failed
+SUITE:        npm test -> PASS (28 files passed, 0 failed); load-smoke PASS
+GATE:         none — change is confined to the self-contained browser-rag layer, is
+              additive and backwards-compatible, registers no new setting, and crosses
+              no §5 boundary. No wire-contract, directive grammar, or setting changed.
+ROLLBACK:     git revert <feature commit sha>  (single-commit revert of the cache
+              change; version bump is its own separate commit).
+RESIDUAL RISK: Low. The cache is plain references to the same record objects getAll()
+              already returned (no extra copy / negligible memory), is dropped on every
+              write/remove/clear, and resets to null on any read error so a transient
+              IndexedDB failure can never pin a stale or empty corpus.
+```
