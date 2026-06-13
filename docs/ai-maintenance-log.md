@@ -2983,3 +2983,40 @@ ROLLBACK:     git revert <this commit> — removes the doc, the UI module, the c
               handler and the test together; no other behaviour touched.
 RESIDUAL RISK: LOW. Purely additive: a new opt-in command that opens a read-only window; the window
               never dispatches commands (only pre-fills the input). Lazy class keeps Node import safe.
+
+### [2026-06-13 23:30 EEST] — S1: tabbed settings panel (ApplicationV2)
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    IMPLEMENT (gated — see Phase D gate above)
+PRE-FLIGHT:   Enumerated all 67 register(MODULE_ID,"…") keys (settings.js), confirmed no registerMenu
+              exists yet, located the Settings.register() call site in the init hook (foundry-hooks.js)
+              and the en.json structure. Verified ApplicationV2 form handling (tag:"form" + form.handler
+              + formData.object) via Foundry docs.
+EVIDENCE:     CLAIM: every Skald setting is registered with config:true, so a custom panel is purely an
+              ADDITIVE alternate editor — the native flat list is untouched.
+              EVIDENCE: scripts/core/settings.js (67 game.settings.register calls, all config:true save
+              the few storage flags filtered at runtime by cfg.config!==true). CONFIDENCE: HIGH BASIS:
+              grepped + read the registry. CLAIM: init hook is the correct place to registerMenu (game
+              ready). EVIDENCE: foundry-hooks.js:57-70 :: Hooks.once("init") → Settings.register().
+              CONFIDENCE: HIGH BASIS: read the lines.
+CHANGE:       NEW scripts/ui/settings-panel.js — an ApplicationV2 form (lazy class, manual inline-HTML
+              render) that reads each setting's REGISTERED definition (game.settings.settings) + current
+              value and renders it under one of four tabs (AI Provider / Narrative / Memory / Advanced)
+              via the pure, unit-tested categorizeSetting/assignSettingsToTabs (unknown keys → Advanced,
+              so nothing is ever hidden). World-scoped controls are disabled for non-GMs; submit writes
+              only changed, permitted keys through the public game.settings.set API. Registered a
+              "tabbedSettings" settings MENU in the init hook (foundry-hooks.js) + en.json i18n. No
+              setting registered, renamed or removed; native flat list unchanged.
+FILES TOUCHED (4 — gated):
+  - scripts/ui/settings-panel.js        (+205 / -0, new)
+  - scripts/hooks/foundry-hooks.js      (+24 / -0)
+  - lang/en.json                        (+7 / -0)
+  - test/settings-panel.test.mjs        (+85 / -0, new)
+TESTS:        node test/settings-panel.test.mjs → 22/22 (incl. a drift guard: every registered setting
+              maps to a valid tab); full suite → 50/50. node --check on changed JS; en.json valid JSON.
+SUITE:        npm test -> PASS (50 files)
+GATE:         Covered by the Phase D gate above (new ui/ layer + new settings menu surface).
+ROLLBACK:     git revert <this commit> — removes the panel, the menu registration and the test; the
+              native settings list is unaffected at every step.
+RESIDUAL RISK: LOW. Additive alternate editor; writes go through the same public API as the native
+              panel and only for permitted, changed keys. Menu registration is wrapped + skipped if
+              ApplicationV2 is unavailable.

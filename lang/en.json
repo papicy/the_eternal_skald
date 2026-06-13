@@ -1,6 +1,13 @@
 {
   "ETERNAL_SKALD": {
     "moduleTitle": "The Eternal Skald",
+    "settingsPanel": {
+      "menu": {
+        "name": "Skald Settings (tabbed)",
+        "label": "Open Tabbed Settings",
+        "hint": "Open the Eternal Skald's settings grouped into tabs — AI Provider, Narrative, Memory and Advanced — for easier navigation than the flat list below."
+      }
+    },
     "settings": {
       "aiMode": {
         "name": "AI Mode",

@@ -16,6 +16,7 @@ import { IronswornController } from "../ironsworn-controller.js";
 import { BrowserRAG } from "../browser-rag.js";
 import { SystemRegistry, registerSystem } from "../systems/registry.js";
 import { NimbleAdapter } from "../systems/nimble-adapter.js";
+import { getSettingsPanelClass } from "../ui/settings-panel.js";
 
 
 /* ===================================================================== */
@@ -66,6 +67,29 @@ Hooks.once("init", () => {
     console.log(LOG_PREFIX, "Settings registered.");
   } catch (err) {
     console.error(LOG_PREFIX, "Settings.register() failed:", err);
+  }
+
+  /* === Tabbed settings panel (v0.21.0, S1) ============================
+   * Register a settings MENU that opens the custom ApplicationV2 panel
+   * grouping the module's settings into tabs. Purely additive — the native
+   * flat list (every setting keeps config:true) is unchanged. Skipped
+   * gracefully if ApplicationV2 is unavailable.
+   * =================================================================== */
+  try {
+    const PanelCls = getSettingsPanelClass();
+    if (PanelCls) {
+      game.settings.registerMenu(MODULE_ID, "tabbedSettings", {
+        name: game.i18n.localize("ETERNAL_SKALD.settingsPanel.menu.name"),
+        label: game.i18n.localize("ETERNAL_SKALD.settingsPanel.menu.label"),
+        hint: game.i18n.localize("ETERNAL_SKALD.settingsPanel.menu.hint"),
+        icon: "fas fa-sliders",
+        type: PanelCls,
+        restricted: false
+      });
+      console.log(LOG_PREFIX, "Tabbed settings menu registered.");
+    }
+  } catch (err) {
+    console.warn(LOG_PREFIX, "Tabbed settings menu registration failed:", err?.message ?? err);
   }
 
   /* === Keybinding: toggle AI Mode (v0.3.2) =============================
