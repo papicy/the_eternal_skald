@@ -307,6 +307,10 @@
         "name": "Memory Relevance Threshold",
         "hint": "Minimum cosine similarity (0–1) for a memory to be considered relevant to a query. Lower values recall more (but looser) matches; higher values recall only strong matches. Default: 0.3."
       },
+      "ragUseAnnIndex": {
+        "name": "Use Advanced Memory Index",
+        "hint": "Use an approximate nearest-neighbour (HNSW) index for semantic memory search instead of an exact scan. Only benefits very large chronicles (1000+ stored memories), where it makes recall dramatically faster; below that the exact scan is used regardless. Results are approximate but typically match exact search closely, and any failure falls back to the exact scan automatically. Defaults to OFF."
+      },
       "ragDebugMode": {
         "name": "Memory Debug Logging",
         "hint": "Print verbose semantic-memory (RAG) diagnostics to the browser console (F12): model load, embedding, indexing and search activity. Useful for troubleshooting. Defaults to OFF."

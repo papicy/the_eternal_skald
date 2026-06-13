@@ -41,8 +41,15 @@
  *  API as `game.modules.get("the-eternal-skald").api.rag`.
  * ===================================================================== */
 
+import { HnswIndex } from "./browser-rag-hnsw.js";
+
 const MODULE_ID   = "the-eternal-skald";
 const LOG_PREFIX  = "The Eternal Skald |";
+
+/* Below this corpus size the brute-force cosine scan is faster than building
+ * an HNSW graph, so the ANN path only engages for genuinely large chronicles
+ * even when the setting is on. */
+const ANN_MIN_CORPUS = 1000;
 
 /* IndexedDB layout. */
 const DB_NAME      = "eternal-skald-vectors";
@@ -186,6 +193,8 @@ export const BrowserRAG = {
   _queryCache: new Map(),  // text → vector (small LRU-ish cache)
   _QUERY_CACHE_MAX: 64,
   _corpusCache: null,      // cached array of ALL vector records (null = unloaded)
+  _hnsw: null,             // lazily-built HNSW ANN index (null = not built)
+  _hnswById: null,         // Map: record id → record, for ANN result hydration
 
   // Serial indexing queue so embedding work never stacks up on the main
   // thread when several journal writes complete back-to-back.
@@ -215,6 +224,9 @@ export const BrowserRAG = {
   maxResults()  { const n = Number(this._setting("ragMaxResults"));   return Number.isFinite(n) && n > 0 ? n : 5; },
   contextTokens(){ const n = Number(this._setting("ragContextTokens")); return Number.isFinite(n) && n > 0 ? n : 2000; },
   threshold()   { const n = Number(this._setting("ragSimilarityThreshold")); return Number.isFinite(n) ? n : 0.3; },
+
+  /** Opt-in HNSW approximate index (default OFF) — for large chronicles. */
+  useAnnIndex() { return this._setting("ragUseAnnIndex") === true; },
 
   /* ---------------- lifecycle / model load ---------------- */
 
@@ -607,6 +619,40 @@ export const BrowserRAG = {
       this._corpusCache = null;
       this._debug("corpus cache invalidated");
     }
+    // The ANN graph is built from the corpus snapshot, so any corpus change
+    // drops it; the next ANN search rebuilds it lazily from fresh vectors.
+    this._hnsw = null;
+    this._hnswById = null;
+  },
+
+  /**
+   * Build (or return the cached) HNSW index over the current corpus, plus an
+   * id→record map for hydrating hits. Returns null when ANN is disabled, the
+   * corpus is too small to benefit, or construction fails — callers then fall
+   * back to the exact linear scan.
+   */
+  _getHnsw(corpus) {
+    if (!this.useAnnIndex()) return null;
+    if (!Array.isArray(corpus) || corpus.length < ANN_MIN_CORPUS) return null;
+    if (this._hnsw && this._hnswById) return this._hnsw;
+    try {
+      const index = new HnswIndex();
+      const byId = new Map();
+      for (const rec of corpus) {
+        if (!rec || !Array.isArray(rec.vector)) continue;
+        index.add(rec.id, rec.vector);
+        byId.set(rec.id, rec);
+      }
+      this._hnsw = index;
+      this._hnswById = byId;
+      this._debug(`HNSW index built — ${index.size} vectors`);
+      return this._hnsw;
+    } catch (err) {
+      this._debug("HNSW build failed, using linear scan:", err?.message || err);
+      this._hnsw = null;
+      this._hnswById = null;
+      return null;
+    }
   },
 
   /* ---------------- search / retrieval ---------------- */
@@ -634,6 +680,25 @@ export const BrowserRAG = {
 
       const all = await this._getCorpus();
       if (!all.length) return [];
+
+      // OPT-IN approximate path: query the HNSW graph, then hydrate + filter.
+      // Any failure falls through to the exact linear scan below.
+      const index = this._getHnsw(all);
+      if (index) {
+        try {
+          const ann = index.search(qVec, limit, undefined)
+            .filter((h) => h.score >= minSim)
+            .map((h) => {
+              const rec = this._hnswById.get(h.id);
+              return rec ? { id: rec.id, text: rec.text, metadata: rec.metadata || {}, score: h.score } : null;
+            })
+            .filter(Boolean);
+          this._debug(`ANN search "${q.slice(0, 40)}" → ${ann.length}/${all.length} hits (min ${minSim})`);
+          return ann;
+        } catch (annErr) {
+          this._debug("ANN search failed, falling back to linear:", annErr?.message || annErr);
+        }
+      }
 
       const scored = [];
       for (const rec of all) {
