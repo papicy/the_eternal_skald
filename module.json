@@ -1,8 +1,8 @@
 {
   "id": "the-eternal-skald",
   "title": "The Eternal Skald",
-  "description": "<p>An AI-powered storyteller, oracle interpreter, and tactical enemy controller for <strong>Ironsworn</strong> and <strong>Ironsworn: Delve</strong> campaigns in Foundry VTT v14, powered by Abacus AI ChatLLM. Just type <code>!</code> followed by your words to speak with the Skald, or <code>!skald-help</code> for all commands.</p><p>v0.22.0 — <strong>Expansion &amp; ambition</strong> (&quot;Phase E&quot;). Adds an AI tool-calling architecture (opt-in autonomous moves / oracles / progress / journaling), ruleset-aware narration for Starforged &amp; Sundered Isles, read-only system adapters for <strong>D&amp;D 5e</strong> and <strong>Pathfinder 2e</strong>, optional browser-native text-to-speech narration (🔊 read-aloud + auto-narrate), and soft, fail-soft integrations with Simple Calendar, Monk&apos;s Enhanced Journals and Dice So Nice. Every addition is opt-in / default-safe and fully backwards-compatible. Full release history is in <a href=\"https://github.com/papicy/the_eternal_skald/blob/main/CHANGELOG.md\">CHANGELOG.md</a>.</p>",
-  "version": "0.22.0",
+  "description": "<p>An AI-powered storyteller, oracle interpreter, and tactical enemy controller for <strong>Ironsworn</strong> and <strong>Ironsworn: Delve</strong> campaigns in Foundry VTT v14, powered by Abacus AI ChatLLM. Just type <code>!</code> followed by your words to speak with the Skald, or <code>!skald-help</code> for all commands.</p><p>v0.23.0 — <strong>Scaling memory</strong> (&quot;L1&quot;). Adds an opt-in HNSW approximate-nearest-neighbour index for semantic memory (the &quot;Use Advanced Memory Index&quot; setting), making recall dramatically faster on very large chronicles (1000+ stored memories) while keeping the exact cosine scan as an automatic fallback. Builds on Phase E: an AI tool-calling architecture, ruleset-aware narration for Starforged &amp; Sundered Isles, read-only system adapters for <strong>D&amp;D 5e</strong> and <strong>Pathfinder 2e</strong>, optional browser-native text-to-speech narration, and fail-soft integrations with Simple Calendar, Monk&apos;s Enhanced Journals and Dice So Nice. Every addition is opt-in / default-safe and fully backwards-compatible. Full release history is in <a href=\"https://github.com/papicy/the_eternal_skald/blob/main/CHANGELOG.md\">CHANGELOG.md</a>.</p>",
+  "version": "0.23.0",
   "compatibility": {
     "minimum": "13",
     "verified": "14",
@@ -42,6 +42,6 @@
   },
   "url": "https://github.com/papicy/the_eternal_skald",
   "manifest": "https://raw.githubusercontent.com/papicy/the_eternal_skald/main/module.json",
-  "download": "https://github.com/papicy/the_eternal_skald/archive/refs/tags/v0.22.0.zip",
+  "download": "https://github.com/papicy/the_eternal_skald/archive/refs/tags/v0.23.0.zip",
   "readme": "https://github.com/papicy/the_eternal_skald/blob/main/README.md"
 }

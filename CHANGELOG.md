@@ -13,6 +13,39 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.23.0] — 2026-06-13
+
+A memory-scaling pass ("L1"). Adds an **opt-in approximate-nearest-neighbour
+(HNSW) index** for semantic memory search so recall stays fast on very large
+chronicles — all **additive / default-safe** and fully backwards-compatible.
+No existing setting, flag, command or behaviour changes when the feature is
+left OFF (the default).
+
+### Added
+- **Advanced Memory Index (HNSW).** A new world setting, **"Use Advanced Memory
+  Index"** (default **OFF**), routes semantic memory search through a
+  Hierarchical Navigable Small World graph instead of the exact brute-force
+  cosine scan. On large chronicles (1000+ stored memories) this makes recall
+  dramatically faster (≈10× in benchmarks) while returning near-identical
+  top-k results. The index is pure, dependency-free, built locally in the
+  browser, rebuilt automatically whenever memories change, and only engages
+  above a 1000-memory threshold.
+
+### Behaviour & safety
+- **Exact search is the default and the fallback.** With the setting OFF, or on
+  chronicles below the threshold, the exact cosine scan is used exactly as
+  before. When the ANN path is on, any error transparently falls back to the
+  exact scan, so results are never lost — only approximated (recall ≈0.94+ on
+  realistic embeddings).
+- **When to enable:** only worlds with very large memory stores (1000+ entries)
+  benefit; smaller chronicles should leave it OFF, where the exact scan is
+  already fast.
+
+### Tests
+- New `test/browser-rag-hnsw.test.mjs` (recall vs brute-force, determinism,
+  edge cases, and a 4000-vector/384-dim performance benchmark). Full suite:
+  **60 files green**.
+
 ## [0.22.0] — 2026-06-13
 
 An expansion & ambition pass ("Phase E"). New AI capabilities, two more game
