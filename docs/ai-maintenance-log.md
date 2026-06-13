@@ -3195,3 +3195,56 @@ GATE:         GRANTED by maintainer via the Phase E subtask assignment (this ent
                self-approval is NOT being used — the human assigned the work with prioritised specs).
 
 NOTE: Per-feature detailed log entries follow below as each lands.
+
+
+### [2026-06-13 21:26 EEST] — F5: tool-calling architecture (registry + executor + client + runner)
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    IMPLEMENT (gated — see Phase E gate above)
+PRE-FLIGHT:   Read scripts/chat/command-registry.js (the model for a declarative registry),
+              scripts/ai/client.js chat()/_directChat/_extractContent (the F5 integration point),
+              scripts/systems/adapter-interface.js (capability + write-method contract),
+              scripts/narrative/integration.js (how directives already route writes through the
+              active adapter via sys()), scripts/chronicle/journal-system.js _createEntity (the
+              JournalEntry.create shape + getOrCreateFolder/_ownership helpers).
+EVIDENCE:     CLAIM: Client.chat() builds an OpenAI-compatible payload and returns Promise<string>;
+              tool_calls live at data.choices[0].message.tool_calls. EVIDENCE: client.js:483-489
+              (payload), :102-110 (_extractContent), :454+ (chat). CONFIDENCE: HIGH BASIS: read lines.
+              CLAIM: Foundry writes for moves/oracle/progress already go through the active adapter
+              (sys()) in the narrative layer. EVIDENCE: integration.js:19 sys()=getActiveAdapter,
+              :734/:944 triggerMove, :2685-2690 markProgress/markProgressByRank/rollOracle,
+              :3094-3114 markProgress/setProgress. CONFIDENCE: HIGH BASIS: read lines.
+CHANGE:       NEW scripts/ai/tools/ layer (PURE — zero Foundry imports):
+              • registry.js — frozen TOOL_REGISTRY of 4 tools (rollMove, queryOracle, updateProgress,
+                createJournalEntry) modelled on command-registry; findTool + buildToolSpecs (emits the
+                OpenAI `tools` array, FILTERED by live adapter capabilities; the journal tool is
+                capability-null = always offered).
+              • executor.js — parseToolCalls (normalises OpenAI + pre-parsed shapes; bad JSON → {}),
+                validateToolCall (required-arg + type/enum checks), executeToolCalls (routes each VALID
+                call to an INJECTED handler; unknown tool / unbound handler / handler throw all become
+                soft { ok:false } results — never throws).
+              ai/client.js — NEW additive chatWithTools() sibling of chat(): buffered completion with
+              the `tools` array attached, returns { content, toolCalls }. chat()'s Promise<string>
+              contract is untouched.
+              NEW scripts/narrative/tool-runner.js — the §5-correct execution home: buildHandlers()
+              binds each tool to a capability-gated adapter method / JournalEntry.create (Foundry
+              writes happen ONLY here, not in ai/); runToolTurn() HARD-gates on the autonomousTools
+              setting (default OFF), offers only capability-supported tools, and executes parsed calls.
+              core/settings.js — NEW world setting `autonomousTools` (Boolean, default FALSE). en.json
+              — i18n name/hint for it.
+FILES TOUCHED (7 — gated):
+  - scripts/ai/tools/registry.js        (+131 / -0, new, pure)
+  - scripts/ai/tools/executor.js        (+117 / -0, new, pure)
+  - scripts/ai/client.js                (+73 / -0, additive chatWithTools)
+  - scripts/narrative/tool-runner.js    (+104 / -0, new, narrative-layer middleware)
+  - scripts/core/settings.js            (+14 / -0, new setting)
+  - lang/en.json                        (+4 / -0, i18n)
+  - test/ai-tools.test.mjs              (+97 / -0, new regression test)
+TESTS:        node test/ai-tools.test.mjs → 44/44; full suite → 54/54.
+SUITE:        npm test -> PASS (54 files)
+GATE:         Covered by the Phase E gate above (new scripts/ai/tools/ layer + ai→adapter execution
+              boundary handled by keeping writes in narrative/tool-runner.js; new default-OFF setting).
+ROLLBACK:     git revert <this commit> — removes the tools layer, chatWithTools, the setting, the
+              runner, and the test. autonomousTools defaults OFF so no behaviour change ships enabled.
+RESIDUAL RISK: LOW. The whole feature is dormant unless a GM turns on autonomousTools. The ai/ layer
+              performs no Foundry writes (verified: registry/executor import nothing from Foundry; all
+              writes are in narrative/tool-runner.js). No existing call path or contract changed.

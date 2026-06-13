@@ -567,6 +567,79 @@ export const Client = {
   },
 
   /**
+   * (v0.22.0 F5) Tool-calling sibling of {@link chat}. Performs a BUFFERED
+   * (non-streaming) completion with an OpenAI-compatible `tools` array attached
+   * and returns the raw assistant message so the caller can inspect any
+   * `tool_calls` the model emitted. This NEVER executes tools itself — the
+   * ai/ layer must not touch Foundry; the narrative/ layer is responsible for
+   * running validated tool calls through the active adapter / chronicle.
+   *
+   * Returns { content, toolCalls } where toolCalls is the raw provider array
+   * (possibly empty/undefined). Honours the same connection-mode + keyless
+   * resolution as {@link chat}; in auto-mode a dead hook falls back to direct.
+   *
+   * @param {Array<{role:string, content:string}>} messages
+   * @param {Array<object>} tools - OpenAI tools array (see tools/registry.js).
+   * @param {object} [opts]
+   * @returns {Promise<{content: (string|null), toolCalls: (Array|undefined)}>}
+   */
+  async chatWithTools(messages, tools = [], opts = {}) {
+    const apiKey   = resolveOllamaApiKey(Settings.get("providerPreset"), Settings.get("apiKey"));
+    const model    = opts.model || Settings.get("modelName") || DEFAULT_MODEL;
+    const endpoint = Settings.get("apiEndpoint") || DEFAULT_ENDPOINT;
+    if (!apiKey) throw new Error(game.i18n.localize("ETERNAL_SKALD.errors.noApiKey"));
+    if (!Array.isArray(messages) || messages.length === 0) {
+      throw new Error("Cannot call ChatLLM with empty messages.");
+    }
+    const payload = {
+      model,
+      messages,
+      temperature: opts.temperature ?? 0.7,
+      max_tokens:  opts.maxTokens   ?? 800,
+      stream: false
+    };
+    if (Array.isArray(tools) && tools.length > 0) {
+      payload.tools = tools;
+      payload.tool_choice = opts.toolChoice || "auto";
+    }
+    const mode = Settings.get("connectionMode") || "auto";
+    let data = null;
+    const direct = async () => {
+      const r = await this._fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+        body: JSON.stringify({ ...payload, stream: false })
+      });
+      if (!r.ok) throw new Error(`AI endpoint error ${r.status}`);
+      return r.json();
+    };
+    if (mode === "direct" || (mode === "auto" && this._hookKnownDead)) {
+      data = await direct();
+    } else {
+      try {
+        const r = await this._fetch(API_PATH, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ apiKey, endpoint, payload })
+        });
+        if (this._hookMissing(r)) {
+          if (mode === "auto") { this._noticeDirectFallback(); data = await direct(); }
+          else throw new Error("The Eternal Skald server hook is not loaded.");
+        } else if (!r.ok) {
+          throw new Error(`Skald API error ${r.status}`);
+        } else {
+          data = await r.json();
+        }
+      } catch (err) {
+        if (mode === "auto") { this._noticeDirectFallback(); data = await direct(); }
+        else throw err;
+      }
+    }
+    const msg = data?.choices?.[0]?.message || {};
+    return { content: this._extractContent(data), toolCalls: msg.tool_calls };
+  },
+
+  /**
    * Streaming sibling of {@link chat} (v0.3.3). POSTs to /skald-api/chat-stream
    * and consumes the upstream LLM's Server-Sent-Events token stream, invoking
    * the supplied callbacks as text arrives.

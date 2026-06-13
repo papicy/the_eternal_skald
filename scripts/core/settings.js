@@ -66,6 +66,20 @@ export const Settings = {
       default: true
     });
 
+    // (v0.22.0 Phase E / F5) Autonomous tool use. When ON, the Skald may call
+    // function-calling "tools" (roll a move, query an oracle, update progress,
+    // create a journal entry) that WRITE to the world, executed through the
+    // active system adapter / chronicle layer. Defaults OFF so the Skald never
+    // mutates game state without the GM explicitly opting in. World-scoped.
+    game.settings.register(MODULE_ID, "autonomousTools", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.autonomousTools.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.autonomousTools.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: false
+    });
+
     // (v0.14.4 / P2) Request timeout in seconds. An AbortController in
     // ai/client.js aborts any AI fetch whose connection/response-headers phase
     // stalls longer than this, so a dead upstream can't hang the UI for the
