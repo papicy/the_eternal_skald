@@ -9,6 +9,7 @@ import { IronswornController } from "../ironsworn-controller.js";
 // Integration (-> narrative step 9) still live in eternal-skald.js.
 import { ContradictionDetector, RagBridge } from "../eternal-skald.js";
 import { Integration } from "../narrative/integration.js";
+import { Integrations } from "../narrative/integrations.js";
 
 /**
  * A tiny, dependency-free background work queue.
@@ -506,6 +507,15 @@ ${protocol}`;
       mysteries,
       decisions
     };
+
+    // (v0.22.0 / §6.2) When Simple Calendar is present, stamp the in-game
+    // date/time alongside the real-world timestamp. Additive + fail-soft:
+    // omitted entirely when the module is absent, so existing events and the
+    // !timeline reader are unaffected.
+    try {
+      const igDate = Integrations.getInGameDate();
+      if (igDate) event.igDate = igDate;
+    } catch (_) { /* non-fatal: in-game date is best-effort */ }
 
     // Read → push → cap → write. Fire-and-forget; persistence must never throw
     // into the narration path.

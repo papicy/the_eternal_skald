@@ -3373,3 +3373,44 @@ RESIDUAL RISK: LOW. All four settings default OFF and are client-scoped, so defa
               ttsAvailable(); on a browser without the Web Speech API every path quietly no-ops. Voice
               availability varies by browser/OS — selectVoice falls back to the first available voice or
               the browser default, never throwing.
+
+### [2026-06-13 21:41 EEST] — §6.2: soft third-party integrations (Simple Calendar / MEJ / DSN)
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    feature (Phase E — §6.2 integration possibilities)
+PRE-FLIGHT:   Confirmed no hard dependency is desirable (additive-only principle). Verified Simple
+              Calendar's developer API exposes `SimpleCalendar.api.currentDateTimeDisplay()` returning a
+              DateDisplayData object with `.date` / `.time` display strings (simplecalendar.info API
+              docs). Verified Dice So Nice already animates rolls created through the system's own Roll
+              pipeline — Skald move/oracle rolls already flow through that pipeline, so DSN needs NO extra
+              wiring (detection only). Confirmed _recordTimelineEvent (journal-system.js:481) builds each
+              timeline event object — the natural, additive injection point for an in-game date stamp.
+EVIDENCE:
+  CLAIM:      A dependency-free, import-free detector can probe sibling modules at runtime and surface an
+              optional in-game date without creating an import cycle or changing default behaviour.
+  EVIDENCE:   scripts/narrative/integrations.js imports nothing from the project (test source-guard
+              asserts no `^import`); journal-system.js stamps `event.igDate` only when getInGameDate()
+              returns a value.
+  CONFIDENCE: HIGH
+  BASIS:      24/24 unit assertions across detection + formatting + fail-soft paths; load-smoke clean;
+              full suite 58/58.
+CHANGE:       NEW scripts/narrative/integrations.js — fail-soft feature-detection for Monk's Enhanced
+              Journals, Dice So Nice!, and Simple Calendar (moduleActive / hasMonksEnhancedJournal /
+              hasDiceSoNice / hasSimpleCalendar), plus formatInGameDate (PURE) and getInGameDate (reads
+              the live Simple Calendar API). hasSimpleCalendar additionally checks the API method exists,
+              so a future SC that renames it degrades to "absent" rather than throwing. Wired into
+              chronicle _recordTimelineEvent: when Simple Calendar is present each persisted timeline
+              event gains an optional `igDate` display string alongside the real-world `t` timestamp.
+FILES TOUCHED (3 — gated):
+  - scripts/narrative/integrations.js   (+108 / -0, new, import-free runtime detector)
+  - scripts/chronicle/journal-system.js (+9 / -0, import + optional igDate stamp)
+  - test/integrations.test.mjs          (+82 / -0, new — detection + formatting + fail-soft)
+TESTS:        node test/integrations.test.mjs → 24/24; full suite → 58/58.
+SUITE:        npm test -> PASS (58 files)
+GATE:         Covered by the Phase E gate above (additive interop, no new hard dependency).
+ROLLBACK:     git revert <this commit> — removes the module, the igDate stamp, and the test. Timeline
+              events simply stop carrying igDate; nothing else changes.
+RESIDUAL RISK: LOW. No module is declared in module.json or required to be installed; every probe is
+              wrapped and returns false/null when the sibling is absent or its API differs. The igDate
+              field is purely additive — the !timeline reader ignores unknown fields — so worlds without
+              Simple Calendar behave exactly as before. DSN/MEJ are detection-only (no behavioural change
+              this slice); DSN animation already works through the system Roll pipeline.
