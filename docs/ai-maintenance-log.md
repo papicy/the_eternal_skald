@@ -3156,3 +3156,42 @@ SUITE:        npm test -> PASS (53 files)
 GATE:         Covered by the Phase D gate above (release of the gated feature set).
 ROLLBACK:     git revert <this commit> — restores the 0.20.0 version literals + CHANGELOG.
 RESIDUAL RISK: NONE. Metadata-only; no runtime behaviour change. CI version-consistency leg passes.
+
+
+### [2026-06-13 21:22 EEST] — Phase E expansion & ambition: recorded approval gate
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    IMPLEMENT + DOCUMENT (multi-task umbrella)
+TOKEN BUDGET: gated  |  USED: n/a  |  WITHIN BUDGET: GATED
+
+GATE REQUEST
+  TASK:        Implement Phase E (F5 tool-calling architecture, F7 TTS narration, Starforged
+               adapter, D&D 5e read-only adapter, PF2e read-only adapter if time, third-party
+               integrations — Monk's Enhanced Journal / Simple Calendar / Dice So Nice, and the
+               optional L1 RAG ANN index only if scale demands). Commit after each feature; bump
+               v0.21.0 → v0.22.0 once a substantial feature set lands.
+  LIMIT HIT:   §0(1,2) hard limits (several features span > 3 files and > 50 changed lines);
+               §5 forbidden-without-gate surfaces: a NEW scripts/ai/tools/ module layer; a NEW
+               ai → adapter/narrative tool-execution boundary crossing (F5); new world settings
+               (autonomousTools, TTS settings); new public UI surface (a "Narrate" button on AI
+               chat cards); new system adapters registered in hooks.
+  WHY NEEDED:  Explicit, detailed Phase E assignment from the maintainer (super-agent task) with a
+               prioritised per-feature spec list and an explicit "commit after each, bump to
+               v0.22.0" directive; this entry records that human approval for the gate.
+  SMALLEST SAFE OPTION: implement each feature incrementally, one feature per commit, full suite
+               green after each. F5 keeps tool *registry + definitions + payload validation* PURE
+               in scripts/ai/tools/ (no Foundry writes); actual *execution* routes through the
+               existing adapter capability-gated methods via the narrative/ orchestration layer, so
+               the ai/ layer never writes to Foundry. New adapters mirror the canonical
+               nimble-adapter.js pattern (reads never throw; all writes unsupported() for read-only
+               5e/PF2e). TTS uses the browser-native SpeechSynthesis API (no new deps). All new
+               settings default-safe (autonomous tool use defaults OFF). Third-party integrations
+               are feature-detected and degrade to no-op when the module is absent.
+  BLAST RADIUS: NEW scripts/ai/tools/ (registry + executor), NEW scripts/systems/starforged-adapter.js,
+               dnd5e-adapter.js (+ pf2e if time), NEW scripts/narrative/tts-narrator.js, hooks wiring
+               (adapter registration + tool/TTS glue), core/settings.js (new settings), lang/en.json
+               (i18n), new regression tests; module.json/package.json/README/CHANGELOG for the bump.
+               Rollback = revert the per-feature commits on phase-e-expansion.
+GATE:         GRANTED by maintainer via the Phase E subtask assignment (this entry records it;
+               self-approval is NOT being used — the human assigned the work with prioritised specs).
+
+NOTE: Per-feature detailed log entries follow below as each lands.
