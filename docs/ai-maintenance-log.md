@@ -2303,3 +2303,68 @@ RESIDUAL RISK: NONE-to-LOW. No executable code changed. The only machine-checked
               module.json `download` URL still points at an older release zip — left
               untouched as it is out of scope for this phase and governed by the release/
               tagging process, not this docs change.
+
+
+
+---
+
+### [2026-06-13 16:14 EEST] — Fix weak-hit Fulfill Your Vow XP to RAW (rank − 1, min 0)
+AGENT:        Abacus.AI Agent (SkaldCoder)
+TASK TYPE:    IMPLEMENT
+TOKEN BUDGET: 5,000  |  USED: ~4,000  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md + repository-map.md
+  [x] task classified (IMPLEMENT)
+  [x] target file(s)+line(s) located (evidence below)
+  [x] <= 3 files / <= 50 changed lines per file (3 files; +20/-13 total)
+  [x] additive & backwards-compatible (behaviour corrected; API/setting/i18n names unchanged)
+  [x] no setting/flag/directive/i18n key removed or renamed ("weakHitHalfXp" setting + i18n keys preserved)
+  [x] no architectural boundary crossed
+  [x] regression test extended (test/xp-grant.test.mjs sections [2] and [10])
+  [x] rollback plan defined
+
+PROBLEM:      The optional weak-hit XP rule for "Fulfill Your Vow" awarded Math.ceil(base/2)
+              ("half, rounded up"), which diverges from the Ironsworn SRD / Datasworn rule of
+              "mark experience equal to the rank value MINUS ONE (floored at 0)". The scales
+              disagreed at Troublesome (1 vs 0), Extreme (2 vs 3) and Epic (3 vs 4).
+
+EVIDENCE (brief §4 format):
+  CLAIM:      The weak-hit branch of xpForRank used half-rounded-up, not rank−1.
+  EVIDENCE:   scripts/ironsworn-controller.js:574-578 :: xpForRank (pre-fix `Math.ceil(base/2)`)
+  CONFIDENCE: HIGH
+  BASIS:      read the lines directly before editing.
+
+  CLAIM:      A mirror copy with the same defect existed in the data layer.
+  EVIDENCE:   scripts/ironsworn-data.js:436-443 :: xpForRank (pre-fix `Math.ceil(base/2)`)
+  CONFIDENCE: HIGH
+  BASIS:      read the lines directly before editing.
+
+  CLAIM:      The authoritative rule is rank value − 1 (troublesome 0 … epic 4) on a weak hit.
+  EVIDENCE:   foundry-ironsworn/json-packs/ironsworn-moves/Fulfill_Your_Vow_725a21e2f02d7e12.json
+              :: Outcomes → Weak Hit Text ("troublesome=0; dangerous=1; formidable=2; extreme=3; epic=4")
+  CONFIDENCE: HIGH
+  BASIS:      parsed the bundled Datasworn move JSON.
+
+CHANGE:       Replaced the weak-hit formula `Math.ceil(base / 2)` with `Math.max(0, base - 1)`
+              in BOTH xpForRank copies (controller + data mirror) and refreshed their doc
+              comments. Updated test/xp-grant.test.mjs sections [2] (unit scale, both Ctrl and
+              Data) and [10] (grantVowXp epic weak hit: 3 → 4) to assert the RAW values. The
+              public API (xpForRank signature, the `weakHit`/`weakHitHalf` option names, the
+              registered "weakHitHalfXp" world setting and its i18n keys) is unchanged — the
+              opt-in toggle still gates whether any reduction applies; only the reduced value
+              is corrected.
+FILES TOUCHED (3):
+  - scripts/ironsworn-controller.js  (+5 / -2 lines)
+  - scripts/ironsworn-data.js        (+4 / -3 lines)
+  - test/xp-grant.test.mjs           (+11 / -8 lines)
+TESTS:        test/xp-grant.test.mjs — RESULT: 62 passed, 0 failed
+SUITE:        npm test -> PASS (37 files passed, 0 failed)
+GATE:         User-approved fix of audit finding F1 (MOVE-MECHANICS-COMPLIANCE-REPORT.md §9).
+              Explicit approval to change behaviour and edit the (formerly 🔴 LOCKED)
+              ironsworn-controller.js for full ruleset compliance.
+ROLLBACK:     git revert <this commit-sha> — a single commit restores the prior formula in
+              both files and the prior test assertions.
+RESIDUAL RISK: NONE-to-LOW. Weak-hit reduction remains OFF by default (opt-in via
+              "weakHitHalfXp"); when enabled it now matches RAW exactly. Strong-hit XP,
+              idempotent single-award per vow, and vow-only granting are unaffected.
