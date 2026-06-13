@@ -337,10 +337,15 @@ const makeJournalPois = (() => {
   ok(/SURVEY:\s*"!survey"/.test(cmds), "[7] COMMANDS.SURVEY = !survey");
   ok(/ANALYZE_MAP:\s*"!analyze-map"/.test(cmds), "[7] COMMANDS.ANALYZE_MAP = !analyze-map");
 
+  // (v0.20.0 M2) Dispatch now routes through the declarative command registry
+  // instead of a switch: assert dispatchCommand resolves via findCommand and
+  // the registry descriptor maps !scout (+ !survey / !analyze-map aliases) to
+  // Commands.scout — equivalent guarantee to the previous switch-case checks.
   const dispatch = extractFrom(SRC, "function dispatchCommand(");
-  ok(/case COMMANDS\.SCOUT:\s*return \(\) => Commands\.scout/.test(dispatch), "[7] !scout dispatches to Commands.scout");
-  ok(/case COMMANDS\.SURVEY:\s*return \(\) => Commands\.scout/.test(dispatch), "[7] !survey aliases Commands.scout");
-  ok(/case COMMANDS\.ANALYZE_MAP:\s*return \(\) => Commands\.scout/.test(dispatch), "[7] !analyze-map aliases Commands.scout");
+  ok(/findCommand\(head\)/.test(dispatch), "[7] dispatchCommand resolves commands via the registry");
+  ok(/Commands\[descriptor\.method\]\(args\)/.test(dispatch), "[7] dispatchCommand invokes the descriptor's method");
+  ok(/command:\s*COMMANDS\.SCOUT,\s*aliases:\s*\[COMMANDS\.SURVEY,\s*COMMANDS\.ANALYZE_MAP\],\s*method:\s*"scout"/.test(SRC),
+     "[7] registry maps !scout (+ !survey / !analyze-map aliases) to Commands.scout");
 
   const scout = extractFrom(SRC, "async scout(_args) {");
   ok(/game\.user\?\.isGM/.test(scout), "[7] scout() is GM-gated");

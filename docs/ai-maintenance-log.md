@@ -2723,3 +2723,28 @@ GATE:         Covered by the Phase C gate above (new world settings + prompt-sur
 ROLLBACK:     Revert this commit on phase-c-feature-enrichment.
 RESIDUAL RISK: LOW. Purely additive and default-off; signature Norse voice unchanged unless a
               GM opts in. No existing setting/directive/i18n key removed or renamed.
+
+### [2026-06-13 19:10 EEST] — M2: Command handler registry
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    REFACTOR (gated — see Phase C gate above)
+EVIDENCE:     commands.js:33-83 (dispatchCommand previously held a ~40-line switch mapping
+              COMMANDS.* tokens → () => Commands.method(args)); map-vision.test.mjs:340-343
+              asserted that switch shape (updated to the registry equivalent).
+CHANGE:       Extracted the command routing table out of the dispatchCommand switch into a new
+              declarative registry, scripts/chat/command-registry.js. Each command self-registers
+              a descriptor { command, aliases, method, permission, help }. dispatchCommand now
+              resolves via findCommand(head) and invokes Commands[descriptor.method](args).
+              Routing is byte-for-byte equivalent (same tokens, same aliases — journal/journals,
+              map, skald-wipe, survey/analyze-map — same methods, same bare-"!" fallback). Added
+              a declarative permission gate: "gm" descriptors are blocked for non-GMs at dispatch;
+              every pre-M2 command is "all", so existing behaviour is unchanged. The handler
+              bodies on the Commands object are untouched.
+FILES TOUCHED: scripts/chat/command-registry.js (new), scripts/chat/commands.js,
+              test/command-registry.test.mjs (new), test/map-vision.test.mjs (3 dispatch
+              source-guards re-pointed at the registry — equal strength, intent preserved).
+TESTS:        node test/command-registry.test.mjs → 212/212; map-vision 211/211; full suite 44/44.
+GATE:         Covered by the Phase C gate above (chat/commands.js registry REFACTOR; new module).
+ROLLBACK:     Revert this commit on phase-c-feature-enrichment.
+RESIDUAL RISK: LOW. Pure routing refactor with identical behaviour; the only new runtime path is
+              the "gm" permission gate, which no current command uses. Registry is frozen + unit
+              tested for completeness (every COMMANDS token maps exactly once).

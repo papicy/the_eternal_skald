@@ -16,6 +16,7 @@ import { EntityLinker } from "../chronicle/entity-linking.js";
 import { IronswornData } from "../ironsworn-data.js";
 import { getActiveAdapter } from "../systems/registry.js";
 import { BrowserRAG } from "../browser-rag.js";
+import { findCommand } from "./command-registry.js";
 
 /**
  * Master dispatcher. Returns true if the message was a recognised Skald
@@ -61,47 +62,24 @@ export function dispatchCommand(rawText) {
   const args = (firstSpace === -1 ? "" : trimmed.slice(firstSpace + 1)).trim();
   console.log(`${LOG_PREFIX} dispatchCommand: head=${JSON.stringify(head)} args=${JSON.stringify(args)}`);
 
-  // Map command tokens to their async handler. We use a lookup table so we
-  // can match the prefix exactly (no partial matches, no fall-through).
+  // (v0.20.0 M2) Resolve the command through the declarative registry
+  // (scripts/chat/command-registry.js) instead of a hand-maintained switch.
+  // Each descriptor carries its canonical token, aliases, the Commands method
+  // to invoke, a permission gate and a help line — a single source of truth
+  // that new commands self-register into. Routing/behaviour is identical to
+  // the previous switch: the same tokens map to the same Commands.<method>(args).
+  const descriptor = findCommand(head);
   const handler = (() => {
-    switch (head) {
-      case COMMANDS.HELP:    return () => Commands.help();
-      case COMMANDS.SKALD:   return () => Commands.skald(args);
-      case COMMANDS.ORACLE:  return () => Commands.oracle(args);
-      case COMMANDS.NPC:     return () => Commands.npc(args);
-      case COMMANDS.SCENE:   return () => Commands.scene(args);
-      case COMMANDS.LORE:    return () => Commands.lore(args);
-      case COMMANDS.COMBAT:  return () => Commands.combat(args);
-      // --- Journal system (v0.4.0) ---
-      case COMMANDS.JOURNAL: return () => Commands.journals(args);
-      case COMMANDS.JOURNALS:return () => Commands.journals(args);
-      case COMMANDS.MYSTERIES:return () => Commands.mysteries(args);
-      case COMMANDS.REMIND:  return () => Commands.remind(args);
-      case COMMANDS.END_SESSION: return () => Commands.endSession(args);
-      // --- Browser-based RAG / AI memory (v0.5.0) ---
-      case COMMANDS.REINDEX:    return () => Commands.reindex(args);
-      case COMMANDS.RAG_STATUS: return () => Commands.ragStatus(args);
-      // --- Living Chronicle (v0.8.0) ---
-      case COMMANDS.TIMELINE:      return () => Commands.timeline(args);
-      case COMMANDS.RELATIONSHIPS: return () => Commands.relationships(args);
-      case COMMANDS.MAP:           return () => Commands.relationships(args);
-      case COMMANDS.TEMPLATE:      return () => Commands.template(args);
-      // --- UX / polish (v0.9.0) ---
-      case COMMANDS.LINK_STYLE:    return () => Commands.linkStyle(args);
-      // --- Maintenance (v0.10.16) ---
-      case COMMANDS.RESET:         return () => Commands.reset(args);
-      case COMMANDS.WIPE:          return () => Commands.reset(args);
-      // --- Map vision / scouting (v0.10.23) ---
-      case COMMANDS.SCOUT:         return () => Commands.scout(args);
-      case COMMANDS.SURVEY:        return () => Commands.scout(args);
-      case COMMANDS.ANALYZE_MAP:   return () => Commands.scout(args);
-      // --- Manual journey progress (v0.11.3) ---
-      case COMMANDS.PROGRESS:      return () => Commands.progress(args);
-      // --- Journal amend / rewrite (v0.14.0) ---
-      case COMMANDS.JOURNAL_REWRITE: return () => Commands.journalRewrite(args);
-      case COMMANDS.JOURNAL_AMEND:   return () => Commands.journalAmend(args);
-      default:               return null;
+    if (!descriptor) return null;
+    // Declarative permission gate. Every pre-M2 command is "all" (a no-op),
+    // so existing behaviour is unchanged; "gm" commands self-gate internally
+    // AND are blocked here for non-GMs (used by newer commands).
+    if (descriptor.permission === "gm" && !game.user?.isGM) {
+      return () => {
+        try { Chat.postError(`The command ${head} is reserved for the GM.`); } catch (_) {}
+      };
     }
+    return () => Commands[descriptor.method](args);
   })();
 
   // --- Bare "!" alias (v0.3.2) ----------------------------------------
