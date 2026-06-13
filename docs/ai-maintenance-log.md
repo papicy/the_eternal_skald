@@ -2813,3 +2813,33 @@ ROLLBACK:     Revert this commit on phase-c-feature-enrichment. Setting defaults
 RESIDUAL RISK: LOW. Default-off + GM-gated + additive (chronicle vectors untouched). Worst case a
               very large compendium grows the vector store / slows queries; mitigated by opt-in and
               the existing corpus cache. Extraction is defensive (returns "" on any odd doc shape).
+
+### [2026-06-13 21:05 EEST] — F3: Session recap & Markdown export
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    FEATURE (gated — see Phase C gate above)
+PRE-FLIGHT:   Studied JournalSystem.listEntries() (returns Skald-scribed JournalEntry docs; text in
+              pages[0].text.content; recency via the lastUpdated flag) and generateSessionChronicle()
+              (the existing Client.chat + buildSystemPrompt recap pattern, temp 0.8 / 1200 tokens).
+              Confirmed scripts/chronicle/*.js IS part of the readSkaldSource corpus.
+EVIDENCE:     The module produced session chronicles only as in-world JournalEntries; there was no
+              way to export a recap to an external journaling workflow (Obsidian/Notion/blog), a
+              top requested feature in the competitive set (Solo RPG Toolkit chat-to-Markdown).
+CHANGE:       Added !session-recap [n] (permission "all", read-only — never writes to the world). It
+              gathers the n most-recent chronicle entries (default 8), builds a digest, asks the AI
+              for a Markdown recap (fail-soft: exports the raw digest if the AI is unreachable), then
+              downloads a clean .md file. New scripts/chronicle/recap-export.js owns the PURE Markdown
+              assembly (buildMarkdown / slugify) and the download (Foundry saveDataToFile with a Blob-
+              anchor fallback). Opt-in Obsidian flavour (world setting recapObsidianFormat, default
+              OFF) adds YAML frontmatter + a "Linked Entities" [[wikilinks]] section built from npc/
+              location entry names — WITHOUT rewriting the AI prose (deliberately, to stay robust).
+FILES TOUCHED: scripts/chronicle/recap-export.js (new), scripts/chat/commands.js (sessionRecap handler
+              + import), scripts/core/constants.js (SESSION_RECAP token), scripts/chat/command-registry.js
+              (descriptor), scripts/core/settings.js (recapObsidianFormat), lang/en.json (i18n),
+              test/session-recap.test.mjs (new, 23 assertions).
+TESTS:        node test/session-recap.test.mjs → 23/23; full suite 47/47; node --check on changed JS;
+              en.json validated as JSON.
+GATE:         Covered by the Phase C gate above (new export module + command).
+ROLLBACK:     Revert this commit on phase-c-feature-enrichment. The command is purely additive and
+              read-only; the Obsidian setting defaults OFF.
+RESIDUAL RISK: LOW. Read-only (no world writes); AI failure degrades to a digest export; download is
+              defensive (saveDataToFile → Blob fallback → false). buildMarkdown is pure + unit-tested.

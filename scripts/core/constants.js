@@ -388,6 +388,8 @@ export const COMMANDS = Object.freeze({
   MYSTERIES:"!mysteries",
   REMIND:   "!remind",
   END_SESSION: "!end-session",
+  // --- Session recap & Markdown export (v0.20.0) ---
+  SESSION_RECAP: "!session-recap",
   // --- Browser-based RAG / AI memory (v0.5.0) ---
   REINDEX:    "!reindex",
   REINDEX_COMPENDIUMS: "!reindex-compendiums",

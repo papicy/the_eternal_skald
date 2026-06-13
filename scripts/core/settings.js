@@ -638,6 +638,17 @@ export const Settings = {
       default: false
     });
 
+    // (v0.20.0 F3) Format !session-recap exports for Obsidian.md (YAML
+    // frontmatter + a [[wikilinks]] section). Off by default → plain Markdown.
+    game.settings.register(MODULE_ID, "recapObsidianFormat", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.recapObsidianFormat.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.recapObsidianFormat.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: false
+    });
+
     // Maximum tokens of recalled world memory injected per AI call.
     game.settings.register(MODULE_ID, "ragContextTokens", {
       name: game.i18n.localize("ETERNAL_SKALD.settings.ragContextTokens.name"),

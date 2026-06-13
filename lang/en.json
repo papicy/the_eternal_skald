@@ -253,6 +253,10 @@
         "name": "Index Compendiums into Memory",
         "hint": "Also embed your installed compendium packs (lore journals, items/assets, NPCs, and — for systems with oracles — roll tables) into the Skald's semantic memory, so it can recall official and world content, not just your chronicle. Off by default: large compendia take time and storage to embed. After enabling, run !reindex-compendiums to build the index."
       },
+      "recapObsidianFormat": {
+        "name": "Session Recap: Obsidian Format",
+        "hint": "When exporting a session recap (!session-recap), format the Markdown for Obsidian.md — adding YAML frontmatter (title, date, tags) and a 'Linked Entities' section of [[wikilinks]] for the figures and places mentioned. Off by default → clean, portable plain Markdown."
+      },
       "ragContextTokens": {
         "name": "Memory Context Budget (tokens)",
         "hint": "Maximum amount of recalled world memory (in tokens, ~4 characters each) injected into each AI request. Higher values give the Skald more continuity but use more of the prompt. Default: 2000."

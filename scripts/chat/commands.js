@@ -13,6 +13,7 @@ import { NpcDialogue, OracleInterpreter, LoreGenerator } from "../narrative/gene
 import { MapVision } from "../vision/map-vision.js";
 import { JournalSystem } from "../chronicle/journal-system.js";
 import { EntityLinker } from "../chronicle/entity-linking.js";
+import { RecapExport } from "../chronicle/recap-export.js";
 import { IronswornData } from "../ironsworn-data.js";
 import { getActiveAdapter } from "../systems/registry.js";
 import { BrowserRAG } from "../browser-rag.js";
@@ -1025,6 +1026,64 @@ name "${entry.name}", and the appropriate structured fields + a 1–3 sentence
       ui.notifications?.info(`${SKALD_NAME}: Session chronicle written.`);
     }
     return entry;
+  },
+
+  /* ----------------------- !session-recap (v0.20.0, F3) ----------- */
+  /**
+   * Compose an AI-authored recap of recent chronicle events and download it
+   * as a clean Markdown file (optionally Obsidian-flavoured via the
+   * recapObsidianFormat setting). Read-only — never writes to the world.
+   * Usage: <code>!session-recap [n]</code> where n = how many recent
+   * chronicle entries to draw on (default 8).
+   */
+  async sessionRecap(args) {
+    const n = Math.max(1, Math.min(50, parseInt(String(args || "").trim(), 10) || 8));
+    let entries = [];
+    try { entries = JournalSystem.listEntries(); } catch (_) { entries = []; }
+    if (!entries.length) {
+      return Chat.postSystem(`<em>There is naught yet chronicled to recap.</em>`, { gmWhisper: true });
+    }
+    const recent = entries
+      .map(e => ({ e, t: Number(e.getFlag?.(MODULE_ID, "lastUpdated")) || 0 }))
+      .sort((a, b) => b.t - a.t)
+      .slice(0, n)
+      .map(x => x.e);
+
+    const readText = (entry) => {
+      try {
+        const page = entry.pages?.contents?.[0] ?? entry.pages?.find?.(() => true);
+        return String(page?.text?.content || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      } catch (_) { return ""; }
+    };
+    const digest = recent.map(e => `## ${e.name}\n${readText(e)}`).join("\n\n").slice(0, 8000);
+    let names = [];
+    try {
+      names = JournalSystem.listEntries("npc").concat(JournalSystem.listEntries("location"))
+        .map(e => e.name).filter(Boolean);
+    } catch (_) { names = []; }
+
+    await Chat.postSystem(`<em>${SKALD_NAME} gathers the threads for a recap…</em>`, { gmWhisper: true });
+
+    const task = `Compose a SESSION RECAP in your Skald voice, in Markdown, drawing ONLY on the chronicle excerpts below (do not invent beyond them). Use level-2 (##) headers for sections such as What Happened, Key Decisions, Consequences and Unresolved Threads. Keep it tight and evocative.\n\nCHRONICLE EXCERPTS:\n${digest}`;
+    let body;
+    try {
+      body = await Client.chat([
+        { role: "system", content: buildSystemPrompt({ task }) },
+        { role: "user", content: "Recap our recent sessions." }
+      ], { temperature: 0.8, maxTokens: 1200 });
+    } catch (e) {
+      console.warn(LOG_PREFIX, "[recap] AI call failed", e?.message || e);
+      body = digest; // fail-soft: export the raw digest
+    }
+
+    const title = `Session Recap — ${new Date().toLocaleDateString()}`;
+    const obsidian = RecapExport.obsidianEnabled();
+    const md = RecapExport.buildMarkdown({ title, body, entities: names, obsidian });
+    const saved = RecapExport.download(md, title);
+    const note = saved
+      ? `<p class="es-help-aside"><em>A Markdown copy has been downloaded${obsidian ? " (Obsidian-flavoured)" : ""}.</em></p>`
+      : `<p class="es-help-aside"><em>(The download could not be started in this browser.)</em></p>`;
+    return Chat.postSkald(`${formatMarkdown(body, { link: false })}${note}`, { variant: "lore", title: "Session Recap" });
   },
 
   /* ------------------------- !link-style (v0.9.0) ----------------- */
