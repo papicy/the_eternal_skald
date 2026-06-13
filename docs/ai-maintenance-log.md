@@ -2946,3 +2946,40 @@ SUITE:        npm test -> PASS (48 files)
 GATE:         Covered by the Phase D gate above (documentation deliverable Doc2).
 ROLLBACK:     git revert <this commit> — removes the new doc only; zero code impact.
 RESIDUAL RISK: NONE — additive documentation; no source, settings, or commands touched.
+
+### [2026-06-13 23:05 EEST] — Doc1: command reference (docs/COMMANDS.md + in-game searchable window)
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    IMPLEMENT + DOCUMENT (gated — see Phase D gate above)
+PRE-FLIGHT:   Read COMMANDS map (constants.js:377-415), COMMAND_REGISTRY (command-registry.js), the
+              help() handler + insertion point (commands.js:189-206), and verified the ApplicationV2
+              render API (_renderHTML/_replaceHTML + DEFAULT_OPTIONS) via Foundry docs/wiki.
+EVIDENCE:     CLAIM: COMMAND_REGISTRY is the single source of truth (command/aliases/permission/help)
+              that both the doc and the window can render without drift.
+              EVIDENCE: scripts/chat/command-registry.js:37-63 :: COMMAND_REGISTRY; findCommand at :69-79.
+              CONFIDENCE: HIGH  BASIS: read the exact lines.
+              CLAIM: a top-level `extends foundry…` would throw under Node and break load-smoke; the
+              class must be lazy. EVIDENCE: test/_skald-source.mjs walks all scripts/ subdirs (so ui/
+              is in the corpus + load-smoke import path). CONFIDENCE: HIGH BASIS: read the helper.
+CHANGE:       (1) docs/COMMANDS.md — comprehensive, categorised reference with syntax, permission and
+              examples for every command. (2) NEW scripts/ui/command-reference.js — an ApplicationV2
+              window (lazy class, manual inline-HTML render matching the repo convention) with pure,
+              unit-tested helpers (buildCommandEntries/filterCommandEntries/renderReferenceHtml/
+              escapeRefHtml), a live search filter, and "Try it" buttons that pre-fill the chat input
+              (no dispatch). Falls back to the classic help card if ApplicationV2 is unavailable.
+              (3) wired a new !commands command: constants.js (COMMANDS_REF), command-registry.js
+              (descriptor), commands.js (commandReference handler + import).
+FILES TOUCHED (6 — gated):
+  - docs/COMMANDS.md                         (+170 / -0, new)
+  - scripts/ui/command-reference.js          (+210 / -0, new)
+  - scripts/chat/commands.js                 (+14 / -0)
+  - scripts/core/constants.js                (+2 / -0)
+  - scripts/chat/command-registry.js         (+1 / -0)
+  - test/command-reference.test.mjs          (+95 / -0, new)
+TESTS:        node test/command-reference.test.mjs → 22/22; full suite → 49/49. node --check on all
+              changed JS.
+SUITE:        npm test -> PASS (49 files)
+GATE:         Covered by the Phase D gate above (new ui/ layer + new public command).
+ROLLBACK:     git revert <this commit> — removes the doc, the UI module, the command token/descriptor/
+              handler and the test together; no other behaviour touched.
+RESIDUAL RISK: LOW. Purely additive: a new opt-in command that opens a read-only window; the window
+              never dispatches commands (only pre-fills the input). Lazy class keeps Node import safe.

@@ -36,6 +36,7 @@ import { COMMANDS } from "../core/constants.js";
 /** @type {ReadonlyArray<CommandDescriptor>} */
 export const COMMAND_REGISTRY = Object.freeze([
   { command: COMMANDS.HELP,        aliases: [],                                          method: "help",          permission: "all", help: "Show the Skald command help card." },
+  { command: COMMANDS.COMMANDS_REF, aliases: [],                                         method: "commandReference", permission: "all", help: "Open the interactive, searchable command reference." },
   { command: COMMANDS.SKALD,       aliases: [],                                          method: "skald",         permission: "all", help: "Speak with the Skald (explicit form)." },
   { command: COMMANDS.ORACLE,      aliases: [],                                          method: "oracle",        permission: "all", help: "Roll an Ironsworn oracle and interpret it." },
   { command: COMMANDS.NPC,         aliases: [],                                          method: "npc",           permission: "all", help: "Conjure or roleplay an NPC." },
