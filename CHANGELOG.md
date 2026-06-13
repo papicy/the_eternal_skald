@@ -13,6 +13,45 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.18.0] — 2026-06-13
+
+A reliability and maintainability pass (developer-facing "Phase A"). No gameplay,
+data-model, directive grammar or i18n key changed — everything here is purely
+additive and fully backwards-compatible.
+
+### Added
+- **Error cards in chat (H3).** A new `Chat.postError()` helper posts a styled,
+  fail-soft **error card** (whispered to GMs by default) when a command or AI
+  call fails, so problems surface in the saga instead of dying silently in the
+  browser console. The command dispatcher now routes failures through it, with
+  an actionable hint pointing at Module Settings and the troubleshooting guide.
+  A matching `.es-variant-error` card style was added.
+- **Unified logging facade + Logging Level setting (M1).** A new
+  `scripts/core/logger.js` provides a single, level-aware `Logger` (`off` /
+  `error` / `warn` / `info` / `debug`) and a new world-scoped **Logging Level**
+  setting (default *Warnings and errors*) tunes console verbosity. The legacy
+  **Debug Logging** toggle still works and, when on, forces full debug output.
+- **Troubleshooting guide (Doc3).** A new categorised
+  [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md) covers the most common
+  setup issues (API keys, the server hook, RAG/secure-context, Ironsworn
+  detection, vision models, Connection Mode, CORS and stale caches), linked from
+  the README.
+- **Continuous integration (L3).** A `.github/workflows/ci.yml` workflow runs the
+  full Node test suite (including the version-consistency guard) on every push
+  and pull request.
+
+### Changed
+- **Manifest hygiene (H4).** `module.json`'s `download` URL now tracks the current
+  release tag (it had drifted to a stale `v0.14.0.zip`), the bloated multi-version
+  changelog embedded in `description` was trimmed to a concise current-version
+  summary (full history lives here in the changelog), and `package.json`'s
+  `repository.url` was corrected to the real `the_eternal_skald` slug.
+
+### Fixed
+- The version-consistency test suite was extended to guard the download URL,
+  the manifest/repo slug match, a concise description, and that the latest
+  CHANGELOG heading matches the shipped version — the same checks CI enforces.
+
 ## [0.17.2] — 2026-06-13
 
 ### Fixed

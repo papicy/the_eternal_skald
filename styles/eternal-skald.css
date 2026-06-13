@@ -1004,3 +1004,30 @@
 /* Collapsible archive block left behind by a rewrite/merge (v0.14.0) */
 .es-journal-archive { margin-top: .75em; opacity: .9; }
 .es-journal-archive > summary { cursor: pointer; font-size: .9em; opacity: .8; }
+
+/* (H3) Error card variant — a distinct red-edged card for surfaced AI / API /
+   command failures (see Chat.postError). */
+.eternal-skald-card.es-variant-error {
+  background: linear-gradient(180deg, #241010 0%, #140807 100%);
+  border-color: #7a2520;
+  box-shadow:
+    inset 0 0 0 1px rgba(220, 90, 60, 0.18),
+    0 2px 4px rgba(0, 0, 0, 0.5);
+}
+.eternal-skald-card.es-variant-error::before {
+  border-color: rgba(220, 90, 60, 0.30);
+}
+.eternal-skald-card.es-variant-error .es-rune,
+.eternal-skald-card.es-variant-error .es-alias { color: #e88a7a; }
+.eternal-skald-card.es-variant-error .es-title  { color: #f0b0a0; }
+.eternal-skald-card.es-variant-error .es-error-detail {
+  font-family: monospace;
+  font-size: 0.85em;
+  color: #d8a0a0;
+  opacity: 0.9;
+  word-break: break-word;
+}
+.eternal-skald-card.es-variant-error .es-error-hint {
+  color: var(--es-muted);
+  font-style: italic;
+}

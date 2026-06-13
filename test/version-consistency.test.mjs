@@ -121,5 +121,65 @@ eq(packageJson.version, VERSION, "[1] package.json version matches module.json")
   }
 }
 
+/* --------------------------------------------------------------------- *
+ * [8] Manifest hygiene (H4): the download URL must point at the CURRENT
+ *     version's release tag, not a stale older one (it drifted to v0.14.0
+ *     while the module shipped 0.17.0).
+ * --------------------------------------------------------------------- */
+{
+  const dl = moduleJson.download || "";
+  ok(dl.includes(`v${VERSION}.zip`),
+     `[8] module.json download URL points at the current version tag (v${VERSION})`);
+  ok(!/v0\.14\.0\.zip/.test(dl),
+     "[8] module.json download URL no longer pins the stale v0.14.0 tag");
+}
+
+/* --------------------------------------------------------------------- *
+ * [9] Manifest hygiene (H4): module.json `url` and package.json
+ *     `repository.url` must reference the SAME GitHub repository slug
+ *     (they drifted: the_eternal_skald vs eternal_skald).
+ * --------------------------------------------------------------------- */
+{
+  const slug = (u) => {
+    const m = (u || "").match(/github\.com\/([^/]+\/[^/.]+)/);
+    return m ? m[1] : null;
+  };
+  const manifestSlug = slug(moduleJson.url);
+  const repoSlug = slug(packageJson.repository && packageJson.repository.url);
+  ok(!!manifestSlug, "[9] module.json url is a parseable GitHub repo URL");
+  ok(!!repoSlug, "[9] package.json repository.url is a parseable GitHub repo URL");
+  eq(repoSlug, manifestSlug, "[9] package.json repo slug matches module.json url slug");
+}
+
+/* --------------------------------------------------------------------- *
+ * [10] Manifest hygiene (H4): the description must be a concise,
+ *      current-version summary — the full multi-version changelog that
+ *      had been embedded (back to v0.4.0) belongs in CHANGELOG.md.
+ * --------------------------------------------------------------------- */
+{
+  const desc = moduleJson.description || "";
+  ok(desc.length < 4000,
+     `[10] module.json description is concise (got ${desc.length} chars, expect < 4000)`);
+  ok(!/v0\.4\.0/.test(desc),
+     "[10] module.json description no longer embeds the full historical changelog");
+  ok(desc.includes(`v${VERSION}`),
+     "[10] module.json description references the current version");
+}
+
+/* --------------------------------------------------------------------- *
+ * [11] Release hygiene (L3): the most recent CHANGELOG heading must match
+ *      the module version, so a release is never cut without a changelog
+ *      entry (and the entry never drifts from the shipped version). This
+ *      is the third leg the CI workflow enforces:
+ *      module.json == package.json == CHANGELOG latest heading.
+ * --------------------------------------------------------------------- */
+{
+  const changelog = read("CHANGELOG.md");
+  // First "## [X.Y.Z]" heading top-to-bottom is the latest release.
+  const m = changelog.match(/^##\s*\[(\d+\.\d+\.\d+)\]/m);
+  ok(!!m, "[11] CHANGELOG.md has a '## [X.Y.Z]' release heading");
+  if (m) eq(m[1], VERSION, "[11] latest CHANGELOG heading matches module.json version");
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

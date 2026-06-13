@@ -140,6 +140,15 @@ export function dispatchCommand(rawText) {
     .catch(err => {
       console.error(LOG_PREFIX, `Command "${head}" failed:`, err);
       try { ui.notifications?.error(`${SKALD_NAME}: ${err?.message ?? err}`); } catch (_) {}
+      // (H3) Surface the failure as a persistent GM-whispered error card so it
+      // isn't lost in a transient toast / the console. Fire-and-forget &
+      // fail-soft — postError never throws.
+      try {
+        Chat.postError(`The command ${head} could not be completed.`, {
+          detail: err?.message ?? String(err),
+          hint: "Check your AI Provider, API Key and Connection Mode in Module Settings. See docs/TROUBLESHOOTING.md."
+        });
+      } catch (_) {}
     });
 
   return true;
