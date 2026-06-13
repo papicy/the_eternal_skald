@@ -13,6 +13,42 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.17.0] — 2026-06-13
+
+### Added
+- **Multi-system adapter architecture.** The Skald is now *game-system aware*. A
+  thin **system-adapter** layer (`scripts/systems/`) lets the agnostic core —
+  chronicle, semantic memory/RAG, map vision, commands and narration — drive any
+  Foundry system through a single `SystemAdapter` contract instead of assuming
+  Ironsworn everywhere. See the new developer guide,
+  [docs/SYSTEMS.md](docs/SYSTEMS.md), and the design rationale in
+  [docs/PROPOSAL-multi-system-adapter-architecture.md](docs/PROPOSAL-multi-system-adapter-architecture.md).
+- **System registry.** `scripts/systems/registry.js` maps a Foundry
+  `game.system.id` to an adapter and resolves the active one. `getActiveAdapter()`
+  **never returns `null`** — it falls back to the `NullAdapter`. Exposed to macros
+  and other modules as `game.modules.get('the-eternal-skald').api.systems`.
+- **`NullAdapter` (standalone fallback).** When no adapter matches the active
+  system, the Skald keeps working as a standalone AI narrator — chronicle, memory,
+  map vision and commands all function — while system-specific mechanics safely
+  no-op. This preserves the long-standing "works in any system" promise.
+- **`NimbleAdapter` (read-only support for Nimble 2).** The Skald can now read
+  characters running under the `nimble` system — core abilities (STR/DEX/INT/WIL)
+  and resource pools (HP, Wounds, Mana, Hit Dice) — to ground its narration. Map
+  vision, chronicle and memory all work. Nimble has no oracles, vows, progress
+  tracks or momentum, so those Ironsworn-specific mechanics report `unsupported()`
+  and the (capability-gated) consumers simply omit them. The Skald does **not**
+  write to Nimble sheets.
+- **`nimble` manifest relationship.** `module.json` now advertises Nimble as a
+  recommended (read-only-supported) system alongside Ironsworn.
+
+### Changed
+- **Internal consumers now talk to the active adapter.** Leaf consumers and the
+  integration spine were migrated to resolve state and capabilities through
+  `getActiveAdapter()` rather than referencing Ironsworn directly. The Ironsworn
+  controller is re-registered verbatim as the `foundry-ironsworn` adapter, so
+  **behaviour on Ironsworn worlds is unchanged** — the migration is purely
+  additive and backwards-compatible.
+
 ## [0.14.0] — 2026-06-11
 
 ### Added

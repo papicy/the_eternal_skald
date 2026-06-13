@@ -4,7 +4,7 @@ An AI-powered storyteller, oracle interpreter, and tactical enemy controller for
 
 Powered by the **Abacus AI ChatLLM** platform (Gemini 3.0 Flash by default).
 
-> ⚠️ **Alpha / Development Version (v0.16.1)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
+> ⚠️ **Alpha / Development Version (v0.17.0)** — This is experimental pre-release software under active development. Expect rough edges, breaking changes between versions, and features that may not yet work in every configuration. It is **not** production-ready. Please back up your world before use and report issues you run into. See [Versioning & Release Strategy](#versioning--release-strategy) for what the version numbers mean.
 
 As of **v0.3.0**, the Skald integrates directly with the official [**foundry-ironsworn**](https://foundryvtt.com/packages/foundry-ironsworn) system: it reads your character's stats and meters, *suggests* the right Ironsworn move, triggers the system's own dice mechanics on one click, narrates the official strong-hit / weak-hit / miss outcome, and can optionally apply mechanical effects. See [Ironsworn Integration](#ironsworn-integration) below. The module still works standalone in any system — Ironsworn features simply activate when the system is present.
 
@@ -117,7 +117,7 @@ node --import "./Data/modules/the-eternal-skald/scripts/eternal-skald-server.mjs
 When Foundry starts, you should see this in the console/logs:
 
 ```
-⚔️  Skald | v0.16.1 — server hook active. /skald-api/* routes ready.
+⚔️  Skald | v0.17.0 — server hook active. /skald-api/* routes ready.
 ```
 
 ### 3. Set your API key
@@ -139,7 +139,7 @@ http://your-foundry:30000/skald-api/health
 You should see:
 
 ```json
-{"status":"ok","service":"The Eternal Skald","version":"0.16.1"}
+{"status":"ok","service":"The Eternal Skald","version":"0.17.0"}
 ```
 
 If you get a 404 or Foundry's normal HTML page, the `--import` flag isn't taking effect. Double-check:
@@ -242,6 +242,30 @@ With **AI Applies Mechanical Effects** enabled (now **on by default**), the Skal
 | Auto-Create Combat Tracks | On | Auto-create a combat progress track per foe when a fight begins. Requires *AI Applies Mechanical Effects*. |
 | Default Enemy Rank | Dangerous | Fallback rank for **custom** foes only — used when the Skald invents a foe that isn't in the Ironsworn foe compendium *and* doesn't specify a rank. Standard foes (Bear, Wolf, Wyvern, …) automatically use their official compendium rank. |
 | Debug Logging | Off | Verbose integration diagnostics in the browser console (F12). |
+
+---
+
+## Multi-System Support
+
+The Eternal Skald is **game-system aware**. Starting in **v0.17.0**, the module talks to the underlying Foundry game system through a small **system-adapter** layer instead of assuming Ironsworn everywhere. This keeps the rich Ironsworn integration intact while letting the Skald run — and read characters — on other systems, and degrade gracefully when no adapter matches.
+
+### How adapters work
+
+At `ready`, the module inspects the active world's system and selects a **system adapter**. Every adapter implements a common contract (read character state, report which capabilities it supports, optionally apply mechanical effects). The rest of the module — chronicle, memory/RAG, map vision, chat commands — talks only to the *active adapter*, never to a specific system's data model.
+
+If no adapter matches the active system, a built-in **NullAdapter** takes over so the Skald still works as a standalone AI narrator (chronicle, memory, map vision and commands all function); it simply reports no character-sheet reads or rules effects.
+
+| System | Adapter | What the Skald does |
+|---|---|---|
+| **foundry-ironsworn** | `IronswornController` | **Full integration** — reads stats/meters/tracks, suggests & narrates moves, and (optionally) applies mechanical effects. Unchanged from previous releases. |
+| **nimble** (Nimble v2) | `NimbleAdapter` | **Read-only** — reads core abilities (STR/DEX/INT/WIL) and resource pools (HP, wounds, mana, hit dice) to ground narration. Map vision, chronicle and memory all work. The Skald does **not** write to Nimble sheets. |
+| *anything else / none* | `NullAdapter` | **Standalone narrator** — chronicle, memory, map vision and commands work; no sheet reads, no rules effects. |
+
+Because every consumer is capability-gated, enabling a new system is purely additive: existing Ironsworn worlds behave exactly as before.
+
+### Adding your own system
+
+Adapters are intentionally small and self-contained. If you'd like the Skald to read characters (or apply effects) on a system that isn't supported yet, see the developer guide: **[docs/SYSTEMS.md](docs/SYSTEMS.md)**.
 
 ---
 
@@ -599,6 +623,15 @@ await skald.rag.clear();                       // wipe the whole vector store
 await skald.scout();                           // force a fresh vision analysis of the current scene
 await skald.mapVision.analyzeScene(scene, { force: true });   // analyse a specific scene (force ignores cache)
 const cached = skald.mapVision.getCached(scene);              // { ts, model, pois } | null
+
+// --- Multi-system adapters (v0.17.0) ---
+// skald.systems is the SystemRegistry.
+const adapter = skald.systems.getActive();           // active adapter (never null — NullAdapter fallback)
+const caps    = adapter.capabilities();              // { characterReads, mapVision, systemActive, ... }
+const who     = adapter.describeCharacter?.();        // active character state, if the adapter supports reads
+skald.systems.get('nimble');                          // look up a registered adapter by system id (or null)
+skald.systems.list();                                 // → ['foundry-ironsworn', 'nimble', ...] for diagnostics
+skald.systems.register('my-system', myAdapter);       // register your own adapter (see docs/SYSTEMS.md)
 ```
 
 ---
@@ -608,7 +641,7 @@ const cached = skald.mapVision.getCached(scene);              // { ts, model, po
 **"The Eternal Skald server hook is not loaded (404)"**
 This only appears if **Connection Mode** is set to **Server hook only** and the `--import` flag isn't in your Foundry startup command (or the path is wrong). On **Auto** (the default) the Skald silently falls back to direct browser→AI mode instead, so you won't see this error. To use the hook, see [Setup step 2](#2-optional-add---import-to-your-foundry-startup); otherwise switch Connection Mode to **Auto** or **Direct (browser → AI)**.
 
-**No `⚔️ Skald | v0.16.1` line in Foundry's console output**
+**No `⚔️ Skald | v0.17.0` line in Foundry's console output**
 The hook file isn't being loaded. Check the path is absolute and correct. Run it in a terminal to see Node.js errors.
 
 **"No Abacus AI API key is set"**
