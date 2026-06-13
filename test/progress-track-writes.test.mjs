@@ -18,9 +18,6 @@
  *  Run: node test/progress-track-writes.test.mjs
  * ===================================================================== */
 
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { readSkaldSource } from "./_skald-source.mjs";
 
 let passed = 0, failed = 0;
@@ -139,7 +136,6 @@ function extractFn(src, marker) {
   }
   return src.slice(start, i);
 }
-const __dirname = dirname(fileURLToPath(import.meta.url));
 // (Phase 2 refactor) The monolith was decomposed into scripts/<subsystem>/*.js
 // modules. This source-text guard scans the whole refactored tree via the
 // shared reader so relocated definitions are still seen wherever they live.
@@ -152,12 +148,11 @@ const _parseWriteDirective = new Function(
 const _completionMoveKind = new Function(
   "return (" + extractFn(SRC, "_completionMoveKind(moveName)").replace(/^_completionMoveKind/, "function _completionMoveKind") + ")"
 )();
-// _isProgressMove(dsid, name) lives in the root-level ironsworn-controller.js,
-// which the shared corpus deliberately excludes — read that file directly. It
-// uses no `this`, so we can lift it out as a plain function.
-const CTRL_SRC = readFileSync(join(__dirname, "..", "scripts", "ironsworn-controller.js"), "utf8");
+// _isProgressMove(dsid, name) lives in scripts/ironsworn/moves.js (extracted from
+// the controller during the Phase B decomposition) and is part of the shared
+// corpus. It uses no `this`, so we can lift it out as a plain function.
 const _isProgressMove = new Function(
-  "return (" + extractFn(CTRL_SRC, "_isProgressMove(dsid, name)").replace(/^_isProgressMove/, "function _isProgressMove") + ")"
+  "return (" + extractFn(SRC, "_isProgressMove(dsid, name)").replace(/^_isProgressMove/, "function _isProgressMove") + ")"
 )();
 
 console.log("Progress-track WRITE / story-arc / roll-integration test (v0.10.27)\n");
