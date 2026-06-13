@@ -9,14 +9,14 @@
 [![System](https://img.shields.io/badge/System-Ironsworn-4a7fa5?style=for-the-badge&labelColor=1a1a1a)](https://foundryvtt.com/packages/foundry-ironsworn)
 [![AI Model](https://img.shields.io/badge/AI-Gemini_3_Flash-7b2cbf?style=for-the-badge&logo=google&logoColor=white&labelColor=1a1a1a)](https://abacus.ai)
 [![License](https://img.shields.io/badge/License-CC_BY--SA_4.0-3a7a5a?style=for-the-badge&labelColor=1a1a1a)](http://creativecommons.org/licenses/by-sa/4.0/)
-[![Buy me a coffee](https://img.shields.io/badge/Buy_me_a_coffee-Support_%E2%98%95-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=000&labelColor=1a1a1a)](https://buymeacoffee.com/papicy)
-[![Patreon](https://img.shields.io/badge/Patreon-Become_a_patron-FF424D?style=for-the-badge&logo=patreon&logoColor=fff&labelColor=1a1a1a)](https://patreon.com/papicy)
+[![Buy me a coffee](https://img.shields.io/badge/Buy_me_a_coffee-Support_%E2%98%95-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=000&labelColor=1a1a1a)](https://buymeacoffee.com/YOUR_NAME)
+[![Patreon](https://img.shields.io/badge/Patreon-Become_a_patron-FF424D?style=for-the-badge&logo=patreon&logoColor=fff&labelColor=1a1a1a)](https://patreon.com/YOUR_NAME)
 
 ---
 
 *"A wise, dramatic Norse narrator who serves as the GM at your table — interpreting oracle rolls, voicing NPCs, and taking control of enemy combatants."*
 
-[Setup](#-setup) • [Ironsworn Integration](#-ironsworn-integration) • [Combat](#-combat-system) • [Living Chronicle](#-the-living-chronicle) • [Map Vision](#-map-vision) • [AI Memory](#-ai-memory-rag) • [Commands](#-commands) • [Public API](#-public-api)
+[Setup](#setup) • [Ironsworn Integration](#ironsworn-integration) • [Combat](#combat-system) • [Living Chronicle](#the-living-chronicle) • [Map Vision](#map-vision) • [AI Memory](#ai-memory-rag) • [Commands](#commands) • [Public API](#public-api)
 
 </div>
 
@@ -27,6 +27,7 @@
 
 ---
 
+<a id="core-capabilities"></a>
 ### 🛡️ Core Capabilities
 
 | Feature | Description |
@@ -40,6 +41,7 @@
 
 ---
 
+<a id="setup"></a>
 ### 🚀 Setup
 
 **1. Install the Module**
@@ -67,6 +69,7 @@ If self-hosting, add the following to your Foundry startup flags:
 
 ---
 
+<a id="ironsworn-integration"></a>
 ### 🏔️ Ironsworn Integration
 
 As of **v0.3.0**, the Skald integrates directly with [foundry-ironsworn](https://foundryvtt.com/packages/foundry-ironsworn). It reads your character's stats and meters, suggests the right move, triggers the system's own dice mechanics on one click, and narrates the official strong-hit / weak-hit / miss outcome.
@@ -75,6 +78,7 @@ The module still works **standalone in any system** — Ironsworn features simpl
 
 ---
 
+<a id="combat-system"></a>
 ### ⚔️ Combat System
 
 The Skald manages enemy combatants on their turn with full tactical narration.
@@ -86,6 +90,7 @@ The Skald manages enemy combatants on their turn with full tactical narration.
 
 ---
 
+<a id="the-living-chronicle"></a>
 ### 📖 The Living Chronicle
 
 The Skald automatically scribes your saga into Foundry Journal entries.
@@ -97,6 +102,7 @@ The Skald automatically scribes your saga into Foundry Journal entries.
 
 ---
 
+<a id="map-vision"></a>
 ### 🗺️ Map Vision (Image Analysis)
 
 The Skald can look at your background map using vision-capable models and describe terrain, points of interest, and atmosphere.
@@ -118,6 +124,7 @@ The Skald can look at your background map using vision-capable models and descri
 
 ---
 
+<a id="ai-memory-rag"></a>
 ### 🧠 AI Memory (RAG)
 
 Browser-based semantic memory powered by vector embeddings — no server required.
@@ -129,6 +136,7 @@ Browser-based semantic memory powered by vector embeddings — no server require
 
 ---
 
+<a id="commands"></a>
 ### 💬 Commands
 
 Use the `!` prefix in the Foundry chat (**AI Mode must be ON**).
@@ -145,6 +153,7 @@ Use the `!` prefix in the Foundry chat (**AI Mode must be ON**).
 
 ---
 
+<a id="settings"></a>
 ### ⚙️ Settings
 
 | Setting | Default | Effect |
@@ -159,6 +168,7 @@ Use the `!` prefix in the Foundry chat (**AI Mode must be ON**).
 
 ---
 
+<a id="multi-system-support"></a>
 ### 🔌 Multi-System Support
 
 The Skald is built for Ironsworn but degrades gracefully in other systems.
@@ -171,6 +181,7 @@ The Skald is built for Ironsworn but degrades gracefully in other systems.
 
 ---
 
+<a id="public-api"></a>
 ### 🛠️ Public API
 
 The module exposes a global API for macros and other modules:
@@ -193,6 +204,7 @@ await skald.vision.analyzeCurrentScene();
 
 ---
 
+<a id="architecture"></a>
 ### 🏗️ Architecture
 
 The module was refactored in **v0.10.x** from a single ~11,000-line monolith into focused ES modules with **zero behavioral change**.
@@ -213,6 +225,7 @@ scripts/
 
 ---
 
+<a id="changelog-highlights"></a>
 ### 📋 Changelog Highlights
 
 | Version | Highlights |
@@ -225,6 +238,7 @@ scripts/
 
 ---
 
+<a id="versioning"></a>
 ### 📦 Versioning
 
 ```
@@ -243,22 +257,45 @@ npm run version:bump 0.16.0 --no-commit # update files only
 
 ---
 
+<a id="license-attribution"></a>
 ### ⚖️ License & Attribution
 
-**The Eternal Skald** — Copyright © papicy.
-Licensed under [Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)](http://creativecommons.org/licenses/by-sa/4.0/).
+#### The Eternal Skald (Module Code & Original Content)
 
-Based on works by **Shawn Tomkin** — *Ironsworn*, *Ironsworn: Delve*, *Ironsworn: Starforged*, and *Sundered Isles* — licensed under [CC-BY-NC-SA 4.0](http://creativecommons.org/licenses/by-nc-sa/4.0/). Please support the creator at [tomkinpress.com](https://tomkinpress.com/).
+This project is licensed under **Creative Commons Attribution–ShareAlike 4.0 International (CC BY‑SA 4.0)**.
 
-Also builds on the [Ironsworn & Starforged system for Foundry VTT](https://github.com/ben/foundry-ironsworn) by Ben and contributors.
+- **License text:** [CC BY-SA 4.0](http://creativecommons.org/licenses/by-sa/4.0/)
+- **You may:** share, adapt, remix, and build upon this work (including commercially).
+- **You must:**
+  - **Attribute** the original author(s).
+  - **ShareAlike** — distribute contributions under the same license.
+
+> [!NOTE]
+> If you reuse or modify this repository, include attribution in your fork/readme/release notes and keep the license notice intact.
+
+#### Ironsworn / Starforged Attribution
+
+**The Eternal Skald** is an unofficial, fan-made Foundry VTT module based on works by **Shawn Tomkin** — including *Ironsworn*, *Ironsworn: Delve*, *Ironsworn: Starforged*, and *Sundered Isles* — which are licensed under **CC BY‑NC‑SA 4.0**.
+
+- **Tomkin Press licensing:** [tomkinpress.com/pages/licensing](https://tomkinpress.com/pages/licensing)
+- Please support the creator by buying the official books at [tomkinpress.com](https://tomkinpress.com/).
+
+#### Foundry System Attribution
+
+This module also builds on the **Ironsworn & Starforged system for Foundry VTT** by Ben and contributors:
+
+- [github.com/ben/foundry-ironsworn](https://github.com/ben/foundry-ironsworn)
+
+#### Disclaimer
 
 > This is an independent, unofficial project and is **not affiliated with, endorsed by, or sponsored by** Shawn Tomkin, Tomkin Press, or Foundry Gaming LLC. All trademarks are the property of their respective owners.
+
 
 ---
 
 <div align="center">
 
-*Forged in the Ironlands. Powered by [Abacus AI](https://abacus.ai) & Fried Chicken*
+*Forged in the Ironlands. <br> Powered by [Abacus AI](https://abacus.ai) & Fried Chicken*
 
 ⚔️
 
