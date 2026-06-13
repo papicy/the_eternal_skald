@@ -289,9 +289,17 @@ This project is licensed under **Creative Commons Attribution–ShareAlike 4.0 I
 
 #### Foundry System Attribution
 
-This module also builds on the **Ironsworn & Starforged system for Foundry VTT** by Ben and contributors:
+This module builds on and/or is inspired by the following projects (thank you to their authors and contributors):
 
-- [github.com/ben/foundry-ironsworn](https://github.com/ben/foundry-ironsworn)
+- **Foundry VTT** (The core VTT software):
+  - [github.com/foundryvtt](https://github.com/foundryvtt)
+- **Datasworn** (Ironsworn/Starforged data reference):
+  - [github.com/papicy/datasworn](https://github.com/papicy/datasworn)
+- **FoundryVTT-Nimble**:
+  - [github.com/papicy/FoundryVTT-Nimble](https://github.com/papicy/FoundryVTT-Nimble)
+- **Ironsworn & Starforged system for Foundry VTT** (repository reference used by this module):
+  - [github.com/papicy/foundry-ironsworn](https://github.com/papicy/foundry-ironsworn)
+  - (Upstream) [github.com/ben/foundry-ironsworn](https://github.com/ben/foundry-ironsworn)
 
 #### Disclaimer
 
