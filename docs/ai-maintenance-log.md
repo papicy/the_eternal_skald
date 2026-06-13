@@ -2492,3 +2492,71 @@ SUITE:        npm test -> PASS (37 files passed, 0 failed).
 GATE:         User explicitly approved merging PR #22 and requested the version bump.
 ROLLBACK:     git revert <bump-commit-sha> restores 0.17.0 across all four files.
 RESIDUAL RISK: NONE. Metadata/docs only; no runtime behaviour changed by this commit.
+
+
+
+---
+
+### [2026-06-13 16:55 EEST] — Fix: progress-track registration + naming (vows/combat/journeys)
+AGENT:        Abacus.AI Agent (SkaldCoder)
+TASK TYPE:    IMPLEMENT (bug fix) + TEST
+TOKEN BUDGET: 5,000 (IMPLEMENT)  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] 1. read engineering-brief.md + repository-map.md in full
+  [x] 2. task classified: IMPLEMENT (bug fix, budget 5,000)
+  [x] 3. target located — scripts/narrative/integration.js:_splitNameRank (was 593-605)
+  [x] 4. change is 2 files, ≤50 changed lines/file (integration.js: 33 ins / 15 del)
+  [x] 5. ADDITIVE & backwards-compatible (parsing only; defaults unchanged)
+  [x] 6. NO setting/flag/AI-effect-directive removed or renamed
+  [x] 7. crosses a 🔴 LOCKED boundary (integration.js) → APPROVAL GATE recorded below
+  [x] 8. regression test added: test/progress-track-naming.test.mjs
+  [x] 9. rollback = revert this single commit
+
+EVIDENCE (brief §4):
+  CLAIM:      A rank word emitted BEFORE the name produced an empty name, so the
+              create_vow/create_combat/create_journey handler returned null and the
+              directive was SILENTLY DROPPED — the track never registered.
+  EVIDENCE:   scripts/narrative/integration.js:593-605 :: _splitNameRank (greedy
+              findIndex picked idx 0 → name = tokens.slice(0,0) = "") and
+              :531/:536/:542 (handlers return null when name is falsy).
+  CONFIDENCE: HIGH  BASIS: read the exact lines AND executed the identical logic.
+
+  CLAIM:      A canonical rank WORD that is part of a track name ("Slay the Formidable
+              Wyrm", "The Extreme Cold of the North") was mistaken for the rank and
+              truncated the name (the "bad naming" bug).
+  EVIDENCE:   scripts/narrative/integration.js:596 :: greedy first-match findIndex.
+  CONFIDENCE: HIGH  BASIS: executed identical logic on those exact strings.
+
+CHANGE:       Rewrote _splitNameRank so a rank is recognised ONLY as a TRAILING token
+              (the canonical "<Name> <rank>" form), with a defensive recovery that lifts
+              a single MIS-ORDERED leading rank ("<rank> <Name>") out of the name. A rank
+              word embedded mid-name is therefore never treated as the rank, and the name
+              is never empty when real name tokens are present, so the directive always
+              registers. No call-site signature changed (return shape still
+              {name, rank, desc}); `desc` is retained but is now always "" (an inline
+              description cannot be split once the rank must be trailing — descriptions
+              remain fully supported via the createProgressTrack(...) API).
+FILES TOUCHED (2):
+  - scripts/narrative/integration.js  (🔴 LOCKED — _splitNameRank rewrite + doc/comment;
+                                        33 insertions, 15 deletions)
+  - test/progress-track-naming.test.mjs  (🟢 NEW regression test — extracts the REAL
+                                        _splitNameRank from shipped source and locks both
+                                        bug fixes + the never-empty-name invariant)
+TESTS:        node test/progress-track-naming.test.mjs — RESULT: 24 passed, 0 failed.
+SUITE:        npm test -> PASS (38 files passed, 0 failed).
+GATE (brief §6):
+  TASK:        Fix progress-track registration failures + name corruption.
+  LIMIT HIT:   §5 — edit to a 🔴 LOCKED file (scripts/narrative/integration.js).
+  WHY NEEDED:  root cause is _splitNameRank's greedy first-rank match (evidence above).
+  SMALLEST SAFE OPTION: rewrite ONLY _splitNameRank; no grammar/setting/i18n change.
+  BLAST RADIUS: 2 files (1 LOCKED fn + 1 new test); rollback = revert this commit.
+  APPROVAL:    GRANTED by user (chat, 2026-06-13): "Proceed. Require ranks to be a
+               trailing token." — the stricter trailing-only rule was the user's explicit
+               choice over the milder last-rank-token option.
+ROLLBACK:     git revert <this-commit-sha> restores the prior _splitNameRank and removes
+              the new test.
+RESIDUAL RISK: LOW. Parsing-only change behind no setting. Known accepted trade-off: an
+              inline description on create_vow/create_journey is no longer split from the
+              tail (folds into the name if no trailing rank) — a direct consequence of the
+              approved trailing-rank rule; no test or downstream path depended on it.

@@ -568,7 +568,7 @@ export const Integration = {
     return null;
   },
 
-  /** Ironsworn rank words, used to split "Name <rank> [description]". */
+  /** Ironsworn rank words. A rank is recognised ONLY as a TRAILING token. */
   _RANKS: ["troublesome", "dangerous", "formidable", "extreme", "epic"],
 
   /**
@@ -584,24 +584,42 @@ export const Integration = {
   },
 
   /**
-   * Split a directive tail of the form "<Name...> [rank] [description...]".
-   * The rank token (if any of the canonical ranks appears) separates the
-   * track name from an optional trailing description. When no rank token is
-   * present, the whole string is treated as the name (rank=null).
+   * Split a directive tail of the form "<Name...> [rank]" into a clean track
+   * name and optional rank.
+   *
+   * A rank word is recognised ONLY as a TRAILING token (the canonical
+   * "<Name> <rank>" form). This deliberately stops a rank WORD that is part of
+   * the name itself — e.g. "Slay the Formidable Wyrm", "The Extreme Cold of the
+   * North" — from being mistaken for the rank and truncating the track name
+   * (the "bad naming" bug). A defensive recovery also lifts a single
+   * MIS-ORDERED leading rank ("<rank> <Name>") out of the name so the track
+   * still registers with a clean name instead of being dropped (the
+   * "track never registers" bug). When no trailing/leading rank is present the
+   * whole string is the name (rank=null) — a real rank then defaults downstream.
+   *
+   * NOTE: `desc` is retained in the return shape for call-site compatibility
+   * but is always "" — an inline description cannot be separated once a rank is
+   * required to be trailing. Descriptions are still supported via the explicit
+   * createProgressTrack(...) API.
    * @returns {{name:string, rank:string|null, desc:string}}
    */
   _splitNameRank(rest) {
     if (!rest) return { name: "", rank: null, desc: "" };
-    const tokens = rest.split(/\s+/);
-    const idx = tokens.findIndex(t =>
-      this._RANKS.includes(t.toLowerCase().replace(/[^a-z]/g, "")));
-    if (idx === -1) {
-      return { name: rest.replace(/[:\-—|]+$/, "").trim(), rank: null, desc: "" };
+    const tokens = String(rest).trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return { name: "", rank: null, desc: "" };
+    const norm   = (t) => t.toLowerCase().replace(/[^a-z]/g, "");
+    const isRank = (t) => this._RANKS.includes(norm(t));
+    let rank = null;
+    if (isRank(tokens[tokens.length - 1])) {
+      // Canonical "<Name> <rank>" — rank is the trailing token.
+      rank = norm(tokens.pop());
+    } else if (tokens.length > 1 && isRank(tokens[0])) {
+      // Defensive recovery for a mis-ordered "<rank> <Name>".
+      rank = norm(tokens.shift());
     }
-    const name = tokens.slice(0, idx).join(" ").replace(/[:\-—|]+$/, "").trim();
-    const rank = tokens[idx].toLowerCase().replace(/[^a-z]/g, "");
-    const desc = tokens.slice(idx + 1).join(" ").replace(/^[:\-—|]+/, "").trim();
-    return { name, rank, desc };
+    const name = tokens.join(" ")
+      .replace(/^[:\-—|]+/, "").replace(/[:\-—|]+$/, "").trim();
+    return { name, rank, desc: "" };
   },
 
   /* ---------------- AI reply posting (with suggestion card) ---------------- */
