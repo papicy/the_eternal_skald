@@ -24,6 +24,26 @@
         "name": "Streaming Responses",
         "hint": "Render the Skald's replies in real time, word by word, as the AI generates them — instead of waiting for the whole reply to arrive. Gives near-instant feedback and a livelier feel. If streaming is ever unavailable (older server hook, network issue), the Skald automatically falls back to a normal buffered reply, so it is safe to leave ON. Defaults to ON."
       },
+      "autonomousTools": {
+        "name": "Autonomous Tool Use",
+        "hint": "Let the Skald act on the world by calling function-calling 'tools' — rolling a move, querying an oracle, updating a progress track, or recording a journal entry — when the fiction calls for it. Every tool call is validated and routed through the active system adapter and the chronicle layer (the AI never writes to your world directly). Leave OFF (the default) to keep the Skald purely narrative; turn ON only if you want it to take mechanical actions on its own. World-scoped, GM-only."
+      },
+      "ttsEnabled": {
+        "name": "Read Narration Aloud (TTS)",
+        "hint": "Show a 🔊 button on the Skald's chat cards that reads the narration aloud using your browser's built-in voice (Web Speech API — no account or extra cost). Per-player setting. Leave OFF (the default) for silent play."
+      },
+      "ttsAutoNarrate": {
+        "name": "Auto-Narrate New Cards",
+        "hint": "When 'Read Narration Aloud' is on, automatically speak each new Skald card as it appears — no click needed. Per-player setting. Default OFF."
+      },
+      "ttsRate": {
+        "name": "Narration Speed",
+        "hint": "Playback speed for spoken narration, from 0.5× (slow) to 2× (fast). Default 1×."
+      },
+      "ttsVoice": {
+        "name": "Narration Voice",
+        "hint": "Name of the browser voice to use (e.g. 'Daniel', 'Samantha'). Leave blank to use your browser's default voice. Available voices vary by browser and operating system."
+      },
       "providerPreset": {
         "name": "AI Provider",
         "hint": "Pick your AI provider to auto-fill the API Endpoint below with that provider's OpenAI-compatible chat-completions URL. You still supply your own API Key and AI Model separately. The Skald is powered by Abacus AI ChatLLM, so 'Abacus AI' is the recommended default. Choose 'Custom' for a self-hosted gateway, the legacy RouteLLM endpoint, or any other endpoint (leaves the endpoint untouched). World-scoped, GM-only. Default: Abacus AI.",

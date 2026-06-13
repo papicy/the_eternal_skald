@@ -66,6 +66,57 @@ export const Settings = {
       default: true
     });
 
+    // (v0.22.0 Phase E / F5) Autonomous tool use. When ON, the Skald may call
+    // function-calling "tools" (roll a move, query an oracle, update progress,
+    // create a journal entry) that WRITE to the world, executed through the
+    // active system adapter / chronicle layer. Defaults OFF so the Skald never
+    // mutates game state without the GM explicitly opting in. World-scoped.
+    game.settings.register(MODULE_ID, "autonomousTools", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.autonomousTools.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.autonomousTools.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: false
+    });
+
+    // (v0.22.0 / Phase E — F7) Text-to-Speech narration. Browser-native Web
+    // Speech API; client-scoped so each player chooses their own audio + voice.
+    // All default OFF so behaviour is unchanged until a player opts in.
+    game.settings.register(MODULE_ID, "ttsEnabled", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.ttsEnabled.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.ttsEnabled.hint"),
+      scope: "client",
+      config: true,
+      type: Boolean,
+      default: false
+    });
+    game.settings.register(MODULE_ID, "ttsAutoNarrate", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.ttsAutoNarrate.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.ttsAutoNarrate.hint"),
+      scope: "client",
+      config: true,
+      type: Boolean,
+      default: false
+    });
+    game.settings.register(MODULE_ID, "ttsRate", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.ttsRate.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.ttsRate.hint"),
+      scope: "client",
+      config: true,
+      type: Number,
+      default: 1,
+      range: { min: 0.5, max: 2, step: 0.1 }
+    });
+    game.settings.register(MODULE_ID, "ttsVoice", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.ttsVoice.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.ttsVoice.hint"),
+      scope: "client",
+      config: true,
+      type: String,
+      default: ""
+    });
+
     // (v0.14.4 / P2) Request timeout in seconds. An AbortController in
     // ai/client.js aborts any AI fetch whose connection/response-headers phase
     // stalls longer than this, so a dead upstream can't hang the UI for the

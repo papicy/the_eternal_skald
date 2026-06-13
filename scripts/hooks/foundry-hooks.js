@@ -10,12 +10,15 @@ import { JournalSystem } from "../chronicle/journal-system.js";
 import { MapVision } from "../vision/map-vision.js";
 import { Integration } from "../narrative/integration.js";
 import { NpcDialogue, OracleInterpreter, LoreGenerator } from "../narrative/generators.js";
+import { TtsNarrator } from "../narrative/tts-narrator.js";
 import { CombatController } from "../eternal-skald.js";
 import { IronswornData } from "../ironsworn-data.js";
 import { IronswornController } from "../ironsworn-controller.js";
 import { BrowserRAG } from "../browser-rag.js";
 import { SystemRegistry, registerSystem } from "../systems/registry.js";
 import { NimbleAdapter } from "../systems/nimble-adapter.js";
+import { Dnd5eAdapter } from "../systems/dnd5e-adapter.js";
+import { Pf2eAdapter } from "../systems/pf2e-adapter.js";
 import { getSettingsPanelClass } from "../ui/settings-panel.js";
 import { installChatAutocomplete } from "../ui/command-autocomplete.js";
 import { getWizardClass, maybeLaunchFirstRun } from "../ui/first-run-wizard.js";
@@ -235,6 +238,15 @@ Hooks.once("ready", async () => {
     // the Nimble rules digest, and map vision; Ironsworn-only mechanics
     // (oracles / progress tracks / vows / momentum) report unsupported.
     registerSystem("nimble", NimbleAdapter);
+    // (Phase E) Register the D&D 5e adapter. Read-only: it lights up character
+    // READS (abilities/HP/AC/spell slots/items), the 5e rules digest, and map
+    // vision; all Ironsworn-only mechanical writes report unsupported.
+    registerSystem("dnd5e", Dnd5eAdapter);
+    // (Phase E) Register the Pathfinder 2e adapter. Read-only: it lights up
+    // character READS (abilities/HP/AC/hero & focus points/items), the PF2e
+    // rules digest, and map vision; all Ironsworn-only mechanical writes report
+    // unsupported.
+    registerSystem("pf2e", Pf2eAdapter);
     console.log(LOG_PREFIX, "System adapter registry initialised —", JSON.stringify(SystemRegistry.list()));
   } catch (e) {
     console.warn(LOG_PREFIX, "System adapter registry init failed:", e?.message ?? e);
@@ -408,6 +420,14 @@ Hooks.on("createChatMessage", (message) => {
     // carry our module flag, and a Skald-posted card is never a command.
     if (ourFlags) {
       console.log(`${LOG_PREFIX} [createChatMessage] message is ours — skipping command dispatch`);
+      // (v0.22.0 / F7) Auto-narrate brand-new Skald cards aloud when the
+      // player has opted in. Fires here (creation) — NOT on render — so old
+      // cards aren't re-spoken on every scrollback/reload. Fail-soft.
+      try {
+        if (Settings.get("ttsEnabled") === true && Settings.get("ttsAutoNarrate") === true) {
+          TtsNarrator.narrateMessage(message);
+        }
+      } catch (_) { /* defensive — narration must never break chat */ }
       return;
     }
 
@@ -471,6 +491,8 @@ Hooks.on("renderChatMessageHTML", (message, html /*, data */) => {
   }
   // Wire interactive move-suggestion buttons (no-op if no suggestion flag).
   try { Integration.wireSuggestionCard(message, html); } catch (_) { /* defensive */ }
+  // Add the 🔊 narrate control (no-op when TTS disabled/unavailable).
+  try { TtsNarrator.wireNarrateButton(message, html); } catch (_) { /* defensive */ }
 });
 // Legacy hook name for v12/v13 compatibility (no-op if unused).
 Hooks.on("renderChatMessage", (message, html /*, data */) => {
@@ -481,6 +503,7 @@ Hooks.on("renderChatMessage", (message, html /*, data */) => {
   try {
     const el = html?.[0] ?? html;
     Integration.wireSuggestionCard(message, el);
+    TtsNarrator.wireNarrateButton(message, el);
   } catch (_) { /* defensive */ }
 });
 

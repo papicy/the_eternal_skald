@@ -3156,3 +3156,300 @@ SUITE:        npm test -> PASS (53 files)
 GATE:         Covered by the Phase D gate above (release of the gated feature set).
 ROLLBACK:     git revert <this commit> — restores the 0.20.0 version literals + CHANGELOG.
 RESIDUAL RISK: NONE. Metadata-only; no runtime behaviour change. CI version-consistency leg passes.
+
+
+### [2026-06-13 21:22 EEST] — Phase E expansion & ambition: recorded approval gate
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    IMPLEMENT + DOCUMENT (multi-task umbrella)
+TOKEN BUDGET: gated  |  USED: n/a  |  WITHIN BUDGET: GATED
+
+GATE REQUEST
+  TASK:        Implement Phase E (F5 tool-calling architecture, F7 TTS narration, Starforged
+               adapter, D&D 5e read-only adapter, PF2e read-only adapter if time, third-party
+               integrations — Monk's Enhanced Journal / Simple Calendar / Dice So Nice, and the
+               optional L1 RAG ANN index only if scale demands). Commit after each feature; bump
+               v0.21.0 → v0.22.0 once a substantial feature set lands.
+  LIMIT HIT:   §0(1,2) hard limits (several features span > 3 files and > 50 changed lines);
+               §5 forbidden-without-gate surfaces: a NEW scripts/ai/tools/ module layer; a NEW
+               ai → adapter/narrative tool-execution boundary crossing (F5); new world settings
+               (autonomousTools, TTS settings); new public UI surface (a "Narrate" button on AI
+               chat cards); new system adapters registered in hooks.
+  WHY NEEDED:  Explicit, detailed Phase E assignment from the maintainer (super-agent task) with a
+               prioritised per-feature spec list and an explicit "commit after each, bump to
+               v0.22.0" directive; this entry records that human approval for the gate.
+  SMALLEST SAFE OPTION: implement each feature incrementally, one feature per commit, full suite
+               green after each. F5 keeps tool *registry + definitions + payload validation* PURE
+               in scripts/ai/tools/ (no Foundry writes); actual *execution* routes through the
+               existing adapter capability-gated methods via the narrative/ orchestration layer, so
+               the ai/ layer never writes to Foundry. New adapters mirror the canonical
+               nimble-adapter.js pattern (reads never throw; all writes unsupported() for read-only
+               5e/PF2e). TTS uses the browser-native SpeechSynthesis API (no new deps). All new
+               settings default-safe (autonomous tool use defaults OFF). Third-party integrations
+               are feature-detected and degrade to no-op when the module is absent.
+  BLAST RADIUS: NEW scripts/ai/tools/ (registry + executor), NEW scripts/systems/starforged-adapter.js,
+               dnd5e-adapter.js (+ pf2e if time), NEW scripts/narrative/tts-narrator.js, hooks wiring
+               (adapter registration + tool/TTS glue), core/settings.js (new settings), lang/en.json
+               (i18n), new regression tests; module.json/package.json/README/CHANGELOG for the bump.
+               Rollback = revert the per-feature commits on phase-e-expansion.
+GATE:         GRANTED by maintainer via the Phase E subtask assignment (this entry records it;
+               self-approval is NOT being used — the human assigned the work with prioritised specs).
+
+NOTE: Per-feature detailed log entries follow below as each lands.
+
+
+### [2026-06-13 21:26 EEST] — F5: tool-calling architecture (registry + executor + client + runner)
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    IMPLEMENT (gated — see Phase E gate above)
+PRE-FLIGHT:   Read scripts/chat/command-registry.js (the model for a declarative registry),
+              scripts/ai/client.js chat()/_directChat/_extractContent (the F5 integration point),
+              scripts/systems/adapter-interface.js (capability + write-method contract),
+              scripts/narrative/integration.js (how directives already route writes through the
+              active adapter via sys()), scripts/chronicle/journal-system.js _createEntity (the
+              JournalEntry.create shape + getOrCreateFolder/_ownership helpers).
+EVIDENCE:     CLAIM: Client.chat() builds an OpenAI-compatible payload and returns Promise<string>;
+              tool_calls live at data.choices[0].message.tool_calls. EVIDENCE: client.js:483-489
+              (payload), :102-110 (_extractContent), :454+ (chat). CONFIDENCE: HIGH BASIS: read lines.
+              CLAIM: Foundry writes for moves/oracle/progress already go through the active adapter
+              (sys()) in the narrative layer. EVIDENCE: integration.js:19 sys()=getActiveAdapter,
+              :734/:944 triggerMove, :2685-2690 markProgress/markProgressByRank/rollOracle,
+              :3094-3114 markProgress/setProgress. CONFIDENCE: HIGH BASIS: read lines.
+CHANGE:       NEW scripts/ai/tools/ layer (PURE — zero Foundry imports):
+              • registry.js — frozen TOOL_REGISTRY of 4 tools (rollMove, queryOracle, updateProgress,
+                createJournalEntry) modelled on command-registry; findTool + buildToolSpecs (emits the
+                OpenAI `tools` array, FILTERED by live adapter capabilities; the journal tool is
+                capability-null = always offered).
+              • executor.js — parseToolCalls (normalises OpenAI + pre-parsed shapes; bad JSON → {}),
+                validateToolCall (required-arg + type/enum checks), executeToolCalls (routes each VALID
+                call to an INJECTED handler; unknown tool / unbound handler / handler throw all become
+                soft { ok:false } results — never throws).
+              ai/client.js — NEW additive chatWithTools() sibling of chat(): buffered completion with
+              the `tools` array attached, returns { content, toolCalls }. chat()'s Promise<string>
+              contract is untouched.
+              NEW scripts/narrative/tool-runner.js — the §5-correct execution home: buildHandlers()
+              binds each tool to a capability-gated adapter method / JournalEntry.create (Foundry
+              writes happen ONLY here, not in ai/); runToolTurn() HARD-gates on the autonomousTools
+              setting (default OFF), offers only capability-supported tools, and executes parsed calls.
+              core/settings.js — NEW world setting `autonomousTools` (Boolean, default FALSE). en.json
+              — i18n name/hint for it.
+FILES TOUCHED (7 — gated):
+  - scripts/ai/tools/registry.js        (+131 / -0, new, pure)
+  - scripts/ai/tools/executor.js        (+117 / -0, new, pure)
+  - scripts/ai/client.js                (+73 / -0, additive chatWithTools)
+  - scripts/narrative/tool-runner.js    (+104 / -0, new, narrative-layer middleware)
+  - scripts/core/settings.js            (+14 / -0, new setting)
+  - lang/en.json                        (+4 / -0, i18n)
+  - test/ai-tools.test.mjs              (+97 / -0, new regression test)
+TESTS:        node test/ai-tools.test.mjs → 44/44; full suite → 54/54.
+SUITE:        npm test -> PASS (54 files)
+GATE:         Covered by the Phase E gate above (new scripts/ai/tools/ layer + ai→adapter execution
+              boundary handled by keeping writes in narrative/tool-runner.js; new default-OFF setting).
+ROLLBACK:     git revert <this commit> — removes the tools layer, chatWithTools, the setting, the
+              runner, and the test. autonomousTools defaults OFF so no behaviour change ships enabled.
+RESIDUAL RISK: LOW. The whole feature is dormant unless a GM turns on autonomousTools. The ai/ layer
+              performs no Foundry writes (verified: registry/executor import nothing from Foundry; all
+              writes are in narrative/tool-runner.js). No existing call path or contract changed.
+
+
+### [2026-06-13 21:29 EEST] — Starforged: ruleset-aware narration (NOT a duplicate adapter)
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    INVESTIGATE + IMPLEMENT (gated — see Phase E gate above)
+PRE-FLIGHT:   The Phase E spec asks for a "Starforged adapter mirroring nimble". Before building one,
+              audited how the repo already handles Starforged (engineering principle: repo is the
+              source of truth; smallest safe change).
+EVIDENCE:     CLAIM: Starforged is the SAME foundry-ironsworn system module, already served end-to-end
+              by the ruleset-aware IronswornController — NOT a distinct game.system.id.
+              EVIDENCE: scripts/ironsworn/character.js:197-217 getRuleset()/isStarforgedRuleset()
+              read the four foundry-ironsworn world flags; ironsworn/internals.js:197 indexes
+              `foundry-ironsworn.starforgedmoves`; ironsworn/progress.js:77-90 writes legacy-tick XP
+              for the starforged model; combat.js:291 / mechanics.js:123 pull Starforged
+              encounters/assets. CONFIDENCE: HIGH BASIS: read the lines.
+              CLAIM: a second adapter for "foundry-ironsworn" would be ARCHITECTURALLY WRONG — the
+              registry keys ONE adapter per system id and a re-register REPLACES the incumbent.
+              EVIDENCE: scripts/systems/registry.js:50-66 (_adapters.set(id, …); "replacing existing
+              adapter" warning). CONFIDENCE: HIGH BASIS: read the lines. The spec's own §6.1 row
+              agrees ("Same system module, different game … Much can be shared with the Ironsworn
+              adapter").
+CONCLUSION:   Building scripts/systems/starforged-adapter.js would shadow the rich IronswornController
+              with a thin duplicate and break Ironsworn worlds. Starforged mechanics are ALREADY
+              supported. The genuine remaining gap is NARRATIVE: the AI was always told the generic
+              "Ironsworn / Starforged system" and defaulted to Iron-age fantasy imagery, with no
+              signal when a Starforged / Sundered Isles (sci-fi / age-of-sail) ruleset is active.
+CHANGE:       NEW pure exported prompt-builder helper buildRulesetSettingBlock(): when game.system.id
+              is foundry-ironsworn AND only a Starforged-family ruleset flag is set (classic/delve take
+              priority — parity with character.js getRuleset), it injects a short SETTING block steering
+              genre, imagery and progress vocabulary (legacy tracks: Quests/Bonds/Discoveries) toward
+              Starforged or Sundered Isles. Wired into the system-prompt array after toneBlock. Reads
+              only (ai/ layer); never throws; classic/non-Ironsworn → "" so existing behaviour is
+              byte-identical.
+FILES TOUCHED (2 — gated):
+  - scripts/ai/prompt-builder.js     (+43 / -1, new buildRulesetSettingBlock + array wiring)
+  - test/starforged-ruleset.test.mjs (+82 / -0, new — structural + behavioural over all ruleset states)
+TESTS:        node test/starforged-ruleset.test.mjs → 13/13; full suite → 55/55.
+SUITE:        npm test -> PASS (55 files)
+GATE:         Covered by the Phase E gate above. NOTE: the evidence-based decision was to NOT add a
+              duplicate system adapter (it would violate the one-adapter-per-system-id invariant and
+              regress Ironsworn worlds) — the smallest safe change that fulfils the Starforged intent.
+ROLLBACK:     git revert <this commit> — removes the ruleset block + test. Classic worlds unaffected
+              either way (block returns "" for them).
+RESIDUAL RISK: LOW. Additive, default-safe, fantasy worlds unchanged. The setting hint only appears
+              when a Starforged-family ruleset flag is the sole active ruleset.
+
+
+### [2026-06-13 21:32 EEST] — D&D 5e read-only system adapter
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    IMPLEMENT (gated — see Phase E gate above)
+PRE-FLIGHT:   Read scripts/systems/nimble-adapter.js IN FULL (the canonical read-only adapter
+              template) + test/nimble-adapter.test.mjs (the test template) + adapter-interface.js
+              (SYSTEM_CAPABILITIES + helpers) + the registration site in foundry-hooks.js.
+EVIDENCE:     CLAIM: a read-only adapter mirrors NimbleAdapter exactly — frozen object, isActive()
+              tracks game.system.id, capabilities() lights up characterReads + mapVision only, every
+              write returns unsupported(), reads use foundry.utils.getProperty defensively and never
+              throw. EVIDENCE: nimble-adapter.js:78-110 (identity/caps), :112-135 (getActiveCharacter),
+              :330-348 (unsupported writes). CONFIDENCE: HIGH BASIS: read the whole file.
+              CLAIM: adapters register via registerSystem(id, adapter) in foundry-hooks.js.
+              EVIDENCE: foundry-hooks.js:233-237. CONFIDENCE: HIGH BASIS: read the lines.
+CHANGE:       NEW scripts/systems/dnd5e-adapter.js — read-only Dnd5eAdapter (system id "dnd5e")
+              mirroring NimbleAdapter: six ability mods (STR/DEX/CON/INT/WIS/CHA, with a score→mod
+              fallback), HP/AC/spell-slot (L1–L9 + pact) resource pools, class/level + equipped /
+              attuned inventory highlights, and a 5e GUIDANCE system prompt that keeps dice in the
+              players' hands and disclaims Ironsworn concepts. All mechanical writes report
+              unsupported(); rollOracle() → null. Registered after Nimble in foundry-hooks.js.
+FILES TOUCHED (3 — gated):
+  - scripts/systems/dnd5e-adapter.js (+392 / -0, new, read-only adapter)
+  - scripts/hooks/foundry-hooks.js   (+5 / -0, import + registerSystem("dnd5e", …))
+  - test/dnd5e-adapter.test.mjs      (+180 / -0, new — full contract + behaviour parity with Nimble)
+TESTS:        node test/dnd5e-adapter.test.mjs → 69/69; full suite → 56/56.
+SUITE:        npm test -> PASS (56 files)
+GATE:         Covered by the Phase E gate above (new system adapter + registration).
+ROLLBACK:     git revert <this commit> — removes the adapter, its registration and its test. Ironsworn
+              and Nimble worlds are unaffected (the adapter only activates under game.system.id "dnd5e").
+RESIDUAL RISK: LOW. Read-only and capability-gated: under 5e the Skald narrates with character context
+              but emits no Ironsworn directives and performs no writes. Data-path reads are all
+              defended; field paths follow the dnd5e data model (system.abilities.*.mod,
+              attributes.hp/ac, spells.spell<N>) and degrade to null/omitted if a future 5e release
+              renames them — no throw, just less context.
+
+### [2026-06-13 21:38 EEST] — F7: browser-native TTS narration (opt-in)
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    feature (Phase E — F7)
+PRE-FLIGHT:   Confirmed Foundry exposes no broad native TTS API; spec F7 names browser-native
+              `window.speechSynthesis` as the zero-cost baseline (~80 lines) and AI-TTS as optional/High.
+              Kept to browser-native only (no new deps, no build step, no server-contract change).
+              Confirmed Skald cards render `.eternal-skald-card > .es-banner / .es-body`
+              (chat/display.js:53-69) and that both render hooks already wire interactive buttons via
+              Integration.wireSuggestionCard (foundry-hooks.js:478-493) — modelled the narrate button
+              the same way. Auto-narrate fires on createChatMessage (creation) NOT render, so scrollback
+              / reload never re-speaks old cards.
+EVIDENCE:
+  CLAIM:      A standalone narrative-layer TTS module can read a card's text and drive the browser
+              speech engine without touching the AI provider or writing any Foundry document.
+  EVIDENCE:   scripts/narrative/tts-narrator.js — pure helpers (extractSpeakableText / selectVoice /
+              clampRate) + guarded speak()/wireNarrateButton(); test/tts-narrator.test.mjs source-guard
+              asserts no Client./fetch( and no .create(/.update(/setFlag.
+  CONFIDENCE: HIGH
+  BASIS:      30/30 unit assertions; full suite 57/57; node --check on all changed JS; en.json parses.
+CHANGE:       NEW scripts/narrative/tts-narrator.js — browser-native Web Speech narration. Pure helpers
+              strip HTML / [[DIRECTIVE]] tokens / markdown to clean prose, match a voice by name (with
+              first-voice fallback), and clamp playback rate to the legal [0.5,2] range. speak() cancels
+              any in-flight utterance then speaks; stopSpeaking() cancels; narrateMessage() drives the
+              auto-narrate path; wireNarrateButton() adds an idempotent 🔊 control to Skald cards. Every
+              entry point is fail-soft (no-op when speechSynthesis is unavailable or the toggle is off).
+              Four client-scoped settings (ttsEnabled / ttsAutoNarrate / ttsRate / ttsVoice, all default
+              OFF/neutral) + en.json strings. Wired the 🔊 button from both renderChatMessage(HTML) hooks
+              and auto-narrate from createChatMessage (our own cards only).
+FILES TOUCHED (5 — gated):
+  - scripts/narrative/tts-narrator.js (+185 / -0, new, narrative-layer, no writes/AI calls)
+  - scripts/core/settings.js          (+36 / -0, four client-scoped TTS settings)
+  - scripts/hooks/foundry-hooks.js    (+12 / -2, import + button wiring + auto-narrate gate)
+  - lang/en.json                      (+16 / -0, i18n for the four settings)
+  - test/tts-narrator.test.mjs        (+78 / -0, new — pure helpers + layering source-guards)
+TESTS:        node test/tts-narrator.test.mjs → 30/30; full suite → 57/57.
+SUITE:        npm test -> PASS (57 files)
+GATE:         Covered by the Phase E gate above (new opt-in narration feature; default OFF).
+ROLLBACK:     git revert <this commit> — removes the module, settings, i18n, wiring and test. With the
+              settings absent the hooks' guarded calls are no-ops, so chat is unaffected.
+RESIDUAL RISK: LOW. All four settings default OFF and are client-scoped, so default behaviour is
+              unchanged and silent. The button/auto-narrate calls are wrapped in try/catch and gated by
+              ttsAvailable(); on a browser without the Web Speech API every path quietly no-ops. Voice
+              availability varies by browser/OS — selectVoice falls back to the first available voice or
+              the browser default, never throwing.
+
+### [2026-06-13 21:41 EEST] — §6.2: soft third-party integrations (Simple Calendar / MEJ / DSN)
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    feature (Phase E — §6.2 integration possibilities)
+PRE-FLIGHT:   Confirmed no hard dependency is desirable (additive-only principle). Verified Simple
+              Calendar's developer API exposes `SimpleCalendar.api.currentDateTimeDisplay()` returning a
+              DateDisplayData object with `.date` / `.time` display strings (simplecalendar.info API
+              docs). Verified Dice So Nice already animates rolls created through the system's own Roll
+              pipeline — Skald move/oracle rolls already flow through that pipeline, so DSN needs NO extra
+              wiring (detection only). Confirmed _recordTimelineEvent (journal-system.js:481) builds each
+              timeline event object — the natural, additive injection point for an in-game date stamp.
+EVIDENCE:
+  CLAIM:      A dependency-free, import-free detector can probe sibling modules at runtime and surface an
+              optional in-game date without creating an import cycle or changing default behaviour.
+  EVIDENCE:   scripts/narrative/integrations.js imports nothing from the project (test source-guard
+              asserts no `^import`); journal-system.js stamps `event.igDate` only when getInGameDate()
+              returns a value.
+  CONFIDENCE: HIGH
+  BASIS:      24/24 unit assertions across detection + formatting + fail-soft paths; load-smoke clean;
+              full suite 58/58.
+CHANGE:       NEW scripts/narrative/integrations.js — fail-soft feature-detection for Monk's Enhanced
+              Journals, Dice So Nice!, and Simple Calendar (moduleActive / hasMonksEnhancedJournal /
+              hasDiceSoNice / hasSimpleCalendar), plus formatInGameDate (PURE) and getInGameDate (reads
+              the live Simple Calendar API). hasSimpleCalendar additionally checks the API method exists,
+              so a future SC that renames it degrades to "absent" rather than throwing. Wired into
+              chronicle _recordTimelineEvent: when Simple Calendar is present each persisted timeline
+              event gains an optional `igDate` display string alongside the real-world `t` timestamp.
+FILES TOUCHED (3 — gated):
+  - scripts/narrative/integrations.js   (+108 / -0, new, import-free runtime detector)
+  - scripts/chronicle/journal-system.js (+9 / -0, import + optional igDate stamp)
+  - test/integrations.test.mjs          (+82 / -0, new — detection + formatting + fail-soft)
+TESTS:        node test/integrations.test.mjs → 24/24; full suite → 58/58.
+SUITE:        npm test -> PASS (58 files)
+GATE:         Covered by the Phase E gate above (additive interop, no new hard dependency).
+ROLLBACK:     git revert <this commit> — removes the module, the igDate stamp, and the test. Timeline
+              events simply stop carrying igDate; nothing else changes.
+RESIDUAL RISK: LOW. No module is declared in module.json or required to be installed; every probe is
+              wrapped and returns false/null when the sibling is absent or its API differs. The igDate
+              field is purely additive — the !timeline reader ignores unknown fields — so worlds without
+              Simple Calendar behave exactly as before. DSN/MEJ are detection-only (no behavioural change
+              this slice); DSN animation already works through the system Roll pipeline.
+
+### [2026-06-13 21:44 EEST] — §6.1: read-only Pathfinder 2e system adapter
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    feature (Phase E — §6.1 system adapter)
+PRE-FLIGHT:   Mirrored the proven read-only adapter shape (Dnd5eAdapter / NimbleAdapter): satisfy the
+              SystemAdapter contract, light up character READS + map-vision, and report unsupported() for
+              every Ironsworn-shaped write. Verified PF2e data paths: abilities expose `.mod` directly
+              (system.abilities.<k>.mod), hp/ac under system.attributes, hero points under
+              system.resources.heroPoints, focus pool under system.resources.focus, level under
+              system.details.level.value, and PF2e's `actor.class` / `actor.ancestry` convenience getters
+              + invested/carryType item flags.
+EVIDENCE:
+  CLAIM:      A new adapter can narrate PF2e characters with full sheet context yet drive no mechanics,
+              and the registry resolves it when "pf2e" is the active system.
+  EVIDENCE:   scripts/systems/pf2e-adapter.js — capabilities() leaves all write flags off;
+              foundry-hooks.js registerSystem("pf2e", Pf2eAdapter); test asserts getActiveAdapter()
+              resolves to it under game.system.id "pf2e".
+  CONFIDENCE: HIGH
+  BASIS:      70/70 unit assertions (contract + reads + prompt + unsupported writes + registry);
+              full suite 59/59.
+CHANGE:       NEW scripts/systems/pf2e-adapter.js — read-only Pf2eAdapter (system id "pf2e") mirroring
+              Dnd5eAdapter: six ability mods (with score→mod fallback), HP/AC + Hero/Focus point pools,
+              level/ancestry/class descriptor, invested/held/worn inventory highlights, and a PF2e
+              GUIDANCE system prompt (d20 + proficiency, degrees of success, three-action economy, hero/
+              focus points) that keeps dice in the players' hands and disclaims Ironsworn concepts. All
+              mechanical writes report unsupported(); rollOracle() → null. Registered after D&D 5e.
+FILES TOUCHED (3 — gated):
+  - scripts/systems/pf2e-adapter.js (+330 / -0, new, read-only adapter)
+  - scripts/hooks/foundry-hooks.js  (+7 / -0, import + registerSystem("pf2e", ...))
+  - test/pf2e-adapter.test.mjs       (+185 / -0, new — full contract + behaviour parity with 5e)
+TESTS:        node test/pf2e-adapter.test.mjs → 70/70; full suite → 59/59.
+SUITE:        npm test -> PASS (59 files)
+GATE:         Covered by the Phase E gate above (new read-only system adapter + registration).
+ROLLBACK:     git revert <this commit> — removes the adapter, its registration and its test. Ironsworn /
+              Nimble / 5e worlds are unaffected (the adapter only activates under game.system.id "pf2e").
+RESIDUAL RISK: LOW. Read-only and capability-gated: under PF2e the Skald narrates with character context
+              but emits no Ironsworn directives and performs no writes. Field paths follow the pf2e data
+              model and degrade to null/omitted if a future PF2e release renames them — no throw, just
+              less context.

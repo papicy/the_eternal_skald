@@ -83,14 +83,55 @@ export function buildSystemPrompt(extras = {}) {
   // session-chronicle prompt stay lean and unhinted.
   const contextBlock = extras.allowMoves ? buildContextSuggestionBlock() : "";
 
+  // (v0.22.0 Phase E) Ruleset-awareness for the shared foundry-ironsworn
+  // system. Starforged / Sundered Isles run on the SAME system module as
+  // classic Ironsworn (one game.system.id), so the active ruleset must steer
+  // the AI toward the right SETTING (space opera vs. Iron-age fantasy) and the
+  // right progress vocabulary (legacy tracks vs. vows). Read-only, default-safe.
+  const rulesetBlock = buildRulesetSettingBlock();
+
   // (v0.15.0) Optional official-compendium NAME catalogues (Moves / Assets /
   // Truths / Delve content), per the AI Compendium Context world settings.
   // Reads a cached snapshot; returns "" when every category is OFF/unprimed.
   const compendiumBlock = buildCompendiumContextBlock();
 
-  return [persona, rulesDigest, guidance, toneBlock, compendiumBlock, memoryBlock, ironswornBlock, journalBlock, contextBlock]
+  return [persona, rulesDigest, guidance, toneBlock, rulesetBlock, compendiumBlock, memoryBlock, ironswornBlock, journalBlock, contextBlock]
     .filter(Boolean)
     .join("\n\n") + taskAddendum;
+}
+
+/**
+ * Detect the active foundry-ironsworn ruleset family and, when it is the
+ * Starforged / Sundered Isles (sci-fi) family, return a short SETTING block
+ * that steers the AI toward the correct genre and progress vocabulary. Classic
+ * / Delve (and any non-Ironsworn system) return "" so the default Iron-age
+ * fantasy persona is untouched — fully additive and default-safe.
+ *
+ * Reads the same four world flags the Ironsworn character module uses to pick
+ * its XP model (see scripts/ironsworn/character.js getRuleset). Reads never
+ * throw; any failure yields no injection.
+ *
+ * @returns {string}
+ */
+export function buildRulesetSettingBlock() {
+  try {
+    if (String(game?.system?.id || "") !== "foundry-ironsworn") return "";
+    const flag = (k) => { try { return game?.settings?.get?.("foundry-ironsworn", k) === true; } catch (_) { return false; } };
+    if (flag("ruleset-classic") || flag("ruleset-delve")) return ""; // fantasy default
+    const sf = flag("ruleset-starforged");
+    const si = flag("ruleset-sundered_isles");
+    if (!sf && !si) return "";
+    const setting = si ? "Sundered Isles (perilous age-of-sail seas)" : "Starforged (the Forge — a sundered region of deep space)";
+    return `\
+ACTIVE RULESET — ${si ? "IRONSWORN: SUNDERED ISLES" : "IRONSWORN: STARFORGED"}:
+This campaign uses ${setting}, NOT Iron-age fantasy. Pitch your imagery, names,
+factions, technology and threats to this setting (${si ? "ships, storms, uncharted isles, sea-perils" : "starships, vaults, precursor relics, the void, frontier settlements"}).
+Progress is tracked on Starforged-style tools: VOWS become formal undertakings,
+and long-term growth is recorded on the LEGACY TRACKS — Quests, Bonds and
+Discoveries — rather than a single XP pool. Use Starforged move and asset
+names verbatim from the catalogue above; never substitute classic-Ironsworn
+fantasy equivalents.`;
+  } catch (_) { return ""; }
 }
 
 /**
