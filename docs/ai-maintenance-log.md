@@ -2447,3 +2447,48 @@ RESIDUAL RISK: LOW. #3 is advisory prompt text (no mechanical effect). #5 is add
               optional-chained, fail-closed, and per-world scoped; worst case it silently
               no-ops to the prior in-memory behaviour. No settings/flags/directives changed.
 
+
+---
+
+### [2026-06-13 16:42 EEST] — Release v0.17.1 (patch): weak-hit vow XP RAW fix
+AGENT:        Abacus.AI Agent (SkaldCoder)
+TASK TYPE:    RELEASE / DOCUMENT (version bump + release notes — no runtime logic changed here)
+TOKEN BUDGET: 2,000  |  USED: ~1,500  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read repository-map.md + bump-version tooling + version-consistency guards
+  [x] task classified (RELEASE: bump version after merging the F1 fix PR #22)
+  [x] target file(s) located (module.json, package.json, README.md, CHANGELOG.md)
+  [x] additive & backwards-compatible (version metadata + docs only)
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] no architectural boundary crossed (no 🔴 LOCKED runtime source edited in this step)
+  [x] full suite kept green (version-consistency guards satisfied by the README edits)
+  [x] rollback plan defined
+
+CONTEXT:      PR #22 (fix/weak-hit-vow-xp-raw-compliance — audit finding F1) was merged into
+              main (merge commit 46ad5d8) after resolving an append-only docs conflict with
+              PR #21. This entry records the follow-on version bump for that fix.
+
+VERSIONING:   SemVer, pre-1.0 alpha. The change is a backwards-compatible BUG FIX (rules
+              accuracy on an opt-in, default-OFF rule), so a PATCH bump is correct:
+              0.17.0 → 0.17.1.
+
+CHANGE:       (1) `node tools/bump-version.mjs 0.17.1 --no-commit` updated module.json +
+              package.json (the two authoritative manifests; module.json is the source of
+              truth). (2) README.md: bumped the three version-coupled literals that
+              version-consistency.test.mjs locks to the manifest — the alpha badge, the
+              server-hook console banner, and the /skald-api/health JSON. Historical
+              "Starting in v0.17.0" feature references were intentionally left untouched.
+              (3) CHANGELOG.md: new [0.17.1] — 2026-06-13 entry under "### Fixed" describing
+              the weak-hit XP correction. (4) module.json description: prepended a short
+              v0.17.1 release blurb (matching the per-release convention).
+FILES TOUCHED (4):
+  - module.json    (version 0.17.0→0.17.1 + description blurb)
+  - package.json   (version 0.17.0→0.17.1, via bump tool)
+  - README.md      (3 version-coupled literals bumped)
+  - CHANGELOG.md   (new [0.17.1] Fixed entry)
+TESTS:        version-consistency.test.mjs — RESULT: 17 passed, 0 failed.
+SUITE:        npm test -> PASS (37 files passed, 0 failed).
+GATE:         User explicitly approved merging PR #22 and requested the version bump.
+ROLLBACK:     git revert <bump-commit-sha> restores 0.17.0 across all four files.
+RESIDUAL RISK: NONE. Metadata/docs only; no runtime behaviour changed by this commit.

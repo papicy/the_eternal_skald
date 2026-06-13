@@ -13,6 +13,21 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.17.1] — 2026-06-13
+
+### Fixed
+- **Weak-hit XP on *Fulfill Your Vow* now matches Ironsworn RAW.** The optional
+  *Weak-Hit Half XP* rule previously awarded `ceil(rank / 2)` ("half, rounded
+  up"), which over-awarded Experience relative to the rulebook. A weak hit on
+  *Fulfill Your Vow* now marks Experience equal to the **rank value minus one,
+  floored at 0** — troublesome **0**, dangerous **1**, formidable **2**,
+  extreme **3**, epic **4**. The fix is applied consistently in both the
+  controller and its data-layer mirror. The opt-in rule remains **off by
+  default** and no setting, flag or i18n key was renamed; only the computed
+  reduced value is corrected. Strong-hit XP, the idempotent single-award-per-vow
+  guarantee, and vow-only granting are unchanged. Covered by the regression
+  suite (`test/xp-grant.test.mjs`).
+
 ## [0.17.0] — 2026-06-13
 
 ### Added
