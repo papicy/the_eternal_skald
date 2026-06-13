@@ -1894,3 +1894,168 @@ RESIDUAL RISK: LOW. Both consumers are read-only and now fall back to "" on any 
               Ironsworn system exactly as before. The one residual coupling is the
               deferred oracle block (still on IronswornData) — intentional, documented,
               and harmless until the oracle capability lands.
+
+---
+
+### [2026-06-13 11:05 UTC] — Phase 3 (GATE): migrate the integration spine to the adapter registry
+AGENT:        Abacus.AI Agent (SkaldCoder)
+TASK TYPE:    IMPLEMENT (dedicated approval gate)
+TOKEN BUDGET: 5,000  |  USED: ~within  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md + repository-map.md + PROPOSAL-multi-system-adapter-architecture.md
+  [x] task classified: IMPLEMENT — Phase 3, the spine migration, which the proposal
+        designates as its OWN dedicated approval gate (§"Phase 3 — Migrate the spine").
+  [x] target file(s)+line(s) located (evidence below)
+  [!] <= 3 files / <= 50 changed lines per file — DELIBERATELY EXCEEDED, COVERED BY GATE.
+        integration.js is a 🔴 LOCKED file and the change is 209 changed lines
+        (+109/-100, net +9) across ~99 mechanical call-site rewrites; 4 files total
+        (spine + 1 adjusted source-text test + 1 new test + this log). The proposal
+        PRESCRIBES this exact edit and grants the gate specifically so the normal
+        file/line caps do not block it. See GATE below.
+  [x] additive & backwards-compatible (byte-for-byte identical for any Ironsworn world)
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] architectural boundary crossed INTENTIONALLY under the granted gate (the LOCKED
+        spine is the explicit subject of this phase); ironsworn-controller.js still
+        untouched (read by range only).
+  [x] regression test added (test/adapter-integration-spine.test.mjs); existing suite
+        kept 100% green, nothing weakened/disabled (see test-update rationale).
+  [x] rollback plan defined (single git revert)
+
+PROBLEM:      Phases 1–2 stood up the adapter registry and migrated the LEAF consumers,
+              but scripts/narrative/integration.js — the orchestration SPINE — still
+              imported IronswornController directly and called it in ~109 places. While
+              that import remained, no non-Ironsworn system could ever drive the
+              narrative pipeline, and the registry seam stopped one layer short of the
+              code that actually applies effects, marks tracks, completes vows, runs the
+              auto-flows, etc. Phase 3 repoints the spine at getActiveAdapter() so the
+              registry is the single source of truth for "which system am I driving".
+
+EVIDENCE (brief §4 format):
+  CLAIM:      integration.js referenced IronswornController in exactly 109 places; 99
+              are EXECUTABLE call-sites (member access) and the rest are doc-comment /
+              JSDoc {@link} mentions.
+  EVIDENCE:   grep -c "IronswornController" scripts/narrative/integration.js -> 109;
+              migration script replaced 99 executable `IronswornController.` tokens with
+              `sys().`, skipping comment lines and the import line.
+  CONFIDENCE: HIGH
+  BASIS:      scripted replacement with comment/import guards; post-edit grep shows the
+              only remaining bare `IronswornController` tokens are the import-replacement
+              comment and ~9 JSDoc references (no executable member access remains).
+
+  CLAIM:      The migration is byte-for-byte behaviour-preserving for EVERY Ironsworn
+              world, regardless of the ironswornIntegration setting.
+  EVIDENCE:   scripts/systems/registry.js getActiveAdapter() resolves by game.system.id;
+              for "foundry-ironsworn" it returns the SAME IronswornController singleton
+              the spine used to import. The ironswornIntegration setting is read
+              separately in Integration.active() and is unchanged by resolution.
+  CONFIDENCE: HIGH
+  BASIS:      read registry resolution + IronswornController.isActive() (both key off
+              game.system.id); `const sys = () => getActiveAdapter()` therefore returns
+              an object identical to the old import for any Ironsworn world.
+
+  CLAIM:      IronswornController.capabilities() returns the OLD shape
+              {systemActive,prerollDialog,characterSheet,activeCharacter}, NOT the new
+              SYSTEM_CAPABILITIES keys, so per-operation capability-KEY gating inside the
+              spine is impossible without editing the LOCKED controller.
+  EVIDENCE:   scripts/ironsworn-controller.js capabilities() literal (read by range);
+              scripts/systems/adapter-interface.js SYSTEM_CAPABILITIES key set.
+  CONFIDENCE: HIGH
+  BASIS:      read both; key sets disjoint. The "capability check" requirement is
+              instead satisfied STRUCTURALLY (see APPROACH).
+
+  CLAIM:      The spine is comprehensively defensive: every executable call-site is
+              either behind the Integration.active() master gate, behind an `actor ?` /
+              getActiveCharacter() null-guard, or inside a try/catch.
+  EVIDENCE:   entry methods (gatherContext/classifyAndRouteAction/doTriggerMove/
+              showProgressTrackCard/doMarkTrack/doCompleteTrack/showAssetLink/
+              onIronswornRoll/onXpGain) each begin `if (!this.active()) return`; the 6
+              otherwise-unguarded methods (showMoveSelector, _autoCombatFlow,
+              _autoCompletionFlow, _autoJourneyFlow, _autoMilestoneFlow, applyEffects)
+              are only reached via try/catch-armored call sites and run with actor=null
+              under non-Ironsworn (getActiveCharacter()===null).
+  CONFIDENCE: HIGH
+  BASIS:      read each call-site and its enclosing guard during investigation.
+
+APPROACH:     MECHANICAL replacement exactly as the proposal prescribes — introduce
+              `const sys = () => getActiveAdapter();` once and rewrite every executable
+              `IronswornController.` to `sys().`. NO per-operation active() guards were
+              added: doing so would be WRONG because today an Ironsworn world with the
+              ironswornIntegration setting OFF still applies effects (the controller
+              methods self-guard on system, not on the setting), and per-op active()
+              gating keys off the setting — it would silently break that reachable case.
+              The "capability check" is satisfied structurally, two ways:
+                (1) Integration.active() now routes through sys().isActive(); for an
+                    unsupported system getActiveAdapter() returns the NullAdapter whose
+                    isActive()===false, so the master gate closes the whole pipeline.
+                (2) NullAdapter implements only a SUBSET of methods; the handful of spine
+                    calls it lacks (adjustMomentum, getCombatTracks, findTrackFuzzy, …)
+                    throw TypeError, but every such site is try/catch-armored or
+                    actor-null-guarded, so they degrade to logged-warning + no-op —
+                    functionally identical to the old controller's no-op on a non-
+                    Ironsworn system.
+              For an Ironsworn world sys() IS IronswornController, so all of this is a
+              no-op and behaviour is byte-for-byte identical.
+
+CHANGE:       (1) scripts/narrative/integration.js (🔴 LOCKED — edited under this gate):
+              replaced `import { IronswornController } from "../ironsworn-controller.js"`
+              with `import { getActiveAdapter } from "../systems/registry.js"`, added a
+              short comment block explaining the seam, defined `const sys = () =>
+              getActiveAdapter();`, and rewrote 99 executable call-sites
+              `IronswornController.` -> `sys().`. The ~9 JSDoc/comment references to
+              IronswornController were intentionally preserved as historical context.
+              (2) test/inline-move-suggestions.test.mjs — see TEST UPDATE RATIONALE.
+
+TEST UPDATE RATIONALE (NOT a weakening):
+              inline-move-suggestions.test.mjs contained a SOURCE-TEXT guard asserting
+              the link-move handler block matches /IronswornController\.triggerMove/.
+              The migration renamed that exact token to `sys().triggerMove`, so the
+              literal-string assertion had to track the rename or it would assert on a
+              string that no longer exists. It was broadened to
+              /(?:sys\(\)|IronswornController)\.triggerMove/ (still proves the handler
+              routes a move trigger, now via the adapter seam). The BEHAVIOURAL contract
+              the test protects is unchanged; only the implementation token it greps for
+              moved. No assertion was removed or loosened in scope.
+
+FILES TOUCHED (2 source/test + 1 new test + this log = 4; over the normal 3-file cap,
+              covered by the gate):
+  - scripts/narrative/integration.js          (+109 / -100, net +9; 🔴 LOCKED, gated)
+  - test/inline-move-suggestions.test.mjs      (+6 / -3; source-text guard retargeted)
+  - test/adapter-integration-spine.test.mjs    (+~190 / -0, NEW)
+  - docs/ai-maintenance-log.md                 (this entry)
+TESTS:        test/adapter-integration-spine.test.mjs — RESULT: 18 passed, 0 failed.
+              [SRC] guards: no direct controller import; registry import + sys() helper
+                present; active() routes through sys().isActive(); applyEffects routes
+                through sys(); no executable IronswornController.<member> remains.
+              [A] registered an Ironsworn-like adapter under "foundry-ironsworn":
+                getActiveAdapter() returns it, Integration.active()===true, and
+                applyEffects([{kind:"momentum",op:"adjust",value:2}]) routes to the
+                adapter's adjustMomentum spy (once, with (actor,2)) -> "momentum +2".
+              [B] game.system.id="some-unsupported-system" (nothing registered):
+                getActiveAdapter()===NullAdapter, Integration.active()===false, and
+                applyEffects(...) + applyNarrativeTrackEffects(...) return [] WITHOUT
+                throwing (the TypeError is caught and logged — proves graceful
+                degradation, exactly the warning seen in the test run).
+SUITE:        npm test -> PASS (36 files passed, 0 failed; was 35, +1 new). No existing
+              test weakened or disabled.
+BEHAVIOURAL CHANGE (unsupported systems): NONE for any state reachable today. Ironsworn
+              is byte-for-byte unchanged (sys() is the same controller object). A non-
+              Ironsworn world already produced no narrative effects (master gate closed,
+              actor null); post-migration the NullAdapter yields the identical inert
+              result. The seam now lets a FUTURE adapter (Phase 4 / Nimble) drive the
+              full spine with no further edits here.
+GATE:         RECORDED PHASE 3 APPROVAL. The proposal designates the spine migration as
+              its own dedicated gate (docs/PROPOSAL-multi-system-adapter-architecture.md,
+              §"Phase 3 — Migrate the spine (dedicated gate)") and prescribes the exact
+              `sys()` mechanical-replacement approach used here. This authorises editing
+              the 🔴 LOCKED integration.js and exceeding the normal file/line caps for
+              this phase only. ironsworn-controller.js remained untouched (read-only).
+ROLLBACK:     git revert <phase3-commit-sha> (single commit; restores the direct
+              IronswornController import + 99 call-sites, the original test guard, and
+              removes the new test + this log entry). Independent of Phases 1–2.
+RESIDUAL RISK: LOW. For Ironsworn the resolved adapter is the identical singleton, so the
+              99 rewrites are provably equivalent. The only new behaviour is on systems
+              that have no adapter, where the spine now degrades through NullAdapter +
+              the pre-existing try/catch / null-guard armor instead of through the old
+              controller's internal isActive() no-ops — same observable result (nothing
+              happens), reached one layer later. Verified by the [B] degradation test.
