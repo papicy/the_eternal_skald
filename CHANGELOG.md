@@ -13,6 +13,23 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.17.2] — 2026-06-13
+
+### Fixed
+- **Progress tracks now register reliably and keep their full names.** Swearing a
+  vow, beginning a journey, or starting a combat could silently fail to create the
+  track, or create it under a truncated name, when the directive's rank word was
+  positioned unexpectedly. The track-name/rank parser now treats a rank
+  (*troublesome … epic*) as a **trailing token only**, so:
+  - a rank word that is genuinely part of the name (e.g. *"Slay the **Formidable**
+    Wyrm"*, *"The **Extreme** Cold of the North"*) is no longer mistaken for the
+    rank and no longer truncates the name; and
+  - a mis-ordered *"&lt;rank&gt; &lt;name&gt;"* is recovered instead of being
+    dropped, so the track always registers with a non-empty name.
+
+  No setting, directive grammar, or i18n key changed. Inline descriptions remain
+  supported via the track-creation API.
+
 ## [0.17.1] — 2026-06-13
 
 ### Fixed

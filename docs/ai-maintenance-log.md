@@ -2560,3 +2560,49 @@ RESIDUAL RISK: LOW. Parsing-only change behind no setting. Known accepted trade-
               inline description on create_vow/create_journey is no longer split from the
               tail (folds into the name if no trailing rank) — a direct consequence of the
               approved trailing-rank rule; no test or downstream path depended on it.
+
+
+
+---
+
+### [2026-06-13 17:24 EEST] — Release v0.17.2 (patch): progress-track registration + naming fix
+AGENT:        Abacus.AI Agent (SkaldCoder)
+TASK TYPE:    RELEASE / DOCUMENT (version bump + release notes — no runtime logic changed here)
+TOKEN BUDGET: 2,000  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read repository-map.md + bump-version tooling + version-consistency guards
+  [x] task classified (RELEASE: bump version after pushing the progress-track parsing fix)
+  [x] target file(s) located (module.json, package.json, README.md, CHANGELOG.md)
+  [x] additive & backwards-compatible (version metadata + docs only)
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] no architectural boundary crossed (no 🔴 LOCKED runtime source edited in this step)
+  [x] full suite kept green (version-consistency guards satisfied by the README edits)
+  [x] rollback plan defined
+
+CONTEXT:      The progress-track registration + naming fix (commit 5111241 — _splitNameRank
+              rewrite + test/progress-track-naming.test.mjs) was pushed to main
+              (b868ea0..5111241). This entry records the follow-on version bump for that fix.
+
+VERSIONING:   SemVer, pre-1.0 alpha. The change is a backwards-compatible BUG FIX
+              (track-creation parsing), so a PATCH bump is correct: 0.17.1 → 0.17.2.
+
+CHANGE:       (1) `node tools/bump-version.mjs 0.17.2 --no-commit` updated module.json +
+              package.json (the two authoritative manifests; module.json is the source of
+              truth). (2) README.md: bumped the three version-coupled literals that
+              version-consistency.test.mjs locks to the manifest — the alpha badge, the
+              server-hook console banner, and the /skald-api/health JSON. (3) CHANGELOG.md:
+              new [0.17.2] — 2026-06-13 entry under "### Fixed" describing the progress-track
+              registration + naming correction. (4) module.json description: prepended a
+              short v0.17.2 release blurb (matching the per-release convention).
+FILES TOUCHED (4):
+  - module.json    (version 0.17.1→0.17.2 + description blurb)
+  - package.json   (version 0.17.1→0.17.2, via bump tool)
+  - README.md      (3 version-coupled literals bumped)
+  - CHANGELOG.md   (new [0.17.2] Fixed entry)
+TESTS:        version-consistency.test.mjs — RESULT: 17 passed, 0 failed.
+SUITE:        npm test -> PASS (38 files passed, 0 failed).
+GATE:         User explicitly approved pushing the progress-track fix and requested the
+              version bump.
+ROLLBACK:     git revert <bump-commit-sha> restores 0.17.1 across all four files.
+RESIDUAL RISK: NONE. Metadata/docs only; no runtime behaviour changed by this commit.
