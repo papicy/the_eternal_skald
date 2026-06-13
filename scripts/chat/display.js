@@ -207,6 +207,45 @@ export function parseMetadata(text) {
   return { metadata, clean };
 }
 
+/** Distance (px) from the very bottom of the chat log within which we still
+ *  treat the user as "at the bottom" and keep auto-scrolling. */
+const CHAT_SCROLL_THRESHOLD_PX = 150;
+
+/**
+ * Is the chat log currently scrolled to (or within {@link CHAT_SCROLL_THRESHOLD_PX}
+ * of) the bottom? Used to decide whether streaming should auto-scroll. If the
+ * user has scrolled UP to read earlier messages this returns false, so we leave
+ * their view alone. Defaults to `true` (stick to bottom) whenever the chat UI /
+ * scroll metrics are unavailable (headless tests, older Foundry), preserving the
+ * "show the new narration" default.
+ */
+function isChatNearBottom() {
+  try {
+    const chat = ui?.chat;
+    if (!chat) return true;
+    let el = chat.element;
+    if (el && el.jquery) el = el[0];                 // unwrap jQuery (Foundry ≤ v12)
+    const scroller =
+      el?.querySelector?.("ol.chat-log") ||
+      el?.querySelector?.("#chat-log") ||
+      el?.querySelector?.(".chat-scroll") ||
+      el;
+    if (!scroller || typeof scroller.scrollHeight !== "number") return true;
+    const distance = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+    return distance <= CHAT_SCROLL_THRESHOLD_PX;
+  } catch (_e) {
+    return true;
+  }
+}
+
+/**
+ * Defensively scroll the chat log to the bottom. No-ops if the chat UI or the
+ * scrollBottom API is unavailable (older Foundry, headless tests).
+ */
+function scrollChatToBottom() {
+  try { ui?.chat?.scrollBottom?.(); } catch (_e) { /* non-fatal */ }
+}
+
 /**
  * The streaming counterpart to a "post a Skald reply" call (v0.3.3).
  *
@@ -252,7 +291,13 @@ export async function callSkaldStreaming(messages, opts = {}) {
   if (opts.gmWhisper) {
     data.whisper = game.users.filter(u => u.isGM).map(u => u.id);
   }
+  // Remember whether the player was at the bottom BEFORE the new card grows
+  // the log, so we only pull the view down if they weren't reading history.
+  const stickAtStart = isChatNearBottom();
   const message = await ChatMessage.create(data);
+  // Bring the placeholder into view so the player sees the narration begin —
+  // but only if they were already at/near the bottom.
+  if (stickAtStart) scrollChatToBottom();
 
   // 2) Throttled in-place updater.
   const THROTTLE_MS = 140;
@@ -270,8 +315,13 @@ export async function callSkaldStreaming(messages, opts = {}) {
     if (cardHtml === lastRendered) return;
     lastRendered = cardHtml;
     updating = true;
+    // Measure BEFORE the update grows the message: keep following the stream
+    // only while the user is at/near the bottom. If they scrolled up to read
+    // earlier messages we leave them be; if they scroll back down we resume.
+    const stick = isChatNearBottom();
     try {
       await message.update({ content: cardHtml });
+      if (stick) scrollChatToBottom();
     } catch (e) {
       console.warn(LOG_PREFIX, "stream message.update failed:", e?.message || e);
     } finally {
