@@ -3328,3 +3328,48 @@ RESIDUAL RISK: LOW. Read-only and capability-gated: under 5e the Skald narrates 
               defended; field paths follow the dnd5e data model (system.abilities.*.mod,
               attributes.hp/ac, spells.spell<N>) and degrade to null/omitted if a future 5e release
               renames them — no throw, just less context.
+
+### [2026-06-13 21:38 EEST] — F7: browser-native TTS narration (opt-in)
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    feature (Phase E — F7)
+PRE-FLIGHT:   Confirmed Foundry exposes no broad native TTS API; spec F7 names browser-native
+              `window.speechSynthesis` as the zero-cost baseline (~80 lines) and AI-TTS as optional/High.
+              Kept to browser-native only (no new deps, no build step, no server-contract change).
+              Confirmed Skald cards render `.eternal-skald-card > .es-banner / .es-body`
+              (chat/display.js:53-69) and that both render hooks already wire interactive buttons via
+              Integration.wireSuggestionCard (foundry-hooks.js:478-493) — modelled the narrate button
+              the same way. Auto-narrate fires on createChatMessage (creation) NOT render, so scrollback
+              / reload never re-speaks old cards.
+EVIDENCE:
+  CLAIM:      A standalone narrative-layer TTS module can read a card's text and drive the browser
+              speech engine without touching the AI provider or writing any Foundry document.
+  EVIDENCE:   scripts/narrative/tts-narrator.js — pure helpers (extractSpeakableText / selectVoice /
+              clampRate) + guarded speak()/wireNarrateButton(); test/tts-narrator.test.mjs source-guard
+              asserts no Client./fetch( and no .create(/.update(/setFlag.
+  CONFIDENCE: HIGH
+  BASIS:      30/30 unit assertions; full suite 57/57; node --check on all changed JS; en.json parses.
+CHANGE:       NEW scripts/narrative/tts-narrator.js — browser-native Web Speech narration. Pure helpers
+              strip HTML / [[DIRECTIVE]] tokens / markdown to clean prose, match a voice by name (with
+              first-voice fallback), and clamp playback rate to the legal [0.5,2] range. speak() cancels
+              any in-flight utterance then speaks; stopSpeaking() cancels; narrateMessage() drives the
+              auto-narrate path; wireNarrateButton() adds an idempotent 🔊 control to Skald cards. Every
+              entry point is fail-soft (no-op when speechSynthesis is unavailable or the toggle is off).
+              Four client-scoped settings (ttsEnabled / ttsAutoNarrate / ttsRate / ttsVoice, all default
+              OFF/neutral) + en.json strings. Wired the 🔊 button from both renderChatMessage(HTML) hooks
+              and auto-narrate from createChatMessage (our own cards only).
+FILES TOUCHED (5 — gated):
+  - scripts/narrative/tts-narrator.js (+185 / -0, new, narrative-layer, no writes/AI calls)
+  - scripts/core/settings.js          (+36 / -0, four client-scoped TTS settings)
+  - scripts/hooks/foundry-hooks.js    (+12 / -2, import + button wiring + auto-narrate gate)
+  - lang/en.json                      (+16 / -0, i18n for the four settings)
+  - test/tts-narrator.test.mjs        (+78 / -0, new — pure helpers + layering source-guards)
+TESTS:        node test/tts-narrator.test.mjs → 30/30; full suite → 57/57.
+SUITE:        npm test -> PASS (57 files)
+GATE:         Covered by the Phase E gate above (new opt-in narration feature; default OFF).
+ROLLBACK:     git revert <this commit> — removes the module, settings, i18n, wiring and test. With the
+              settings absent the hooks' guarded calls are no-ops, so chat is unaffected.
+RESIDUAL RISK: LOW. All four settings default OFF and are client-scoped, so default behaviour is
+              unchanged and silent. The button/auto-narrate calls are wrapped in try/catch and gated by
+              ttsAvailable(); on a browser without the Web Speech API every path quietly no-ops. Voice
+              availability varies by browser/OS — selectVoice falls back to the first available voice or
+              the browser default, never throwing.

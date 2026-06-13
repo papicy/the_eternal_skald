@@ -10,6 +10,7 @@ import { JournalSystem } from "../chronicle/journal-system.js";
 import { MapVision } from "../vision/map-vision.js";
 import { Integration } from "../narrative/integration.js";
 import { NpcDialogue, OracleInterpreter, LoreGenerator } from "../narrative/generators.js";
+import { TtsNarrator } from "../narrative/tts-narrator.js";
 import { CombatController } from "../eternal-skald.js";
 import { IronswornData } from "../ironsworn-data.js";
 import { IronswornController } from "../ironsworn-controller.js";
@@ -413,6 +414,14 @@ Hooks.on("createChatMessage", (message) => {
     // carry our module flag, and a Skald-posted card is never a command.
     if (ourFlags) {
       console.log(`${LOG_PREFIX} [createChatMessage] message is ours — skipping command dispatch`);
+      // (v0.22.0 / F7) Auto-narrate brand-new Skald cards aloud when the
+      // player has opted in. Fires here (creation) — NOT on render — so old
+      // cards aren't re-spoken on every scrollback/reload. Fail-soft.
+      try {
+        if (Settings.get("ttsEnabled") === true && Settings.get("ttsAutoNarrate") === true) {
+          TtsNarrator.narrateMessage(message);
+        }
+      } catch (_) { /* defensive — narration must never break chat */ }
       return;
     }
 
@@ -476,6 +485,8 @@ Hooks.on("renderChatMessageHTML", (message, html /*, data */) => {
   }
   // Wire interactive move-suggestion buttons (no-op if no suggestion flag).
   try { Integration.wireSuggestionCard(message, html); } catch (_) { /* defensive */ }
+  // Add the 🔊 narrate control (no-op when TTS disabled/unavailable).
+  try { TtsNarrator.wireNarrateButton(message, html); } catch (_) { /* defensive */ }
 });
 // Legacy hook name for v12/v13 compatibility (no-op if unused).
 Hooks.on("renderChatMessage", (message, html /*, data */) => {
@@ -486,6 +497,7 @@ Hooks.on("renderChatMessage", (message, html /*, data */) => {
   try {
     const el = html?.[0] ?? html;
     Integration.wireSuggestionCard(message, el);
+    TtsNarrator.wireNarrateButton(message, el);
   } catch (_) { /* defensive */ }
 });
 
