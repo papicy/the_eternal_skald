@@ -562,7 +562,10 @@ export const IronswornController = {
   /**
    * Experience earned for fulfilling a vow / progress track of a given rank.
    * Mirrors IronswornData.xpForRank so callers that only hold the controller
-   * still have it. Troublesome 1 … Epic 5; weak hit halves (rounded up).
+   * still have it. Strong hit = rank value (Troublesome 1 … Epic 5). Per the
+   * Ironsworn SRD / Datasworn "Fulfill Your Vow" move, a weak hit marks
+   * experience equal to the rank value MINUS ONE, floored at 0
+   * (troublesome 0, dangerous 1, formidable 2, extreme 3, epic 4).
    *
    * @param {string|number} rank canonical rank word or numeric ChallengeRank.
    * @param {{weakHit?: boolean}} [opts]
@@ -572,7 +575,7 @@ export const IronswornController = {
     let key = (typeof rank === "number") ? RANK_NUM[rank] : String(rank ?? "").toLowerCase().trim();
     const base = RANK_XP[key] ?? 0;
     if (!base) return 0;
-    return weakHit ? Math.ceil(base / 2) : base;
+    return weakHit ? Math.max(0, base - 1) : base;
   },
 
   /**
