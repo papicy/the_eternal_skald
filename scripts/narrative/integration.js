@@ -7,7 +7,16 @@ import { EntityLinker } from "../chronicle/entity-linking.js";
 import { JournalSystem } from "../chronicle/journal-system.js";
 import { OracleInterpreter } from "./generators.js";
 import { TokenControl } from "./token-control.js";
-import { IronswornController } from "../ironsworn-controller.js";
+import { getActiveAdapter } from "../systems/registry.js";
+// Phase 3: the orchestration spine resolves the ACTIVE system adapter through
+// the registry instead of importing the Ironsworn controller directly. The
+// module-local `sys()` helper returns that adapter. For a `foundry-ironsworn`
+// world the registry returns the very same IronswornController object (resolution
+// is by `game.system.id`, exactly as IronswornController.isActive() gated before),
+// so behaviour is byte-for-byte identical for ANY Ironsworn configuration. On any
+// other / no system it returns the safe NullAdapter; the master `active()` gate
+// (below) then resolves false and the system-specific flows no-op as before.
+const sys = () => getActiveAdapter();
 // Call-time cross-imports (safe cycle): CombatController & RagBridge still live in
 // eternal-skald.js and are only referenced inside Integration methods (never module-eval).
 import { CombatController, RagBridge } from "../eternal-skald.js";
@@ -37,7 +46,7 @@ export const Integration = {
   /** True iff the Ironsworn system is active AND integration is enabled. */
   active() {
     try {
-      if (!IronswornController.isActive()) return false;
+      if (!sys().isActive()) return false;
       return Settings.get("ironswornIntegration") ?? true;
     } catch (_) { return false; }
   },
@@ -50,12 +59,12 @@ export const Integration = {
     if (!this.active()) return "";
     const blocks = [];
     try {
-      const charDesc = IronswornController.describeCharacter();
+      const charDesc = sys().describeCharacter();
       if (charDesc) blocks.push(charDesc);
     } catch (e) { console.warn(LOG_PREFIX, "gatherContext: character read failed", e); }
 
     try {
-      const combatState = IronswornController.describeCombatState();
+      const combatState = sys().describeCombatState();
       if (combatState) blocks.push(combatState);
     } catch (e) { console.warn(LOG_PREFIX, "gatherContext: combat state read failed", e); }
 
@@ -211,7 +220,7 @@ export const Integration = {
       if (stat === "—" || stat === "-" || stat === "none" || stat === "n/a") stat = "";
       const reason = (m[3] || "").trim();
       // Validate against the real catalogue — DROP invented/unknown moves.
-      const resolved = IronswornController._resolveMove?.(rawName);
+      const resolved = sys()._resolveMove?.(rawName);
       if (!resolved?.name) continue;
       const key = resolved.name.toLowerCase();
       if (seen.has(key)) continue;
@@ -680,8 +689,8 @@ export const Integration = {
               ui.notifications?.info(`${SKALD_NAME}: ${move} — Ironsworn system not active.`);
             } else {
               const ref = moveDsId || move;
-              const actor = IronswornController.getActiveCharacter();
-              const res = await IronswornController.triggerMove(ref, { actor, stat });
+              const actor = sys().getActiveCharacter();
+              const res = await sys().triggerMove(ref, { actor, stat });
               if (res?.ok && res.method === "milestone") {
                 // Milestone has no roll card — narrate it directly. triggerMove
                 // ALREADY marked progress on the vow, so pass mechanicsApplied
@@ -778,16 +787,16 @@ export const Integration = {
         if (game.combat?.started) sceneContext = "The party is currently in active combat.";
       } catch (_) { /* defensive */ }
 
-      const { system, user } = IronswornController.buildActionClassifierPrompt(text, { sceneContext });
+      const { system, user } = sys().buildActionClassifierPrompt(text, { sceneContext });
       const messages = [
         { role: "system", content: system },
         { role: "user", content: user }
       ];
       // Low temperature + small budget → fast, deterministic classification.
       const reply = await Client.chat(messages, { temperature: 0.2, maxTokens: 250 });
-      const parsed = IronswornController.parseActionClassification(reply);
+      const parsed = sys().parseActionClassification(reply);
       const alwaysConfirm = !!Settings.get("intelligentMoveConfirm");
-      const decision = IronswornController.decideActionRouting(parsed, { alwaysConfirm });
+      const decision = sys().decideActionRouting(parsed, { alwaysConfirm });
 
       console.log(`${LOG_PREFIX} [skald] action classify → type=${parsed?.type ?? "?"} decision=${decision.action}${decision.move ? ` move="${decision.move.name}"` : ""}${decision.candidates ? ` candidates=${decision.candidates.map(c => c.name).join("|")}` : ""}`);
 
@@ -885,13 +894,13 @@ export const Integration = {
     // (fix — intent staleness) Stamp the capture time so _resolveJourney can
     // trust this intent (it was set immediately before the roll it describes).
     this._lastIntentTs = Date.now();
-    const actor = IronswornController.getActiveCharacter();
+    const actor = sys().getActiveCharacter();
     // (v0.10.38 — Phase 4) Asset bonus advisory: a non-blocking suggestion if
     // one of the character's assets grants a bonus that plausibly applies to
     // this move. Purely informational — the player applies it in the dialog.
     try { await this._maybeAdviseAssetBonuses(actor, moveName, stat); }
     catch (e) { console.warn(LOG_PREFIX, "asset bonus advisory failed", e); }
-    const res = await IronswornController.triggerMove(moveName, { actor, stat });
+    const res = await sys().triggerMove(moveName, { actor, stat });
     if (!res?.ok) {
       await Chat.postSystem(
         `<strong>The dice would not answer:</strong> ${escapeHtml(res?.error ?? "unknown error")}`,
@@ -938,9 +947,9 @@ export const Integration = {
     } catch (_) { return; }
     if (!actor || !moveName) return;
     let assets;
-    try { assets = IronswornController.getAssets(actor); }
+    try { assets = sys().getAssets(actor); }
     catch (_) { return; }
-    const hits = IronswornController.detectAssetBonuses(assets, moveName, { stat: stat || "" });
+    const hits = sys().detectAssetBonuses(assets, moveName, { stat: stat || "" });
     if (!Array.isArray(hits) || !hits.length) return;
     const items = hits.map((h) => {
       const cond = h.condition
@@ -987,7 +996,7 @@ export const Integration = {
         ui.notifications?.info(`${SKALD_NAME}: ${trackName} — Ironsworn system not active.`);
         return;
       }
-      const actor = IronswornController.getActiveCharacter();
+      const actor = sys().getActiveCharacter();
       if (!actor) {
         ui.notifications?.warn(`${SKALD_NAME}: no active character to read "${trackName}".`);
         return;
@@ -999,12 +1008,12 @@ export const Integration = {
       // phantom literally-named track. We then read the track's live state from
       // the freshly-built progress-track view so boxes/ticks/completion always
       // mirror the sheet.
-      const item = IronswornController.resolveDisplayTrack(actor, trackName);
+      const item = sys().resolveDisplayTrack(actor, trackName);
       if (!item) {
         ui.notifications?.info(`${SKALD_NAME}: progress track "${trackName}" not found on ${actor.name}.`);
         return;
       }
-      const tracks = IronswornController.getProgressTracks(actor) ?? [];
+      const tracks = sys().getProgressTracks(actor) ?? [];
       const track = tracks.find(t => t.id === item.id);
       if (!track) {
         ui.notifications?.info(`${SKALD_NAME}: progress track "${trackName}" not found on ${actor.name}.`);
@@ -1060,12 +1069,12 @@ export const Integration = {
   async doMarkTrack(trackName) {
     try {
       if (!this.active()) return;
-      const actor = IronswornController.getActiveCharacter();
+      const actor = sys().getActiveCharacter();
       if (!actor) {
         ui.notifications?.warn(`${SKALD_NAME}: no active character to mark "${trackName}".`);
         return;
       }
-      const res = await IronswornController.markProgressByRank(actor, trackName, 1);
+      const res = await sys().markProgressByRank(actor, trackName, 1);
       if (res?.ok) {
         ui.notifications?.info(`${SKALD_NAME}: marked progress on ${res.track} — ${res.boxes}/10 boxes.`);
       } else {
@@ -1094,12 +1103,12 @@ export const Integration = {
         ui.notifications?.info(`${SKALD_NAME}: ${trackName} — Ironsworn system not active.`);
         return;
       }
-      const actor = IronswornController.getActiveCharacter();
+      const actor = sys().getActiveCharacter();
       if (!actor) {
         ui.notifications?.warn(`${SKALD_NAME}: no active character to complete "${trackName}".`);
         return;
       }
-      const res = await IronswornController.completeTrack(actor, trackName);
+      const res = await sys().completeTrack(actor, trackName);
       if (res?.ok) {
         ui.notifications?.info(`${SKALD_NAME}: “${res.name}” marked complete. 🏆`);
         if (Settings.get("showEffectAnnouncements") !== false) {
@@ -1127,7 +1136,7 @@ export const Integration = {
         ui.notifications?.info(`${SKALD_NAME}: ${ref} — Ironsworn system not active.`);
         return;
       }
-      const res = await IronswornController.showAsset(ref);
+      const res = await sys().showAsset(ref);
       if (!res?.ok) {
         ui.notifications?.info(`${SKALD_NAME}: could not open asset — ${res?.error ?? "not found."}`);
       }
@@ -1140,7 +1149,7 @@ export const Integration = {
   /** Show a dialog letting the user pick any catalogued move + stat. */
   async showMoveSelector(prefillStat = "") {
     const grouped = {};
-    for (const m of IronswornController.moves) {
+    for (const m of sys().moves) {
       (grouped[m.cat] ??= []).push(m);
     }
     const optgroups = Object.entries(grouped).map(([cat, moves]) => {
@@ -1645,7 +1654,7 @@ Narrate this milestone briefly and evocatively as the Skald (1–3 sentences), f
    *        prompt so the AI knows what happened (and is told not to re-emit it).
    */
   async _narrateOutcome(message, parsed, opts = {}) {
-    const actor = message?.speakerActor ?? IronswornController.getActiveCharacter();
+    const actor = message?.speakerActor ?? sys().getActiveCharacter();
     const allowEffects = Settings.get("aiAppliesEffects") ?? true;
 
     // 1. Apply the deterministic combat mechanics FIRST (initiative on
@@ -1792,16 +1801,16 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
     const notes  = [];
 
     if (/enter the fray/.test(move)) {
-      const r = await IronswornController.setInitiative(actor, hit);
+      const r = await sys().setInitiative(actor, hit);
       if (r?.ok) { this._notifyInitiative(hit); notes.push(hit ? "seized initiative" : "in a bad spot (no initiative)"); }
       return notes.join("; ");
     }
 
     // Strike / Clash
     if (hit) {
-      const track = IronswornController.getActiveCombatTrack(actor);
+      const track = sys().getActiveCombatTrack(actor);
       if (track) {
-        const pr = await IronswornController.markProgressByRank(actor, track.id);
+        const pr = await sys().markProgressByRank(actor, track.id);
         if (pr?.ok) {
           this._notifyProgress(pr.track, pr.boxes);
           notes.push(`inflicted harm on ${pr.track} (now ${pr.boxes}/10 boxes)`);
@@ -1816,10 +1825,10 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
       }
       // Strong hit keeps initiative; weak hit loses it (per Strike/Clash).
       const keep = strong;
-      const ir = await IronswornController.setInitiative(actor, keep);
+      const ir = await sys().setInitiative(actor, keep);
       if (ir?.ok) { this._notifyInitiative(keep); notes.push(keep ? "kept initiative" : "lost initiative"); }
     } else {
-      const ir = await IronswornController.setInitiative(actor, false);
+      const ir = await sys().setInitiative(actor, false);
       if (ir?.ok) { this._notifyInitiative(false); notes.push("lost initiative — pay the price"); }
     }
     return notes.join("; ");
@@ -1875,26 +1884,26 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
     // Resolve the target track, preferring the explicit story-arc flags.
     let target = null;
     if (kind === "vow") {
-      const av = IronswornController.getActiveVow(actor);
+      const av = sys().getActiveVow(actor);
       target = (av && actor.items?.get?.(av.id))
-            || IronswornController.resolveCompletionTrack(actor, "", "vow");
+            || sys().resolveCompletionTrack(actor, "", "vow");
     } else if (kind === "combat") {
       // (v0.11.0) Prefer the foe track the progress roll ACTUALLY rolled
       // against — recorded by IronswornController.rollProgressMove() as
       // _lastProgressTrack — so the correct fight closes even when several
       // foes are open or the active-combat flag has drifted to a different
       // foe. Fall back to the active-combat flag when no rolled track is known.
-      const lpt = IronswornController._lastProgressTrack;
+      const lpt = sys()._lastProgressTrack;
       if (lpt && lpt.kind === "combat" && lpt.actorId === actor.id) {
         const t = actor.items?.get?.(lpt.id);
         if (t && !foundry.utils.getProperty(t, "system.completed")) target = t;
       }
       if (!target) {
-        const ac = IronswornController.getActiveCombat(actor);
+        const ac = sys().getActiveCombat(actor);
         target = ac && actor.items?.get?.(ac.id);
       }
     } else { // journey
-      target = IronswornController.resolveCompletionTrack(actor, "", "journey");
+      target = sys().resolveCompletionTrack(actor, "", "journey");
     }
 
     if (!strong) {
@@ -1912,11 +1921,11 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
     }
     let r;
     if (kind === "combat") {
-      r = await IronswornController.completeTrack(actor, target.id);
-      if (r?.ok) { try { await IronswornController.clearActiveCombat(actor); } catch (_) {} }
+      r = await sys().completeTrack(actor, target.id);
+      if (r?.ok) { try { await sys().clearActiveCombat(actor); } catch (_) {} }
     } else {
-      r = await IronswornController.completeTrackSmart(actor, target.id, kind);
-      if (r?.ok && kind === "vow") { try { await IronswornController.setActiveVow(actor, null); } catch (_) {} }
+      r = await sys().completeTrackSmart(actor, target.id, kind);
+      if (r?.ok && kind === "vow") { try { await sys().setActiveVow(actor, null); } catch (_) {} }
     }
     if (r?.ok) {
       const verb = kind === "vow" ? "fulfilled vow" : kind === "combat" ? "won the fight" : "reached destination";
@@ -1959,10 +1968,10 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
       if (foundry.utils.getProperty(t, "system.completed")) return false;
       const cur = foundry.utils.getProperty(t, "system.current") ?? 0;
       if (cur < 40) return false;                       // not yet 10/10 boxes
-      const r = await IronswornController.completeTrack(actor, trackId);
+      const r = await sys().completeTrack(actor, trackId);
       if (!r?.ok) return false;
       // A finished fight is no longer the active combat — clear the flag.
-      if (kind === "combat") { try { await IronswornController.clearActiveCombat(actor); } catch (_) {} }
+      if (kind === "combat") { try { await sys().clearActiveCombat(actor); } catch (_) {} }
       const verb = kind === "combat" ? "🏆 foe defeated" : "🏁 destination reached";
       try { this._notifyCombat(`${verb}: ${r.name} (10/10)`); } catch (_) {}
       try { await Chat.postSystem(`<em>🤖 Skald marked “${escapeHtml(r.name)}” complete (full progress — 10/10).</em>`, { gmWhisper: true }); } catch (_) {}
@@ -2169,7 +2178,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
    */
   async _aiExtractDestination(intent, actor) {
     const places = this._getContextLocations().slice(0, 12);
-    const vow = (() => { try { return IronswornController.getActiveVow?.(actor)?.name || ""; } catch (_) { return ""; } })();
+    const vow = (() => { try { return sys().getActiveVow?.(actor)?.name || ""; } catch (_) { return ""; } })();
     const placeLine = places.length ? `Known nearby places: ${places.join(", ")}.` : "No known places listed.";
     const vowLine = vow ? `The character's current vow: "${vow}".` : "";
     const system = "You extract the DESTINATION of an Ironsworn journey from a player's words. " +
@@ -2209,7 +2218,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
   _fallbackJourneyName(actor) {
     // Active / story-focus vow → a goal-oriented journey name.
     try {
-      const vow = IronswornController.getActiveVow?.(actor);
+      const vow = sys().getActiveVow?.(actor);
       if (vow?.name) {
         const kw = this._vowKeyword(vow.name);
         if (kw) return { name: `Journey toward ${kw}`, specific: true, source: "vow" };
@@ -2350,11 +2359,11 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
     const resolved     = await this._resolveJourney(actor);
     const inferredName = resolved.name;       // "Journey to X" | "Journey north" | <fallback> | "The Journey"
     const specific     = resolved.specific;   // did we identify a real destination?
-    let track = IronswornController._newestOpenTrackItem(actor, "journey");
+    let track = sys()._newestOpenTrackItem(actor, "journey");
 
     if (track && specific) {
       // Reuse only an OPEN journey matching this destination; else branch a new one.
-      const match     = IronswornController.findTrackFuzzy(actor, inferredName, "journey");
+      const match     = sys().findTrackFuzzy(actor, inferredName, "journey");
       const matchOpen = match && !foundry.utils.getProperty(match, "system.completed");
       track = matchOpen ? match : null;
     }
@@ -2362,10 +2371,10 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
     if (!track) {
       const name = inferredName;
       const rank = resolved.rank;
-      const res  = await IronswornController.createProgressTrack(actor, name, "journey", rank);
+      const res  = await sys().createProgressTrack(actor, name, "journey", rank);
       if (res?.ok) {
-        track = IronswornController.getProgressTrack(actor, res.id)
-             ?? IronswornController._newestOpenTrackItem(actor, "journey");
+        track = sys().getProgressTrack(actor, res.id)
+             ?? sys()._newestOpenTrackItem(actor, "journey");
         notes.push(`opened journey “${res.name || name}” (${rank})`);
         try { ui.notifications?.info(`${SKALD_NAME}: journey begun — ${res.name || name}.`); } catch (_) {}
       } else {
@@ -2375,7 +2384,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
 
     // On a hit, mark progress on the (now open) journey by its rank.
     if (track && hit) {
-      const pr = await IronswornController.markProgressByRank(actor, track.id);
+      const pr = await sys().markProgressByRank(actor, track.id);
       if (pr?.ok) {
         this._notifyProgress(pr.track, pr.boxes);
         notes.push(`advanced ${pr.track} (now ${pr.boxes}/10 boxes)`);
@@ -2413,7 +2422,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
   async _autoMilestoneFlow(parsed, actor) {
     if (!actor) return "";
     if (!this._isMilestoneMove(parsed?.moveName)) return "";
-    const res = await IronswornController._executeMilestone(actor);
+    const res = await sys()._executeMilestone(actor);
     if (res?.ok) {
       this._notifyProgress(res.track, res.boxes);
       return `marked progress on vow "${res.track}" (now ${res.boxes ?? "?"}/10 boxes)`;
@@ -2553,7 +2562,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
     // but NOT any foe tracks created within this same reply — a single
     // narration can introduce several foes in one fight.
     const preBatchCombatIds = actor
-      ? IronswornController.getCombatTracks(actor).filter(t => !t.completed).map(t => t.id)
+      ? sys().getCombatTracks(actor).filter(t => !t.completed).map(t => t.id)
       : [];
     let staleCombatClosed = false;
     for (const eff of effects) {
@@ -2561,20 +2570,20 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
         let r = null;
         switch (eff.kind) {
           case "momentum":
-            if (eff.op === "reset") r = await IronswornController.resetMomentum(actor);
-            else r = await IronswornController.adjustMomentum(actor, eff.value);
+            if (eff.op === "reset") r = await sys().resetMomentum(actor);
+            else r = await sys().adjustMomentum(actor, eff.value);
             if (r?.ok) applied.push(`momentum ${eff.op === "reset" ? "reset" : (eff.value >= 0 ? "+" : "") + eff.value}`);
             break;
           case "harm":
-            r = await IronswornController.applyHarm(actor, eff.value);
+            r = await sys().applyHarm(actor, eff.value);
             if (r?.ok) applied.push(`-${eff.value} health`);
             break;
           case "stress":
-            r = await IronswornController.applyStress(actor, eff.value);
+            r = await sys().applyStress(actor, eff.value);
             if (r?.ok) applied.push(`-${eff.value} spirit`);
             break;
           case "supply":
-            r = await IronswornController.adjustSupply(actor, eff.value);
+            r = await sys().adjustSupply(actor, eff.value);
             if (r?.ok) applied.push(`supply ${eff.value >= 0 ? "+" : ""}${eff.value}`);
             break;
           case "toggle_impact":
@@ -2589,8 +2598,8 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
             }
             if (!actor) { await this._warnNoActor("change a condition", eff.impact); break; }
             r = (eff.kind === "toggle_impact")
-              ? await IronswornController.toggleImpact(actor, eff.impact)
-              : await IronswornController.setImpact(actor, eff.impact, eff.on);
+              ? await sys().toggleImpact(actor, eff.impact)
+              : await sys().setImpact(actor, eff.impact, eff.on);
             if (r?.ok && !r.noop) {
               const verb = r.state ? "marked" : "cleared";
               applied.push(`${verb} ${r.impact}`);
@@ -2611,7 +2620,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
               break;
             }
             if (!actor) { await this._warnNoActor("change a stat", eff.stat); break; }
-            r = await IronswornController.setStat(actor, eff.stat, eff.value);
+            r = await sys().setStat(actor, eff.stat, eff.value);
             if (r?.ok && !r.noop) {
               applied.push(`${r.stat} ${r.from}→${r.to}`);
               this._auditWrite("SET_STAT", { name: r.stat, boxes: r.to }, true, `${r.from}→${r.to}`);
@@ -2624,18 +2633,18 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
           }
           case "progress":
             r = eff.byRank
-              ? await IronswornController.markProgressByRank(actor, eff.track)
-              : await IronswornController.markProgress(actor, eff.track, eff.value);
+              ? await sys().markProgressByRank(actor, eff.track)
+              : await sys().markProgress(actor, eff.track, eff.value);
             if (r?.ok) applied.push(`progress on ${r.track}`);
             break;
           case "oracle":
-            r = await IronswornController.rollOracle(eff.name);
+            r = await sys().rollOracle(eff.name);
             if (r) applied.push(`oracle “${eff.name}” → ${r}`);
             break;
           case "grant_xp": {
             // [[EFFECT: grant_xp <amount> <reason>]] — discretionary award.
             if (!actor) { await this._warnNoActor("grant experience", ""); break; }
-            r = await IronswornController.grantXp(actor, eff.amount, { reason: eff.reason || "a hard-won milestone" });
+            r = await sys().grantXp(actor, eff.amount, { reason: eff.reason || "a hard-won milestone" });
             if (r?.ok) {
               applied.push(`+${r.amount} XP`);
               this._auditWrite("GRANT_XP", { name: eff.reason || "", boxes: eff.amount }, true, `+${r.amount} XP (${r.mode})`);
@@ -2669,20 +2678,20 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
             // vow just fulfilled. Funnels through the idempotent grantVowXp so
             // it can never double up with the automatic completion hook.
             if (!actor) { await this._warnNoActor("grant vow experience", ""); break; }
-            const vow = IronswornController.resolveVowForXp(actor);
+            const vow = sys().resolveVowForXp(actor);
             if (!vow) {
               // No vow track to attach to — fall back to the rank's flat amount
               // if a rank was supplied, else skip.
               if (eff.rank) {
-                const amt = IronswornController.xpForRank(eff.rank);
-                r = amt > 0 ? await IronswornController.grantXp(actor, amt, { reason: `fulfilled a ${eff.rank} vow` }) : null;
+                const amt = sys().xpForRank(eff.rank);
+                r = amt > 0 ? await sys().grantXp(actor, amt, { reason: `fulfilled a ${eff.rank} vow` }) : null;
                 if (r?.ok) applied.push(`+${r.amount} XP (vow)`);
               }
               this._auditWrite("GRANT_XP_VOW", { name: "", trackKind: "vow" }, !!r?.ok, r?.ok ? "no track, flat rank award" : "no vow to award");
               break;
             }
             const weakHitHalf = (Settings.get("weakHitHalfXp") ?? false) === true;
-            r = await IronswornController.grantVowXp(actor, vow, { weakHitHalf, reason: eff.reason });
+            r = await sys().grantVowXp(actor, vow, { weakHitHalf, reason: eff.reason });
             if (r?.ok && r.xp > 0) {
               applied.push(`+${r.xp} XP for “${vow.name}”`);
               this._auditWrite("GRANT_XP_VOW", { name: vow.name, trackKind: "vow", boxes: r.xp }, true, `+${r.xp} XP`);
@@ -2699,7 +2708,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
               break;
             }
             // Don't duplicate an already-active fight with the same foe.
-            const existing = IronswornController.getProgressTrack(actor, eff.name);
+            const existing = sys().getProgressTrack(actor, eff.name);
             const existingDone = existing && foundry.utils.getProperty(existing, "system.completed");
             if (existing && !existingDone) {
               this._dbg(`→ create_combat skipped: "${eff.name}" already active`);
@@ -2717,7 +2726,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
             let notInCompendium = false;
             let compendiumSuggestion = "";
             if (eff.rank) {
-              rank = IronswornController.normalizeRank(eff.rank);
+              rank = sys().normalizeRank(eff.rank);
               source = "custom";
               this._dbg(`→ create_combat "${eff.name}": custom enemy, using AI-specified rank "${rank}"`);
               // A regular foe given an explicit rank but NOT flagged important
@@ -2725,20 +2734,20 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
               // note it for the GM advisory below.
               if (!eff.important) {
                 try {
-                  const off = await IronswornController.isOfficialCompendiumFoe(eff.name);
+                  const off = await sys().isOfficialCompendiumFoe(eff.name);
                   if (!off) notInCompendium = true;
                 } catch (_) { /* advisory only */ }
               }
             } else {
               let lookup = null;
-              try { lookup = await IronswornController.lookupEnemyInCompendium(eff.name); }
+              try { lookup = await sys().lookupEnemyInCompendium(eff.name); }
               catch (e) { console.warn(LOG_PREFIX, "compendium lookup failed", e); }
               if (lookup?.found && lookup.rank) {
                 rank = lookup.rank;
                 source = "compendium";
                 this._dbg(`→ create_combat "${eff.name}": using compendium rank "${rank}" (matched "${lookup.matchedName}" via ${lookup.match})`);
               } else {
-                rank = IronswornController.normalizeRank(Settings.get("defaultEnemyRank") ?? "dangerous");
+                rank = sys().normalizeRank(Settings.get("defaultEnemyRank") ?? "dangerous");
                 source = "default";
                 const hint = lookup?.suggestion ? ` (did you mean "${lookup.suggestion}"?)` : "";
                 this._dbg(`→ create_combat "${eff.name}": not in compendium${hint}, using default rank "${rank}"`);
@@ -2757,7 +2766,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
             if (!staleCombatClosed && (Settings.get("autoCloseStaleCombatTracks") ?? true)) {
               staleCombatClosed = true;
               if (preBatchCombatIds.length) {
-                const tidy = await IronswornController.closeStaleCombatTracks(actor, { onlyIds: preBatchCombatIds });
+                const tidy = await sys().closeStaleCombatTracks(actor, { onlyIds: preBatchCombatIds });
                 if (tidy?.closed?.length) {
                   applied.push(`auto-closed prior combat ${tidy.closed.map(n => `“${n}”`).join(", ")}`);
                   this._notifyCombat(`🏳 Closed stale combat: ${tidy.closed.join(", ")}`);
@@ -2769,7 +2778,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
               // sheet) to subtype "progress". Runs once per reply, on a write path
               // only. Safe no-op when nothing needs fixing.
               try {
-                const repair = await IronswornController.normalizeCombatTrackSubtypes(actor);
+                const repair = await sys().normalizeCombatTrackSubtypes(actor);
                 if (repair?.fixed?.length) {
                   this._dbg(`→ migrated ${repair.fixed.length} legacy combat track label(s): ${repair.fixed.join(", ")}`);
                 }
@@ -2777,7 +2786,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
                 console.warn(LOG_PREFIX, "normalizeCombatTrackSubtypes failed", e);
               }
             }
-            r = await IronswornController.createProgressTrack(actor, eff.name, "combat", rank);
+            r = await sys().createProgressTrack(actor, eff.name, "combat", rank);
             if (r?.ok) {
               const tag = source === "compendium" ? " [from compendium]" : source === "custom" ? " [custom]" : "";
               applied.push(`⚔ began combat “${eff.name}” [${rank}]${tag}`);
@@ -2785,7 +2794,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
               // Phase 2 (story-arc tracking): a freshly-started fight is the
               // active combat — remember it so context markers and roll
               // integration target the right foe. Best-effort.
-              try { await IronswornController.setActiveCombat(actor, r.id); } catch (_) {}
+              try { await sys().setActiveCombat(actor, r.id); } catch (_) {}
               // Optional GM advisory: a REGULAR foe (not flagged as an
               // important/unique narrative foe) that isn't in the official foe
               // compendia is likely an invented name. Whisper a gentle heads-up
@@ -2809,13 +2818,13 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
           }
           case "create_vow": {
             if (!actor) { await this._warnNoActor("swear the vow", eff.name); break; }
-            const rank = IronswornController.normalizeRank(eff.rank || "formidable");
-            const existing = IronswornController.getProgressTrack(actor, eff.name);
+            const rank = sys().normalizeRank(eff.rank || "formidable");
+            const existing = sys().getProgressTrack(actor, eff.name);
             if (existing && !foundry.utils.getProperty(existing, "system.completed")) {
               applied.push(`vow “${eff.name}” already sworn`);
               break;
             }
-            r = await IronswornController.createProgressTrack(actor, eff.name, "vow", rank, eff.description);
+            r = await sys().createProgressTrack(actor, eff.name, "vow", rank, eff.description);
             if (r?.ok) {
               applied.push(`vow “${eff.name}” sworn [${rank}]`);
               this._notifyCombat(`📜 Vow sworn: ${eff.name} (${rank})`);
@@ -2826,13 +2835,13 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
           }
           case "create_journey": {
             if (!actor) { await this._warnNoActor("begin the journey", eff.name); break; }
-            const rank = IronswornController.normalizeRank(eff.rank || "formidable");
-            const existing = IronswornController.getProgressTrack(actor, eff.name);
+            const rank = sys().normalizeRank(eff.rank || "formidable");
+            const existing = sys().getProgressTrack(actor, eff.name);
             if (existing && !foundry.utils.getProperty(existing, "system.completed")) {
               applied.push(`journey “${eff.name}” already under way`);
               break;
             }
-            r = await IronswornController.createProgressTrack(actor, eff.name, "journey", rank, eff.description);
+            r = await sys().createProgressTrack(actor, eff.name, "journey", rank, eff.description);
             if (r?.ok) {
               applied.push(`journey “${eff.name}” begun [${rank}]`);
               this._notifyCombat(`🧭 Journey begun: ${eff.name} (${rank})`);
@@ -2856,7 +2865,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
               break;
             }
             if (!actor) { await this._warnNoActor("add an asset", eff.name); break; }
-            r = await IronswornController.addAssetToActor(actor, eff.name);
+            r = await sys().addAssetToActor(actor, eff.name);
             if (r?.ok && !r.noop) {
               applied.push(`added asset “${r.name}”`);
               this._notifyCombat(`🎴 Asset added: ${r.name}`);
@@ -2876,7 +2885,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
               break;
             }
             if (!actor) { await this._warnNoActor("add an item", eff.name); break; }
-            r = await IronswornController.addItemToActor(actor, eff.name);
+            r = await sys().addItemToActor(actor, eff.name);
             if (r?.ok && !r.noop) {
               applied.push(`added ${r.type || "item"} “${r.name}”`);
               this._notifyCombat(`📦 Item added: ${r.name}`);
@@ -2897,7 +2906,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
               this._auditWrite("CREATE_FOE", { name: eff.name }, false, "disabled (aiCreatesContent=off)");
               break;
             }
-            r = await IronswornController.createFoeActor(eff.name, { rank: eff.rank, important: eff.important });
+            r = await sys().createFoeActor(eff.name, { rank: eff.rank, important: eff.important });
             if (r?.ok) {
               const tag = r.source === "compendium" ? " [official]" : " [custom]";
               const rk = r.rank ? ` [${r.rank}]` : "";
@@ -2927,7 +2936,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
               this._auditWrite("CREATE_CHARACTER", { name: eff.name }, false, `disabled (aiCreatesContent=${mode})`);
               break;
             }
-            r = await IronswornController.createCharacter(eff.name);
+            r = await sys().createCharacter(eff.name);
             if (r?.ok) {
               applied.push(`🧝 created character “${r.name}”`);
               this._notifyCombat(`🧝 Character created: ${r.name}`);
@@ -2941,7 +2950,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
 
           case "initiative": {
             const gain = eff.value === "gain";
-            r = await IronswornController.setInitiative(actor, gain);
+            r = await sys().setInitiative(actor, gain);
             if (r?.ok) {
               applied.push(gain ? "seized initiative" : "lost initiative");
               this._notifyInitiative(gain);
@@ -2954,17 +2963,17 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
             // end ("the beast falls", "you cut him down"). Try the literal name,
             // then a fuzzy combat-kind match, then the active-combat track, so a
             // narrated conclusion reliably closes the fight without an exact name.
-            let foe = eff.name ? IronswornController.findTrackFuzzy(actor, eff.name, "combat") : null;
-            if (!foe) { try { foe = IronswornController.getActiveCombat(actor); } catch (_) { foe = null; } }
+            let foe = eff.name ? sys().findTrackFuzzy(actor, eff.name, "combat") : null;
+            if (!foe) { try { foe = sys().getActiveCombat(actor); } catch (_) { foe = null; } }
             r = foe
-              ? await IronswornController.completeTrack(actor, foe.id)
-              : await IronswornController.completeTrack(actor, eff.name);
+              ? await sys().completeTrack(actor, foe.id)
+              : await sys().completeTrack(actor, eff.name);
             if (r?.ok) {
               applied.push(`ended combat “${r.name}”`);
               this._notifyCombat(`🏆 Combat ended: ${r.name}`);
               // Phase 2 (story-arc tracking): the fight is over — clear the
               // active-combat flag so stale state never lingers. Best-effort.
-              try { await IronswornController.clearActiveCombat(actor); } catch (_) {}
+              try { await sys().clearActiveCombat(actor); } catch (_) {}
             }
             break;
           }
@@ -2975,7 +2984,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
             // entirely). completeTrackSmart() falls back to the track the last
             // progress move rolled against, then the newest open track of the
             // implied kind (vow / journey). See IronswornController.
-            r = await IronswornController.completeTrackSmart(actor, eff.name, eff.trackKind);
+            r = await sys().completeTrackSmart(actor, eff.name, eff.trackKind);
             if (r?.ok) {
               applied.push(`completed “${r.name}”`);
               this._notifyCombat(`🏆 Completed: ${r.name}`);
@@ -2996,7 +3005,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
             // [[MARK_COMPLETE:kind:Name]] — close a specific, named track. Fuzzy
             // name match constrained to the directive's kind, so a slight
             // paraphrase still resolves but we never close the wrong KIND.
-            const track = IronswornController.findTrackFuzzy(actor, eff.name, eff.trackKind);
+            const track = sys().findTrackFuzzy(actor, eff.name, eff.trackKind);
             if (!track) {
               this._auditWrite("MARK_COMPLETE", eff, false, `no ${eff.trackKind} track matching "${eff.name}"`);
               await Chat.postSystem(
@@ -3010,10 +3019,10 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
               break; // idempotent — nothing to do, no noisy notification
             }
             r = (eff.trackKind === "combat")
-              ? await IronswornController.completeTrack(actor, track.id)
-              : await IronswornController.completeTrackSmart(actor, track.id, eff.trackKind);
+              ? await sys().completeTrack(actor, track.id)
+              : await sys().completeTrackSmart(actor, track.id, eff.trackKind);
             if (r?.ok) {
-              if (eff.trackKind === "combat") { try { await IronswornController.clearActiveCombat(actor); } catch (_) {} }
+              if (eff.trackKind === "combat") { try { await sys().clearActiveCombat(actor); } catch (_) {} }
               applied.push(`completed “${r.name}”`);
               this._auditWrite("MARK_COMPLETE", eff, true, `completed "${r.name}"`);
               await Chat.postSystem(`<em>🤖 Skald marked “${escapeHtml(r.name)}” complete.</em>`, { gmWhisper: true });
@@ -3024,7 +3033,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
           }
           case "add_progress": {
             // [[ADD_PROGRESS:kind:Name:N]] — add N boxes (N×4 ticks).
-            const track = IronswornController.findTrackFuzzy(actor, eff.name, eff.trackKind);
+            const track = sys().findTrackFuzzy(actor, eff.name, eff.trackKind);
             if (!track) {
               this._auditWrite("ADD_PROGRESS", eff, false, `no ${eff.trackKind} track matching "${eff.name}"`);
               await Chat.postSystem(
@@ -3033,7 +3042,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
               );
               break;
             }
-            r = await IronswornController.markProgress(actor, track.id, Math.round(Number(eff.boxes) || 0) * 4);
+            r = await sys().markProgress(actor, track.id, Math.round(Number(eff.boxes) || 0) * 4);
             if (r?.ok) {
               applied.push(`+${eff.boxes} progress on “${r.track}” (${r.boxes}/10)`);
               this._auditWrite("ADD_PROGRESS", eff, true, `"${r.track}" now ${r.boxes}/10`);
@@ -3044,7 +3053,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
           }
           case "set_progress": {
             // [[SET_PROGRESS:kind:Name:N]] — set track to exactly N boxes.
-            const track = IronswornController.findTrackFuzzy(actor, eff.name, eff.trackKind);
+            const track = sys().findTrackFuzzy(actor, eff.name, eff.trackKind);
             if (!track) {
               this._auditWrite("SET_PROGRESS", eff, false, `no ${eff.trackKind} track matching "${eff.name}"`);
               await Chat.postSystem(
@@ -3053,7 +3062,7 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
               );
               break;
             }
-            r = await IronswornController.setProgress(actor, track.id, eff.boxes);
+            r = await sys().setProgress(actor, track.id, eff.boxes);
             if (r?.ok) {
               applied.push(`set “${r.track}” to ${r.boxes}/10`);
               this._auditWrite("SET_PROGRESS", eff, true, `"${r.track}" set to ${r.boxes}/10`);
