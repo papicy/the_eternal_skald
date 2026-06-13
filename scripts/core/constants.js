@@ -69,8 +69,18 @@ export const PROVIDER_PRESETS = {
   openai:     { endpoint: "https://api.openai.com/v1/chat/completions" },
   openrouter: { endpoint: "https://openrouter.ai/api/v1/chat/completions" },
   google:     { endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions" },
+  ollama:     { endpoint: "http://localhost:11434/v1/chat/completions" }, // (v0.20.0 F6) local Ollama, OpenAI-compatible
   custom:     { endpoint: null }
 };
+
+/**
+ * (v0.20.0 F6) Default base URL for a local Ollama server. The OpenAI-compatible
+ * chat endpoint is {@link PROVIDER_PRESETS}.ollama.endpoint; this base is used for
+ * Ollama-native calls such as model discovery (`/api/tags`). Override by editing
+ * the API Endpoint setting if Ollama runs on another host/port.
+ * @type {string}
+ */
+export const OLLAMA_DEFAULT_BASE = "http://localhost:11434";
 
 /*  §1b  VISION-CAPABLE MODEL CATALOGUE  (v0.10.31)                        */
 /* ===================================================================== */
@@ -319,6 +329,7 @@ export const PROVIDER_LABELS = {
   openai:     "OpenAI",
   openrouter: "OpenRouter",
   google:     "Google",
+  ollama:     "Ollama",
   custom:     "Custom"
 };
 

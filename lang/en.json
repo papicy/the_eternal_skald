@@ -18,6 +18,7 @@
           "openai": "OpenAI",
           "openrouter": "OpenRouter",
           "google": "Google AI (Gemini)",
+          "ollama": "Ollama (local LLM)",
           "custom": "Custom (manual endpoint)"
         }
       },

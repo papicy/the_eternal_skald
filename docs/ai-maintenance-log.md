@@ -2678,3 +2678,25 @@ GATE:         GRANTED by maintainer via the Phase C subtask assignment (this ent
                self-approval is NOT being used — the human assigned the work with specs).
 
 NOTE: Per-feature detailed log entries follow below as each lands.
+
+### [2026-06-13 17:45 EEST] — F6: Ollama / local-LLM provider support
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    IMPLEMENT (gated — see Phase C gate above)
+EVIDENCE:     constants.js:67-83 (PROVIDER_PRESETS.ollama + OLLAMA_DEFAULT_BASE),
+              constants.js:327-334 (PROVIDER_LABELS.ollama); model-catalogue.js:135-140
+              (ollama dropdown case); settings.js:103 (providerPreset ollama choice);
+              client.js:457,590 (resolveOllamaApiKey); ai/ollama-client.js (new helper).
+CHANGE:       Added "ollama" provider preset (OpenAI-compatible local endpoint
+              http://localhost:11434/v1/chat/completions). New scripts/ai/ollama-client.js
+              provides keyless-auth resolution (placeholder when no key on ollama),
+              base-URL derivation, a curated common-model list, and /api/tags model
+              discovery (injectable fetch, fail-soft). Implemented as a provider preset
+              (per recommendations §F6) rather than duplicating the chat client.
+FILES TOUCHED: scripts/ai/ollama-client.js (new), scripts/core/constants.js,
+              scripts/core/model-catalogue.js, scripts/core/settings.js, scripts/ai/client.js,
+              lang/en.json, test/ollama-provider.test.mjs (new).
+TESTS:        node test/ollama-provider.test.mjs → 26/26; full suite 42/42; load-smoke OK.
+GATE:         Covered by the Phase C gate above (exceeds 3-file limit; new provider surface).
+ROLLBACK:     Revert this commit on phase-c-feature-enrichment.
+RESIDUAL RISK: LOW. Purely additive; default provider unchanged (abacus). Hosted-provider
+              key guard preserved exactly.

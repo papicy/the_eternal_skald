@@ -100,6 +100,7 @@ export const Settings = {
         openai:     game.i18n.localize("ETERNAL_SKALD.settings.providerPreset.choices.openai"),
         openrouter: game.i18n.localize("ETERNAL_SKALD.settings.providerPreset.choices.openrouter"),
         google:     game.i18n.localize("ETERNAL_SKALD.settings.providerPreset.choices.google"),
+        ollama:     game.i18n.localize("ETERNAL_SKALD.settings.providerPreset.choices.ollama"),
         custom:     game.i18n.localize("ETERNAL_SKALD.settings.providerPreset.choices.custom")
       },
       default: "abacus",
