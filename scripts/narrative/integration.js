@@ -40,8 +40,31 @@ import { CombatController, RagBridge } from "../eternal-skald.js";
 export const Integration = {
   /** ChatMessage ids whose roll we've already narrated (anti-double-fire). */
   _processedRolls: new Set(),
-  /** A short note of what the player was trying to do, for narration context. */
-  _lastIntent: "",
+  /**
+   * A short note of what the player was trying to do, for narration context.
+   * (fix #5 — state persistence) These lived ONLY in memory, so a Foundry reload
+   * wiped the Skald's RECENT intent and it fell back to older RAG/journal facts.
+   * They are now backed by localStorage (per-world key) so a reload within the
+   * freshness window restores the latest intent. Degrades to a pure in-memory
+   * field when localStorage is unavailable (private mode, no DOM, etc.). All
+   * existing `this._lastIntent` / `this._lastIntentTs` reads & writes are
+   * unchanged — persistence is transparent via these accessors.
+   */
+  _intentMem: { v: "", ts: 0, loaded: false },
+  _intentKey() { try { return `eternal-skald:lastIntent:${globalThis.game?.world?.id || "world"}`; } catch (_) { return "eternal-skald:lastIntent"; } },
+  _loadIntent() {
+    if (this._intentMem.loaded) return;
+    this._intentMem.loaded = true;
+    try {
+      const raw = globalThis.localStorage?.getItem(this._intentKey());
+      if (raw) { const o = JSON.parse(raw); this._intentMem.v = String(o.v || ""); this._intentMem.ts = Number(o.ts || 0); }
+    } catch (_) { /* defensive: corrupt/blocked storage → in-memory only */ }
+  },
+  _saveIntent() { try { globalThis.localStorage?.setItem(this._intentKey(), JSON.stringify({ v: this._intentMem.v, ts: this._intentMem.ts })); } catch (_) {} },
+  get _lastIntent() { this._loadIntent(); return this._intentMem.v; },
+  set _lastIntent(v) { this._loadIntent(); this._intentMem.v = String(v ?? ""); this._saveIntent(); },
+  get _lastIntentTs() { this._loadIntent(); return this._intentMem.ts; },
+  set _lastIntentTs(t) { this._loadIntent(); this._intentMem.ts = Number(t || 0); this._saveIntent(); },
 
   /** True iff the Ironsworn system is active AND integration is enabled. */
   active() {
@@ -2391,6 +2414,14 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
         // (v0.13.0) Progress-aware narrative pacing so the fiction stays aligned
         // with the track and never "arrives" before the journey is nearly full.
         notes.push(this._journeyPacingNote(pr.boxes));
+        // (fix #3 — weak-hit framing, option b) RAW: a weak hit DOES mark progress
+        // (kept), but it is a SETBACK. Frame the advance as gained at a COST while
+        // the party stays ON the path; a strong hit advances cleanly.
+        if (!strong) notes.push(
+          `WEAK HIT on "${pr.track}" — progress IS marked, but the party advances AT A COST. ` +
+          `Narrate a setback or mishap suffered en route (a hardship, lost supply, or hard choice) ` +
+          `even as they press on along the path. Do NOT narrate arrival.`
+        );
         // (fix — journey completion) A journey that has reached full progress
         // (10/10) is finished; close it deterministically so it stops being
         // reused by later journeys (which caused the grouping bug).
