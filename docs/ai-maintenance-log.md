@@ -2205,3 +2205,101 @@ RESIDUAL RISK: LOW. Additive registration; resolution keys on game.system.id so 
               rather than a throw. The only deferred work is the (unverified) write surface,
               intentionally left unsupported until it can be confirmed against a running
               Nimble instance under its own gate.
+
+
+
+### [2026-06-13 10:57 UTC] — Phase 5: advertise multi-system support (manifest + docs)
+AGENT:        Abacus.AI Agent (SkaldCoder)
+TASK TYPE:    DOCUMENT (Markdown / manifest only — no runtime code logic changed)
+TOKEN BUDGET: 1,000 (DOCUMENT)  |  EXCEEDED — covered by the recorded multi-phase
+              approval gate (see GATE below).
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md + PROPOSAL-multi-system-adapter-architecture.md
+  [x] task classified: DOCUMENT — final phase of the multi-system plan; updates user/
+        developer-facing docs + the manifest to advertise the capability shipped by
+        Phases 1–4. No .js/.mjs runtime logic touched.
+  [x] target file(s)+line(s) located (evidence below)
+  [~] file/line caps EXCEEDED (6 files) — NOT within the default 3-file/50-line DOCUMENT
+        limits; covered by the pre-recorded multi-phase approval gate (Phases 1–5 of
+        the adapter proposal were approved as a planned sequence).
+  [x] additive & backwards-compatible (no settings/flags/directives/i18n keys removed
+        or renamed; manifest changes are additive: a new `recommends` entry + a prepended
+        description blurb; version bump 0.16.1 → 0.17.0 via tools/bump-version.mjs)
+  [x] no architectural boundary crossed: NO 🔴 LOCKED source file edited. module.json
+        (🧊) edited additively for the version bump + the advertised relationship, which
+        is the intended deliverable of this phase.
+  [x] suite kept 100% green (version-consistency guards satisfied by the README updates)
+  [x] rollback plan defined (branch unmerged / single git revert)
+
+PROBLEM:      Phases 1–4 delivered the working multi-system capability (registry +
+              NullAdapter + leaf/spine migration + the read-only NimbleAdapter), but the
+              user/developer-facing surface still described an Ironsworn-only module: the
+              README had no multi-system section, there was no guide for writing a new
+              adapter, the changelog had no entry, and module.json neither advertised
+              Nimble nor named the architecture. This phase closes that documentation gap.
+
+EVIDENCE:     README.md had no "Multi-System Support" section and the Public API block
+              listed no `skald.systems` surface; CHANGELOG.md's newest entry was [0.14.0];
+              module.json `relationships.recommends` listed only foundry-ironsworn and the
+              version was 0.16.1. test/version-consistency.test.mjs couples the README
+              alpha badge + the two illustrative server-banner/health-JSON version literals
+              to module.json's version, so the version bump REQUIRED matching README edits.
+
+CHANGE:       (1) Version bump 0.16.1 → 0.17.0 (minor — new user-visible feature) via
+              `node tools/bump-version.mjs 0.17.0 --no-commit`, updating module.json +
+              package.json. (2) module.json: added a second relationships.recommends entry
+              ({ id:"nimble", type:"system", reason: read-only support }) and prepended a
+              v0.17.0 "Multi-system foundations" blurb to the description HTML (references
+              docs/SYSTEMS.md; describes adapter architecture, Ironsworn zero-change,
+              Nimble read-only, NullAdapter standalone). (3) README.md: bumped the three
+              version-coupled literals (alpha badge, server-hook banner, /health JSON) and
+              the troubleshooting banner reference to 0.17.0; added a "## Multi-System
+              Support" section (adapter model + a system→adapter→behaviour table) after
+              Ironsworn Integration; added a "Multi-system adapters (v0.17.0)" snippet to
+              the Public API block using the real SystemRegistry methods (getActive/get/
+              list/register). (4) docs/SYSTEMS.md (NEW): developer guide — the SystemAdapter
+              contract, SYSTEM_CAPABILITIES keys, the three iron rules, reference adapters
+              (IronswornController/NimbleAdapter/NullAdapter), a step-by-step "add an
+              adapter" walkthrough (file → registerSystem in ready hook → consume → test),
+              and a checklist. (5) CHANGELOG.md: new [0.17.0] — 2026-06-13 entry
+              (### Added + ### Changed) noting zero behavioural change for Ironsworn.
+
+FILES TOUCHED (6):
+  - module.json                 (version bump + nimble recommends + description blurb)
+  - package.json                (version bump, via bump-version tool)
+  - README.md                   (version literals + Multi-System Support section + API snippet)
+  - docs/SYSTEMS.md             (NEW — adapter developer guide)
+  - CHANGELOG.md                (NEW [0.17.0] entry)
+  - docs/ai-maintenance-log.md  (this entry)
+  NOT committed: auto-generated docs/SYSTEMS.docx / docs/SYSTEMS.pdf siblings, and the
+  repo's .abacus.donotdelete sentinel — excluded from the commit deliberately.
+
+TESTS:        npm test (node test/run-all.mjs) -> PASS — 37 files passed, 0 failed.
+              version-consistency.test.mjs -> 17 passed, 0 failed (confirms package.json
+              matches module.json @ 0.17.0, the README alpha badge reads v0.17.0, and the
+              README server-banner + /health examples read v0.17.0). No runtime test was
+              affected because no runtime code changed.
+
+BEHAVIOURAL CHANGE: NONE. Documentation + manifest metadata only. The version banner that
+              already derives from the manifest at runtime now reads 0.17.0; the added
+              `recommends` entry is advisory metadata Foundry surfaces in the install UI.
+
+GATE:         Pre-approved multi-phase plan. This is Phase 5 (final, documentation) of the
+              multi-system adapter proposal (docs/PROPOSAL-multi-system-adapter-
+              architecture.md), whose Phases 1–5 were approved together as a planned
+              sequence. The DOCUMENT 1,000-token budget and the 3-file/50-line caps are
+              EXCEEDED here (6 files), which the recorded multi-phase approval covers; no
+              additional/dedicated gate is consumed. No 🔴 LOCKED source file was edited.
+
+ROLLBACK:     branch feat/phase5-docs-manifest is unmerged (PR opened against
+              feat/phase4-nimble-adapter, NOT main). Abandon the branch, or
+              git revert <phase5-commit-sha> — a single commit removes the manifest bump,
+              the doc edits, docs/SYSTEMS.md, the changelog entry, and this log entry.
+              Independent of Phases 1–4.
+
+RESIDUAL RISK: NONE-to-LOW. No executable code changed. The only machine-checked coupling
+              (version-consistency.test.mjs) is satisfied and green. The pre-existing
+              module.json `download` URL still points at an older release zip — left
+              untouched as it is out of scope for this phase and governed by the release/
+              tagging process, not this docs change.
