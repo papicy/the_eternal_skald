@@ -1,6 +1,7 @@
 import { LOG_PREFIX, DEFAULT_MODEL, DEFAULT_ENDPOINT } from "../core/constants.js";
 import { isCatalogueVisionModel } from "../core/model-catalogue.js";
 import { Settings } from "../core/settings.js";
+import { resolveOllamaApiKey } from "./ollama-client.js";
 
 /**
  * The ONE endpoint this client talks to. It's a relative URL so it
@@ -451,7 +452,9 @@ export const Client = {
    * @returns {Promise<string>} the assistant's reply text
    */
   async chat(messages, opts = {}) {
-    const apiKey   = Settings.get("apiKey");
+    // (v0.20.0 F6) Resolve a keyless local Ollama to a harmless placeholder so
+    // the no-API-key guard below does not block local inference.
+    const apiKey   = resolveOllamaApiKey(Settings.get("providerPreset"), Settings.get("apiKey"));
     // (v0.10.23) Callers may pin a specific model for one call (e.g. the map
     // vision scout uses a multimodal model that may differ from the narration
     // model). Falls back to the configured Model Name, then the default.
@@ -583,7 +586,8 @@ export const Client = {
    */
   async chatStream(messages, opts = {}, handlers = {}) {
     const { onChunk, onDone, onError } = handlers;
-    const apiKey   = Settings.get("apiKey");
+    // (v0.20.0 F6) Same keyless-Ollama resolution as chat().
+    const apiKey   = resolveOllamaApiKey(Settings.get("providerPreset"), Settings.get("apiKey"));
     // (v0.14.3) Honour a per-call pinned model (opts.model) exactly as chat()
     // does, so callers that delegate here (e.g. the map-vision scout) keep
     // their multimodal model instead of silently falling back to the default.

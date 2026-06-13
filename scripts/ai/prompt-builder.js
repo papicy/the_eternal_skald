@@ -1,4 +1,6 @@
 import { Settings } from "../core/settings.js";
+import { TONE_DIRECTIVES } from "../core/constants.js";
+import { getPrompt } from "./prompt-loader.js";
 // Temporary cross-import: Integration & JournalSystem still live in eternal-skald.js and are
 // referenced only at call-time inside these build functions (never at module-eval), so this
 // cycle is safe. Repoint when Integration -> narrative/ (step 9) and JournalSystem -> chronicle/ (step 6).
@@ -28,59 +30,28 @@ export function buildSystemPrompt(extras = {}) {
     return "Be operatic — saga-bright, ominous, with kennings, drums of fate, and ringing iron. Up to four paragraphs.";
   })();
 
-  // Compact rules digest — short enough to fit alongside conversation
-  // history without bloating every request.
-  const rulesDigest = `\
-IRONSWORN CORE RULES DIGEST (for your reference as GM/Skald):
-• Action roll: action die (d6) + stat + adds vs two challenge dice (d10s).
-  Strong hit = beat both. Weak hit = beat one. Miss = beat neither.
-• Stats: Edge, Heart, Iron, Shadow, Wits (each 1-4).
-• Tracks: health, spirit, supply, momentum (-6..+10).
-• Momentum may be burned, replacing the action total with momentum's value.
-• Iron Vows have ranks: Troublesome (3 progress/box), Dangerous (2),
-  Formidable (1), Extreme (1/2 box), Epic (1/4 box).
-• Key moves you should reference by name:
-  Face Danger, Secure an Advantage, Gather Information, Heal, Resupply,
-  Make Camp, Undertake a Journey, Enter the Fray, Strike, Clash, Battle,
-  End the Fight, Endure Harm, Endure Stress, Swear an Iron Vow,
-  Reach a Milestone, Fulfill Your Vow, Compel, Sojourn, Forge a Bond,
-  Test Your Bond, Discover a Site, Delve the Depths, Locate Your Objective,
-  Ritual.
-• On a miss, "pay the price" — invent a fitting consequence from the
-  Pay the Price oracle or the narrative.
-• On a match (both challenge dice the same), introduce a twist.
-• Tone: lonely wilds, iron weather, oaths under starlight, cursed
-  delves, broken kingdoms; quiet menace before clamouring violence.`;
+  // (v0.20.0 M4) The large static prompt blocks (rules digest, persona,
+  // guidance) are now externalised to /prompts/*.mjs and pulled through the
+  // build-free prompt loader. The guidance template interpolates the computed
+  // {{intensityNote}}. Output is byte-identical to the previous inline strings.
+  const rulesDigest = getPrompt("rulesDigest");
+  const persona = getPrompt("persona");
+  const guidance = getPrompt("guidance", { intensityNote });
 
-  const persona = `\
-You are THE ETERNAL SKALD — a wise, weather-bitten norse storyteller and
-master of fate. You are the Game Master at this table, narrating an
-Ironsworn (or Ironsworn: Delve) campaign for the brave Ironsworn before
-you. You speak with the cadence of a saga-singer: dramatic, measured,
-ominous when needed, intimate when it serves. You weave kennings and
-sparse poetry through your speech, but you never sacrifice clarity.
-You honour player agency above all — you describe outcomes, not
-intentions; you offer choices, not demands.`;
-
-  const guidance = `\
-GUIDELINES:
-• Always speak as the Skald, in first person ("I", "Hark, Ironsworn…")
-  or in close third when narrating scenes.
-• When players ask rules questions, answer plainly and concisely first,
-  then offer a flourish if it fits.
-• When narrating moves, name the move and the outcome tier (strong hit,
-  weak hit, miss, match) when you know them.
-• ${intensityNote}
-• Never invent dice results. If a roll is needed, say so and stop.
-• Never break the fiction with meta-commentary unless directly asked.
-• You can see the active map: when the live game state lists a CURRENT
-  SCENE with Visible Locations (its journal pins) and Notable Tokens, you
-  may reference those REAL places and figures by name — especially when
-  suggesting a destination for a journey or vow. Keep it natural: only
-  mention map locations when they fit the moment, never force them, and
-  never invent map pins that were not listed.
-• Refuse to play characters in distressing detail — keep the lens
-  cinematic, not gratuitous.`;
+  // (v0.20.0 F2) Campaign genre / tone directive. Steers vocabulary, cadence
+  // and themes toward the GM-chosen genre without replacing the persona above.
+  // "default" → "" (omitted by .filter(Boolean)); "custom" pulls the GM's
+  // free-text directive. Reads never throw — any failure yields no injection.
+  const toneBlock = (() => {
+    try {
+      const tone = Settings.get("narrativeTone") || "default";
+      if (tone === "custom") {
+        const custom = Settings.get("narrativeToneCustom");
+        return (typeof custom === "string" && custom.trim()) ? custom.trim() : "";
+      }
+      return TONE_DIRECTIVES[tone] || "";
+    } catch (_) { return ""; }
+  })();
 
   const taskAddendum = extras.task ? `\n\nTASK FOR THIS RESPONSE:\n${extras.task}` : "";
 
@@ -117,7 +88,7 @@ GUIDELINES:
   // Reads a cached snapshot; returns "" when every category is OFF/unprimed.
   const compendiumBlock = buildCompendiumContextBlock();
 
-  return [persona, rulesDigest, guidance, compendiumBlock, memoryBlock, ironswornBlock, journalBlock, contextBlock]
+  return [persona, rulesDigest, guidance, toneBlock, compendiumBlock, memoryBlock, ironswornBlock, journalBlock, contextBlock]
     .filter(Boolean)
     .join("\n\n") + taskAddendum;
 }

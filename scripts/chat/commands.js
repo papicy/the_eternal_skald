@@ -10,12 +10,15 @@ import { runConversation, CombatController, SceneContext,
 import { Integration } from "../narrative/integration.js";
 import { TokenControl } from "../narrative/token-control.js";
 import { NpcDialogue, OracleInterpreter, LoreGenerator } from "../narrative/generators.js";
+import { RoleplayMode } from "../narrative/roleplay-mode.js";
 import { MapVision } from "../vision/map-vision.js";
 import { JournalSystem } from "../chronicle/journal-system.js";
 import { EntityLinker } from "../chronicle/entity-linking.js";
+import { RecapExport } from "../chronicle/recap-export.js";
 import { IronswornData } from "../ironsworn-data.js";
 import { getActiveAdapter } from "../systems/registry.js";
 import { BrowserRAG } from "../browser-rag.js";
+import { findCommand } from "./command-registry.js";
 
 /**
  * Master dispatcher. Returns true if the message was a recognised Skald
@@ -61,47 +64,24 @@ export function dispatchCommand(rawText) {
   const args = (firstSpace === -1 ? "" : trimmed.slice(firstSpace + 1)).trim();
   console.log(`${LOG_PREFIX} dispatchCommand: head=${JSON.stringify(head)} args=${JSON.stringify(args)}`);
 
-  // Map command tokens to their async handler. We use a lookup table so we
-  // can match the prefix exactly (no partial matches, no fall-through).
+  // (v0.20.0 M2) Resolve the command through the declarative registry
+  // (scripts/chat/command-registry.js) instead of a hand-maintained switch.
+  // Each descriptor carries its canonical token, aliases, the Commands method
+  // to invoke, a permission gate and a help line — a single source of truth
+  // that new commands self-register into. Routing/behaviour is identical to
+  // the previous switch: the same tokens map to the same Commands.<method>(args).
+  const descriptor = findCommand(head);
   const handler = (() => {
-    switch (head) {
-      case COMMANDS.HELP:    return () => Commands.help();
-      case COMMANDS.SKALD:   return () => Commands.skald(args);
-      case COMMANDS.ORACLE:  return () => Commands.oracle(args);
-      case COMMANDS.NPC:     return () => Commands.npc(args);
-      case COMMANDS.SCENE:   return () => Commands.scene(args);
-      case COMMANDS.LORE:    return () => Commands.lore(args);
-      case COMMANDS.COMBAT:  return () => Commands.combat(args);
-      // --- Journal system (v0.4.0) ---
-      case COMMANDS.JOURNAL: return () => Commands.journals(args);
-      case COMMANDS.JOURNALS:return () => Commands.journals(args);
-      case COMMANDS.MYSTERIES:return () => Commands.mysteries(args);
-      case COMMANDS.REMIND:  return () => Commands.remind(args);
-      case COMMANDS.END_SESSION: return () => Commands.endSession(args);
-      // --- Browser-based RAG / AI memory (v0.5.0) ---
-      case COMMANDS.REINDEX:    return () => Commands.reindex(args);
-      case COMMANDS.RAG_STATUS: return () => Commands.ragStatus(args);
-      // --- Living Chronicle (v0.8.0) ---
-      case COMMANDS.TIMELINE:      return () => Commands.timeline(args);
-      case COMMANDS.RELATIONSHIPS: return () => Commands.relationships(args);
-      case COMMANDS.MAP:           return () => Commands.relationships(args);
-      case COMMANDS.TEMPLATE:      return () => Commands.template(args);
-      // --- UX / polish (v0.9.0) ---
-      case COMMANDS.LINK_STYLE:    return () => Commands.linkStyle(args);
-      // --- Maintenance (v0.10.16) ---
-      case COMMANDS.RESET:         return () => Commands.reset(args);
-      case COMMANDS.WIPE:          return () => Commands.reset(args);
-      // --- Map vision / scouting (v0.10.23) ---
-      case COMMANDS.SCOUT:         return () => Commands.scout(args);
-      case COMMANDS.SURVEY:        return () => Commands.scout(args);
-      case COMMANDS.ANALYZE_MAP:   return () => Commands.scout(args);
-      // --- Manual journey progress (v0.11.3) ---
-      case COMMANDS.PROGRESS:      return () => Commands.progress(args);
-      // --- Journal amend / rewrite (v0.14.0) ---
-      case COMMANDS.JOURNAL_REWRITE: return () => Commands.journalRewrite(args);
-      case COMMANDS.JOURNAL_AMEND:   return () => Commands.journalAmend(args);
-      default:               return null;
+    if (!descriptor) return null;
+    // Declarative permission gate. Every pre-M2 command is "all" (a no-op),
+    // so existing behaviour is unchanged; "gm" commands self-gate internally
+    // AND are blocked here for non-GMs (used by newer commands).
+    if (descriptor.permission === "gm" && !game.user?.isGM) {
+      return () => {
+        try { Chat.postError(`The command ${head} is reserved for the GM.`); } catch (_) {}
+      };
     }
+    return () => Commands[descriptor.method](args);
   })();
 
   // --- Bare "!" alias (v0.3.2) ----------------------------------------
@@ -355,6 +335,21 @@ export const Commands = {
       return Chat.postSystem(game.i18n.localize("ETERNAL_SKALD.errors.emptySkald"));
     }
 
+    // ── NPC roleplay mode (v0.20.0, F4) ─────────────────────────────────
+    // While roleplay is active, the Skald answers fully IN CHARACTER as the
+    // chosen NPC. We bypass the move/token meta-handling below (in-character
+    // dialogue is not a mechanical action) and do NOT ingest the exchange into
+    // the chronicle (channel "roleplay" is not a journal channel).
+    if (RoleplayMode.isActive()) {
+      const who = RoleplayMode.current();
+      return runConversation("roleplay", args, {
+        task: RoleplayMode.buildPersonaTask(who, RoleplayMode.dossier()),
+        label: `In Character: ${who}`,
+        variant: "default",
+        allowMoves: false
+      });
+    }
+
     // ── Token control subcommands (v0.16.0) ────────────────────────────
     // `!skald move <token> to <x,y>`, `!skald move <token> <n> <dir>`,
     // `!skald remove <token>`, `!skald undo`. Only fires when the GM has
@@ -435,6 +430,51 @@ export const Commands = {
       return Chat.postSystem(game.i18n.localize("ETERNAL_SKALD.errors.emptyNpc"));
     }
     return NpcDialogue.invoke(args);
+  },
+
+  /* --------------------------- !roleplay (v0.20.0, F4) ------------- */
+  /**
+   * Toggle in-character NPC roleplay. While active, !skald responses come
+   * fully in the NPC's voice (see the skald() interception) until disabled.
+   *   !roleplay <name>  → step into that NPC (seeded from their chronicle entry)
+   *   !roleplay off     → return to the Skald
+   *   !roleplay         → show the current mode
+   * The NPC's full dossier is whispered to the GM only; players see just the
+   * in-character voice. State is in-memory (resets on reload).
+   */
+  async roleplay(args) {
+    const raw = String(args || "").trim();
+    if (!raw) {
+      return RoleplayMode.isActive()
+        ? Chat.postSkald(`<p>You are in conversation with <strong>${escapeHtml(RoleplayMode.current())}</strong>. Say <code>!roleplay off</code> to return to the Skald.</p>`, { variant: "help", title: "Roleplay Mode" })
+        : Chat.postSystem(`<em>No roleplay is afoot. Use <code>!roleplay &lt;name&gt;</code> to step into a character.</em>`, { gmWhisper: true });
+    }
+    if (/^off$/i.test(raw)) {
+      const was = RoleplayMode.stop();
+      return Chat.postSkald(`<p>${was ? `<strong>${escapeHtml(was)}</strong> withdraws, and ` : ""}the Skald resumes the telling.</p>`, { variant: "lore", title: "Roleplay Ended" });
+    }
+    // Resolve the NPC against the chronicle (fuzzy first, then exact name).
+    let entry = null;
+    try { entry = JournalSystem._findEntry?.("npc", raw) || null; } catch (_) {}
+    if (!entry) {
+      try { entry = JournalSystem.listEntries("npc").find(e => e.name?.toLowerCase() === raw.toLowerCase()) || null; }
+      catch (_) {}
+    }
+    const name = entry?.name || raw;
+    let dossier = "";
+    if (entry) {
+      try {
+        const page = entry.pages?.contents?.[0] ?? entry.pages?.find?.(() => true);
+        dossier = String(page?.text?.content || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      } catch (_) {}
+    }
+    RoleplayMode.start(name, dossier);
+    if (dossier) {
+      await Chat.postSystem(`<p><strong>${escapeHtml(name)} — dossier (GM eyes only):</strong></p><p>${escapeHtml(dossier.slice(0, 1500))}</p>`, { gmWhisper: true });
+    } else {
+      await Chat.postSystem(`<em>No chronicle entry found for <strong>${escapeHtml(name)}</strong>; ${SKALD_NAME} will improvise a consistent voice.</em>`, { gmWhisper: true });
+    }
+    return Chat.postSkald(`<p>You now speak with <strong>${escapeHtml(name)}</strong>. Address them with <code>!skald …</code>; say <code>!roleplay off</code> to end.</p>`, { variant: "lore", title: `In Character: ${escapeHtml(name)}` });
   },
 
   /* ----------------------------- !scene ---------------------------- */
@@ -665,6 +705,50 @@ export const Commands = {
       console.warn(LOG_PREFIX, "[RAG] !reindex failed", err);
       RagProgress.fail("Memory weaving failed.");
       return Chat.postSystem(`<strong>The weaving faltered:</strong> ${escapeHtml(err?.message || String(err))}`, { gmWhisper: true });
+    }
+  },
+
+  /* --------------------- !reindex-compendiums (v0.20.0, F1) -------- */
+  /**
+   * Embed installed compendium packs into semantic memory ALONGSIDE the
+   * chronicle. GM-only and opt-in (setting `ragIndexCompendiums`). Pack
+   * selection is adapter-gated: oracle/RollTable packs are only included when
+   * the active system adapter advertises the `oracles` capability.
+   */
+  async reindexCompendiums(_args) {
+    if (!game.user?.isGM) {
+      return Chat.postSystem(`<em>Only the GM may bind the great tomes to memory.</em>`, { gmWhisper: true });
+    }
+    if (!BrowserRAG?.isAvailable?.()) {
+      return Chat.postSystem(`<em>Semantic memory is unavailable here. Enable it in <strong>Module Settings → The Eternal Skald</strong>.</em>`, { gmWhisper: true });
+    }
+    if (!BrowserRAG.indexCompendiumsEnabled?.()) {
+      return Chat.postSystem(`<em>Compendium indexing is off. Enable <strong>"Index Compendiums"</strong> in Module Settings first.</em>`, { gmWhisper: true });
+    }
+    const caps = getActiveAdapter()?.capabilities?.() || {};
+    const wantTypes = new Set(["JournalEntry", "Item", "Actor"]);
+    if (caps.oracles) wantTypes.add("RollTable");
+    const packs = [...(game.packs ?? [])].filter((p) => wantTypes.has(p?.documentName));
+    if (!packs.length) {
+      return Chat.postSystem(`<em>No suitable compendium packs are installed to bind.</em>`, { gmWhisper: true });
+    }
+    RagProgress.show("Binding the great tomes…");
+    try {
+      const { indexed, total } = await BrowserRAG.indexCompendiums(packs, {
+        onProgress: (done, tot, label) => {
+          const pct = tot ? Math.round((done / tot) * 100) : 0;
+          RagProgress.update(`Binding ${escapeHtml(String(label))} ${done}/${tot}`, pct);
+        }
+      });
+      RagProgress.done(`Tomes bound: ${indexed}/${total} entries.`);
+      return Chat.postSkald(
+        `<p>I have woven <strong>${indexed}</strong> of <strong>${total}</strong> compendium entries into memory, alongside our chronicle.</p>`,
+        { variant: "lore", title: "The Bound Tomes" }
+      );
+    } catch (err) {
+      console.warn(LOG_PREFIX, "[RAG] !reindex-compendiums failed", err);
+      RagProgress.fail("Binding faltered.");
+      return Chat.postSystem(`<strong>The binding faltered:</strong> ${escapeHtml(err?.message || String(err))}`, { gmWhisper: true });
     }
   },
 
@@ -1003,6 +1087,64 @@ name "${entry.name}", and the appropriate structured fields + a 1–3 sentence
       ui.notifications?.info(`${SKALD_NAME}: Session chronicle written.`);
     }
     return entry;
+  },
+
+  /* ----------------------- !session-recap (v0.20.0, F3) ----------- */
+  /**
+   * Compose an AI-authored recap of recent chronicle events and download it
+   * as a clean Markdown file (optionally Obsidian-flavoured via the
+   * recapObsidianFormat setting). Read-only — never writes to the world.
+   * Usage: <code>!session-recap [n]</code> where n = how many recent
+   * chronicle entries to draw on (default 8).
+   */
+  async sessionRecap(args) {
+    const n = Math.max(1, Math.min(50, parseInt(String(args || "").trim(), 10) || 8));
+    let entries = [];
+    try { entries = JournalSystem.listEntries(); } catch (_) { entries = []; }
+    if (!entries.length) {
+      return Chat.postSystem(`<em>There is naught yet chronicled to recap.</em>`, { gmWhisper: true });
+    }
+    const recent = entries
+      .map(e => ({ e, t: Number(e.getFlag?.(MODULE_ID, "lastUpdated")) || 0 }))
+      .sort((a, b) => b.t - a.t)
+      .slice(0, n)
+      .map(x => x.e);
+
+    const readText = (entry) => {
+      try {
+        const page = entry.pages?.contents?.[0] ?? entry.pages?.find?.(() => true);
+        return String(page?.text?.content || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      } catch (_) { return ""; }
+    };
+    const digest = recent.map(e => `## ${e.name}\n${readText(e)}`).join("\n\n").slice(0, 8000);
+    let names = [];
+    try {
+      names = JournalSystem.listEntries("npc").concat(JournalSystem.listEntries("location"))
+        .map(e => e.name).filter(Boolean);
+    } catch (_) { names = []; }
+
+    await Chat.postSystem(`<em>${SKALD_NAME} gathers the threads for a recap…</em>`, { gmWhisper: true });
+
+    const task = `Compose a SESSION RECAP in your Skald voice, in Markdown, drawing ONLY on the chronicle excerpts below (do not invent beyond them). Use level-2 (##) headers for sections such as What Happened, Key Decisions, Consequences and Unresolved Threads. Keep it tight and evocative.\n\nCHRONICLE EXCERPTS:\n${digest}`;
+    let body;
+    try {
+      body = await Client.chat([
+        { role: "system", content: buildSystemPrompt({ task }) },
+        { role: "user", content: "Recap our recent sessions." }
+      ], { temperature: 0.8, maxTokens: 1200 });
+    } catch (e) {
+      console.warn(LOG_PREFIX, "[recap] AI call failed", e?.message || e);
+      body = digest; // fail-soft: export the raw digest
+    }
+
+    const title = `Session Recap — ${new Date().toLocaleDateString()}`;
+    const obsidian = RecapExport.obsidianEnabled();
+    const md = RecapExport.buildMarkdown({ title, body, entities: names, obsidian });
+    const saved = RecapExport.download(md, title);
+    const note = saved
+      ? `<p class="es-help-aside"><em>A Markdown copy has been downloaded${obsidian ? " (Obsidian-flavoured)" : ""}.</em></p>`
+      : `<p class="es-help-aside"><em>(The download could not be started in this browser.)</em></p>`;
+    return Chat.postSkald(`${formatMarkdown(body, { link: false })}${note}`, { variant: "lore", title: "Session Recap" });
   },
 
   /* ------------------------- !link-style (v0.9.0) ----------------- */

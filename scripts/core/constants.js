@@ -69,8 +69,18 @@ export const PROVIDER_PRESETS = {
   openai:     { endpoint: "https://api.openai.com/v1/chat/completions" },
   openrouter: { endpoint: "https://openrouter.ai/api/v1/chat/completions" },
   google:     { endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions" },
+  ollama:     { endpoint: "http://localhost:11434/v1/chat/completions" }, // (v0.20.0 F6) local Ollama, OpenAI-compatible
   custom:     { endpoint: null }
 };
+
+/**
+ * (v0.20.0 F6) Default base URL for a local Ollama server. The OpenAI-compatible
+ * chat endpoint is {@link PROVIDER_PRESETS}.ollama.endpoint; this base is used for
+ * Ollama-native calls such as model discovery (`/api/tags`). Override by editing
+ * the API Endpoint setting if Ollama runs on another host/port.
+ * @type {string}
+ */
+export const OLLAMA_DEFAULT_BASE = "http://localhost:11434";
 
 /*  §1b  VISION-CAPABLE MODEL CATALOGUE  (v0.10.31)                        */
 /* ===================================================================== */
@@ -319,8 +329,44 @@ export const PROVIDER_LABELS = {
   openai:     "OpenAI",
   openrouter: "OpenRouter",
   google:     "Google",
+  ollama:     "Ollama",
   custom:     "Custom"
 };
+
+/* ===================================================================== */
+/*  §1d  CAMPAIGN GENRE / TONE DIRECTIVES  (v0.20.0, F2)                  */
+/* ===================================================================== */
+/**
+ * (v0.20.0 F2) Tone-directive paragraphs keyed by the `narrativeTone` world
+ * setting. The selected directive is injected into the system prompt to steer
+ * the AI's vocabulary, cadence and thematic emphasis WITHOUT removing the
+ * Skald's core persona. The default key is "default" → empty string, so the
+ * Skald's signature Norse voice is unchanged unless a GM opts in (fully
+ * backwards-compatible). The "custom" key yields "" here; the GM's free-text
+ * `narrativeToneCustom` setting is used in its place by the prompt builder.
+ * @type {Record<string,string>}
+ */
+export const TONE_DIRECTIVES = Object.freeze({
+  default: "",
+  epic:
+    "CAMPAIGN TONE — EPIC NORSE: Lean fully into saga-grandeur. Use kennings, " +
+    "alliteration and the cadence of skaldic verse. Frame events as fate-bound " +
+    "and mythic; let oaths ring like struck iron and victories echo in the halls " +
+    "of memory. Heighten stakes toward the legendary.",
+  dark:
+    "CAMPAIGN TONE — DARK & GRITTY: Keep the prose grim, sparse and visceral. " +
+    "Emphasise cost, exhaustion, cold and dread. Hope is hard-won and never free; " +
+    "violence is ugly, not glorious. Favour short, blunt sentences and bleak " +
+    "sensory detail over flourish.",
+  lighthearted:
+    "CAMPAIGN TONE — LIGHTHEARTED: Keep the mood warm, wry and adventurous. " +
+    "Allow humour, banter and small human moments. Danger is real but the telling " +
+    "is buoyant rather than bleak; favour wonder and camaraderie over dread.",
+  horror:
+    "CAMPAIGN TONE — HORROR: Build creeping unease and wrongness. Linger on what " +
+    "is unseen, half-heard or subtly off. Pace toward dread, not gore; let silence " +
+    "and implication do the work. The wilds and the dead are hostile and patient."
+});
 
 // Foundry VTT v14 validates messages starting with "/" against an
 // internal command registry BEFORE the `chatMessage` hook fires, and
@@ -332,6 +378,7 @@ export const COMMANDS = Object.freeze({
   SKALD:    "!skald",
   ORACLE:   "!oracle",
   NPC:      "!npc",
+  ROLEPLAY: "!roleplay",
   SCENE:    "!scene",
   LORE:     "!lore",
   COMBAT:   "!combat",
@@ -342,8 +389,11 @@ export const COMMANDS = Object.freeze({
   MYSTERIES:"!mysteries",
   REMIND:   "!remind",
   END_SESSION: "!end-session",
+  // --- Session recap & Markdown export (v0.20.0) ---
+  SESSION_RECAP: "!session-recap",
   // --- Browser-based RAG / AI memory (v0.5.0) ---
   REINDEX:    "!reindex",
+  REINDEX_COMPENDIUMS: "!reindex-compendiums",
   RAG_STATUS: "!rag-status",
   // --- Living Chronicle (v0.8.0) ---
   TIMELINE:      "!timeline",

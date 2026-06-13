@@ -2649,3 +2649,242 @@ ROLLBACK:     Pre-rewrite .git tree backed up at /tmp/the_eternal_skald_git_back
               refs/original/* also retain the original commits until expired.
 RESIDUAL RISK: LOW. History rewrite changes commit SHAs from 2950e0d onward, so any external
               clone must re-pull. No runtime behaviour or file content changed.
+
+---
+
+### [2026-06-13 17:30 EEST] — Phase C feature-enrichment: recorded approval gate
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    REFACTOR + IMPLEMENT (multi-task umbrella)
+TOKEN BUDGET: gated  |  USED: n/a  |  WITHIN BUDGET: GATED
+
+GATE REQUEST
+  TASK:        Implement Phase C (F6 Ollama, F2 tone, M2 command registry, M4 externalize
+               prompts, F1 compendium RAG, F3 session recap, F4 NPC roleplay). Each adds
+               new files/commands/settings and several cross §5 boundaries (new AI provider
+               preset; new public commands; chat/commands.js registry REFACTOR; new prompts/
+               loader layer) and exceed the §0 hard limits (3 files / 50 lines).
+  LIMIT HIT:   §0(1,2,5) hard limits; §2 REFACTOR budget; §5.1 public command/setting surface
+               + new module layer (prompts/, chat/commands/ registry).
+  WHY NEEDED:  Explicit, detailed Phase C assignment from the maintainer (super-agent task)
+               with per-feature specs; this is the recorded human approval for the gate.
+  SMALLEST SAFE OPTION: implement each feature incrementally behind a default-safe setting,
+               one feature per commit, full suite green after each; Ollama implemented as a
+               provider preset (not a separate client) per recommendations §F6 to minimise
+               blast radius.
+  BLAST RADIUS: new scripts/ai (ollama plumbing), scripts/chat/command-registry.js + chat/
+               commands/, prompts/ + loader, browser-rag compendium indexing, recap/npc
+               commands; rollback = revert the per-feature commits on phase-c-feature-enrichment.
+GATE:         GRANTED by maintainer via the Phase C subtask assignment (this entry records it;
+               self-approval is NOT being used — the human assigned the work with specs).
+
+NOTE: Per-feature detailed log entries follow below as each lands.
+
+### [2026-06-13 17:45 EEST] — F6: Ollama / local-LLM provider support
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    IMPLEMENT (gated — see Phase C gate above)
+EVIDENCE:     constants.js:67-83 (PROVIDER_PRESETS.ollama + OLLAMA_DEFAULT_BASE),
+              constants.js:327-334 (PROVIDER_LABELS.ollama); model-catalogue.js:135-140
+              (ollama dropdown case); settings.js:103 (providerPreset ollama choice);
+              client.js:457,590 (resolveOllamaApiKey); ai/ollama-client.js (new helper).
+CHANGE:       Added "ollama" provider preset (OpenAI-compatible local endpoint
+              http://localhost:11434/v1/chat/completions). New scripts/ai/ollama-client.js
+              provides keyless-auth resolution (placeholder when no key on ollama),
+              base-URL derivation, a curated common-model list, and /api/tags model
+              discovery (injectable fetch, fail-soft). Implemented as a provider preset
+              (per recommendations §F6) rather than duplicating the chat client.
+FILES TOUCHED: scripts/ai/ollama-client.js (new), scripts/core/constants.js,
+              scripts/core/model-catalogue.js, scripts/core/settings.js, scripts/ai/client.js,
+              lang/en.json, test/ollama-provider.test.mjs (new).
+TESTS:        node test/ollama-provider.test.mjs → 26/26; full suite 42/42; load-smoke OK.
+GATE:         Covered by the Phase C gate above (exceeds 3-file limit; new provider surface).
+ROLLBACK:     Revert this commit on phase-c-feature-enrichment.
+RESIDUAL RISK: LOW. Purely additive; default provider unchanged (abacus). Hosted-provider
+              key guard preserved exactly.
+
+### [2026-06-13 18:30 EEST] — F2: Campaign genre / tone directives
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    IMPLEMENT (gated — see Phase C gate above)
+EVIDENCE:     constants.js:336-369 (TONE_DIRECTIVES frozen map: default/epic/dark/
+              lighthearted/horror); settings.js:188-219 (narrativeTone + narrativeToneCustom
+              world settings, default "default"); prompt-builder.js:2 (TONE_DIRECTIVES import),
+              :86-99 (toneBlock selector), :136 (toneBlock spliced into system-prompt array
+              after guidance); lang/en.json (narrativeTone/narrativeToneCustom i18n).
+CHANGE:       Added an opt-in Campaign Tone world setting that injects a genre/tone-directive
+              paragraph into the system prompt to steer the Skald's vocabulary, cadence and
+              themes WITHOUT replacing its core persona. Presets: Epic Norse, Dark & Gritty,
+              Lighthearted, Horror, plus Custom (free-text via narrativeToneCustom). Default
+              "default" → empty directive → no behavioural change for existing worlds. Reads
+              are wrapped in try/catch (never throw); blank/unknown → omitted via .filter.
+FILES TOUCHED: scripts/core/constants.js, scripts/core/settings.js, scripts/ai/prompt-builder.js,
+              lang/en.json, test/campaign-tone.test.mjs (new).
+TESTS:        node test/campaign-tone.test.mjs → 36/36; full suite 43/43; node --check + en.json
+              JSON-valid.
+GATE:         Covered by the Phase C gate above (new world settings + prompt-surface change).
+ROLLBACK:     Revert this commit on phase-c-feature-enrichment.
+RESIDUAL RISK: LOW. Purely additive and default-off; signature Norse voice unchanged unless a
+              GM opts in. No existing setting/directive/i18n key removed or renamed.
+
+### [2026-06-13 19:10 EEST] — M2: Command handler registry
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    REFACTOR (gated — see Phase C gate above)
+EVIDENCE:     commands.js:33-83 (dispatchCommand previously held a ~40-line switch mapping
+              COMMANDS.* tokens → () => Commands.method(args)); map-vision.test.mjs:340-343
+              asserted that switch shape (updated to the registry equivalent).
+CHANGE:       Extracted the command routing table out of the dispatchCommand switch into a new
+              declarative registry, scripts/chat/command-registry.js. Each command self-registers
+              a descriptor { command, aliases, method, permission, help }. dispatchCommand now
+              resolves via findCommand(head) and invokes Commands[descriptor.method](args).
+              Routing is byte-for-byte equivalent (same tokens, same aliases — journal/journals,
+              map, skald-wipe, survey/analyze-map — same methods, same bare-"!" fallback). Added
+              a declarative permission gate: "gm" descriptors are blocked for non-GMs at dispatch;
+              every pre-M2 command is "all", so existing behaviour is unchanged. The handler
+              bodies on the Commands object are untouched.
+FILES TOUCHED: scripts/chat/command-registry.js (new), scripts/chat/commands.js,
+              test/command-registry.test.mjs (new), test/map-vision.test.mjs (3 dispatch
+              source-guards re-pointed at the registry — equal strength, intent preserved).
+TESTS:        node test/command-registry.test.mjs → 212/212; map-vision 211/211; full suite 44/44.
+GATE:         Covered by the Phase C gate above (chat/commands.js registry REFACTOR; new module).
+ROLLBACK:     Revert this commit on phase-c-feature-enrichment.
+RESIDUAL RISK: LOW. Pure routing refactor with identical behaviour; the only new runtime path is
+              the "gm" permission gate, which no current command uses. Registry is frozen + unit
+              tested for completeness (every COMMANDS token maps exactly once).
+
+### [2026-06-13 20:05 EEST] — M4: Externalise prompt templates + loader
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    REFACTOR (gated — see Phase C gate above)
+EVIDENCE:     prompt-builder.js previously embedded three large static prompt blocks inline
+              (rulesDigest ~22 lines, persona ~8 lines, guidance ~18 lines with a ${intensityNote}
+              interpolation). scene-context.test.mjs:219-226 asserted the guidance wording inside
+              buildSystemPrompt (re-pointed at the template file).
+CHANGE:       Established a build-free prompt-template layer. Moved the three static blocks to
+              /prompts/persona.mjs, /prompts/rules-digest.mjs and /prompts/guidance.mjs
+              (default-export strings; guidance uses a {{intensityNote}} placeholder). Added
+              scripts/ai/prompt-loader.js — imports the templates through the normal ESM graph
+              (loads in-browser with NO build step and NO async fetch, keeping buildSystemPrompt
+              synchronous) and renders {{variable}} placeholders via renderTemplate(). Refactored
+              prompt-builder.js to source the blocks via getPrompt(). Output is byte-identical to
+              the previous inline strings (verified during migration; durable content invariants
+              guard against drift). Loader is fail-soft (unknown template / missing var → "").
+FILES TOUCHED: prompts/persona.mjs (new), prompts/rules-digest.mjs (new), prompts/guidance.mjs (new),
+              scripts/ai/prompt-loader.js (new), scripts/ai/prompt-builder.js,
+              test/prompt-loader.test.mjs (new), test/scene-context.test.mjs (guidance guard
+              re-pointed at the template file — equal strength).
+TESTS:        node test/prompt-loader.test.mjs → 34/34; scene-context 25/25; full suite 45/45;
+              node --check on all new files.
+GATE:         Covered by the Phase C gate above (new prompts/ layer + loader module).
+ROLLBACK:     Revert this commit on phase-c-feature-enrichment.
+RESIDUAL RISK: LOW. Prompt text unchanged (byte-identical); only the storage location moved. The
+              templates are part of the static import graph so they ship in the module zip with
+              no manifest change. Further prompt blocks can migrate incrementally using the loader.
+
+### [2026-06-13 20:35 EEST] — F1: Compendium-aware RAG indexing
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    FEATURE (gated — see Phase C gate above)
+PRE-FLIGHT:   Read browser-rag.js (BrowserRAG store/indexRecord/reindexAll/corpus-cache), the
+              command-registry + dispatch path (M2), and adapter capability map (SYSTEM_CAPABILITIES,
+              `oracles`). Confirmed readSkaldSource() excludes top-level browser-rag.js (tests read
+              it directly), and exact-token dispatch means !reindex-compendiums cannot collide with
+              !reindex.
+EVIDENCE:     RAG previously embedded ONLY chronicle journal entries (reindexAll clears + rebuilds
+              from JournalSystem.listEntries()). Installed compendium lore (modules, bestiaries,
+              oracle tables) was invisible to !remind. No store namespace separated journal vs other
+              vectors, so a comp:<collection>:<id> key was needed to add alongside without collision.
+CHANGE:       Added opt-in, GM-only, adapter-gated compendium indexing. (1) New world setting
+              ragIndexCompendiums (default FALSE). (2) BrowserRAG gains indexCompendiumsEnabled(),
+              the pure/defensive _compendiumDocText(doc) extractor (JournalEntry pages, Item/Actor
+              system.description|biography, RollTable results → HTML-stripped, name-led blob; never
+              throws), and async indexCompendiums(packs,{onProgress}) which embeds docs ALONGSIDE
+              the chronicle (does NOT clear the store), keyed comp:<collection>:<id> for idempotent
+              re-runs, no-ops softly when RAG unavailable or the setting is off, and invalidates the
+              corpus cache when done. (3) New command token REINDEX_COMPENDIUMS + registry descriptor
+              (method reindexCompendiums, permission "gm" — the module's first GM-permission command).
+              (4) Commands.reindexCompendiums handler: GM-gated, availability/opt-in checks, adapter-
+              gated pack selection (JournalEntry/Item/Actor always; RollTable only when caps.oracles),
+              progress toast, success card. Fail-soft throughout.
+FILES TOUCHED: scripts/browser-rag.js, scripts/core/settings.js, scripts/core/constants.js,
+              scripts/chat/command-registry.js, scripts/chat/commands.js, lang/en.json,
+              test/command-registry.test.mjs (permission-set guard updated for the new "gm" command),
+              test/compendium-rag.test.mjs (new, 30 assertions).
+TESTS:        node test/compendium-rag.test.mjs → 30/30; command-registry suite green; full suite
+              46/46; node --check on all changed JS; en.json validated as JSON.
+GATE:         Covered by the Phase C gate above (new RAG capability + first "gm" command).
+ROLLBACK:     Revert this commit on phase-c-feature-enrichment. Setting defaults OFF, so even with
+              the code present no behaviour changes until a GM explicitly enables + runs the command.
+RESIDUAL RISK: LOW. Default-off + GM-gated + additive (chronicle vectors untouched). Worst case a
+              very large compendium grows the vector store / slows queries; mitigated by opt-in and
+              the existing corpus cache. Extraction is defensive (returns "" on any odd doc shape).
+
+### [2026-06-13 21:05 EEST] — F3: Session recap & Markdown export
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    FEATURE (gated — see Phase C gate above)
+PRE-FLIGHT:   Studied JournalSystem.listEntries() (returns Skald-scribed JournalEntry docs; text in
+              pages[0].text.content; recency via the lastUpdated flag) and generateSessionChronicle()
+              (the existing Client.chat + buildSystemPrompt recap pattern, temp 0.8 / 1200 tokens).
+              Confirmed scripts/chronicle/*.js IS part of the readSkaldSource corpus.
+EVIDENCE:     The module produced session chronicles only as in-world JournalEntries; there was no
+              way to export a recap to an external journaling workflow (Obsidian/Notion/blog), a
+              top requested feature in the competitive set (Solo RPG Toolkit chat-to-Markdown).
+CHANGE:       Added !session-recap [n] (permission "all", read-only — never writes to the world). It
+              gathers the n most-recent chronicle entries (default 8), builds a digest, asks the AI
+              for a Markdown recap (fail-soft: exports the raw digest if the AI is unreachable), then
+              downloads a clean .md file. New scripts/chronicle/recap-export.js owns the PURE Markdown
+              assembly (buildMarkdown / slugify) and the download (Foundry saveDataToFile with a Blob-
+              anchor fallback). Opt-in Obsidian flavour (world setting recapObsidianFormat, default
+              OFF) adds YAML frontmatter + a "Linked Entities" [[wikilinks]] section built from npc/
+              location entry names — WITHOUT rewriting the AI prose (deliberately, to stay robust).
+FILES TOUCHED: scripts/chronicle/recap-export.js (new), scripts/chat/commands.js (sessionRecap handler
+              + import), scripts/core/constants.js (SESSION_RECAP token), scripts/chat/command-registry.js
+              (descriptor), scripts/core/settings.js (recapObsidianFormat), lang/en.json (i18n),
+              test/session-recap.test.mjs (new, 23 assertions).
+TESTS:        node test/session-recap.test.mjs → 23/23; full suite 47/47; node --check on changed JS;
+              en.json validated as JSON.
+GATE:         Covered by the Phase C gate above (new export module + command).
+ROLLBACK:     Revert this commit on phase-c-feature-enrichment. The command is purely additive and
+              read-only; the Obsidian setting defaults OFF.
+RESIDUAL RISK: LOW. Read-only (no world writes); AI failure degrades to a digest export; download is
+              defensive (saveDataToFile → Blob fallback → false). buildMarkdown is pure + unit-tested.
+
+### [2026-06-13 21:40 EEST] — F4: AI-powered NPC roleplay mode
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    FEATURE (gated — see Phase C gate above)
+PRE-FLIGHT:   Traced runConversation() (system prompt built from a `task` option; channel drives
+              Memory + journal ingestion — allowJournal only for skald/scene/combat) and the skald()
+              handler (token-control / move-declaration / intelligent-action meta-routing before
+              narration). Confirmed Memory keys arbitrary channels, and JournalSystem exposes a fuzzy
+              _findEntry("npc", name) resolver + listEntries("npc").
+EVIDENCE:     The module tracked NPCs in the chronicle and could conjure one-off dialogue (!npc) but
+              had no persistent IN-CHARACTER mode — a flagship FoundryAI feature solo players value.
+CHANGE:       Added !roleplay <name> / off / (status). New scripts/narrative/roleplay-mode.js holds the
+              in-memory, session-scoped persona state (default OFF) and a PURE buildPersonaTask()
+              that instructs the AI to speak first-person, in-character, dossier-consistent, and never
+              surface dice/rules. The handler resolves the NPC against the chronicle (fuzzy → exact),
+              seeds the persona from the entry's text, and whispers the full dossier to the GM only.
+              skald() gains a guard at the top: while roleplay is active it routes through a dedicated
+              "roleplay" channel with allowMoves:false, BYPASSING move/token meta-handling and (by
+              channel design) NOT ingesting the in-character exchange into the chronicle as canon.
+FILES TOUCHED: scripts/narrative/roleplay-mode.js (new), scripts/chat/commands.js (roleplay handler,
+              skald() interception, import), scripts/core/constants.js (ROLEPLAY token),
+              scripts/chat/command-registry.js (descriptor), test/roleplay-mode.test.mjs (new, 26 assertions).
+TESTS:        node test/roleplay-mode.test.mjs → 26/26; full suite 48/48; node --check on changed JS.
+GATE:         Covered by the Phase C gate above (new mode module + command + skald() hook).
+ROLLBACK:     Revert this commit on phase-c-feature-enrichment. The mode flag defaults inactive on
+              every load, so nothing changes until a user explicitly enters !roleplay.
+RESIDUAL RISK: LOW. In-memory state resets on reload (acceptable for a transient mode). No world
+              writes; dossier is GM-whispered; in-character chatter is excluded from chronicle
+              ingestion so it can't pollute canon. buildPersonaTask is pure + unit-tested.
+
+### [2026-06-13 21:55 EEST] — Release: v0.19.0 → v0.20.0 (Phase C)
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    RELEASE / VERSION BUMP (gated — see Phase C gate above)
+EVIDENCE:     module.json is the single source of truth; version-consistency.test.mjs (27 guards)
+              enforces module.json == package.json == latest CHANGELOG heading, plus the download URL
+              tag, README alpha badge / server banner / health example, and a concise description.
+CHANGE:       Bumped module.json + package.json to 0.20.0; repointed the download URL to the
+              v0.20.0.zip tag; rewrote module.json description as a concise Phase C summary; updated
+              the three README version references; prepended a "## [0.20.0] — 2026-06-13" CHANGELOG
+              section documenting F6/F2/F1/F3/F4 (Added) and M2/M4 (Changed).
+FILES TOUCHED: module.json, package.json, README.md, CHANGELOG.md.
+TESTS:        node test/version-consistency.test.mjs → 27/27; full suite 48/48.
+GATE:         Covered by the Phase C gate above.
+ROLLBACK:     Revert this commit on phase-c-feature-enrichment.
+RESIDUAL RISK: NONE functional — metadata/docs only.

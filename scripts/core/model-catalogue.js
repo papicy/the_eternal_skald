@@ -14,6 +14,7 @@ import {
   PROVIDER_PRESETS, PROVIDER_LABELS,
   OPENROUTER_VISION_MODELS, ABACUS_VISION_MODELS
 } from "./constants.js";
+import { OLLAMA_COMMON_MODELS } from "../ai/ollama-client.js";
 
 /**
  * (v0.10.31) Live OpenRouter vision-model list, lazily fetched from the
@@ -130,6 +131,12 @@ function getModelsForProvider(preset) {
       list = openrouter
         .filter(m => m.vendor === "google")
         .map(m => ({ ...m, id: m.id.replace(/^google\//, "") }));
+      break;
+    case "ollama":
+      // (v0.20.0 F6) Local Ollama models. The curated common-model list seeds
+      // the dropdown; live-discovered tags (via fetchOllamaModels) are merged
+      // in by the settings layer when available.
+      list = OLLAMA_COMMON_MODELS.map(m => ({ ...m }));
       break;
     case "custom":
     default: {

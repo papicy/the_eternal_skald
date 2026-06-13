@@ -18,6 +18,7 @@
           "openai": "OpenAI",
           "openrouter": "OpenRouter",
           "google": "Google AI (Gemini)",
+          "ollama": "Ollama (local LLM)",
           "custom": "Custom (manual endpoint)"
         }
       },
@@ -45,6 +46,22 @@
       "intensity": {
         "name": "Skald Intensity",
         "hint": "How dramatic and verbose the Skald speaks (1 = terse, 10 = full saga-singer operatic)."
+      },
+      "narrativeTone": {
+        "name": "Campaign Tone",
+        "hint": "Steers the Skald's vocabulary, cadence and themes toward a chosen genre WITHOUT replacing its core voice. Default leaves the signature Norse tone unchanged.",
+        "choices": {
+          "default": "Default (Skald's signature voice)",
+          "epic": "Epic Norse",
+          "dark": "Dark & Gritty",
+          "lighthearted": "Lighthearted",
+          "horror": "Horror",
+          "custom": "Custom (use directive below)"
+        }
+      },
+      "narrativeToneCustom": {
+        "name": "Custom Tone Directive",
+        "hint": "Free-text tone instruction, used only when Campaign Tone is set to Custom. Leave blank to inject nothing."
       },
       "autoNarrateCombat": {
         "name": "Auto-Narrate Combat",
@@ -231,6 +248,14 @@
       "ragEnabled": {
         "name": "Semantic Memory (RAG)",
         "hint": "Give the Skald a long-term semantic memory of your saga. Journal entries are embedded into a local in-browser vector store and the most relevant ones are recalled before the Skald answers — improving continuity across sessions. Runs entirely in your browser (no server, no cloud). A small model (~90 MB) downloads once on first use and is cached. Defaults to ON; the AI still works fully when disabled."
+      },
+      "ragIndexCompendiums": {
+        "name": "Index Compendiums into Memory",
+        "hint": "Also embed your installed compendium packs (lore journals, items/assets, NPCs, and — for systems with oracles — roll tables) into the Skald's semantic memory, so it can recall official and world content, not just your chronicle. Off by default: large compendia take time and storage to embed. After enabling, run !reindex-compendiums to build the index."
+      },
+      "recapObsidianFormat": {
+        "name": "Session Recap: Obsidian Format",
+        "hint": "When exporting a session recap (!session-recap), format the Markdown for Obsidian.md — adding YAML frontmatter (title, date, tags) and a 'Linked Entities' section of [[wikilinks]] for the figures and places mentioned. Off by default → clean, portable plain Markdown."
       },
       "ragContextTokens": {
         "name": "Memory Context Budget (tokens)",

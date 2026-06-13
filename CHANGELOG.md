@@ -13,6 +13,50 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.20.0] — 2026-06-13
+
+A feature-enrichment pass ("Phase C"). Five player-facing features and two
+internal refactors, all **opt-in / default-off** and fully backwards-compatible.
+No existing setting, flag, directive or i18n key was removed or renamed.
+
+### Added
+- **Local-LLM support via Ollama (F6).** A new provider preset lets the Skald
+  talk to a local Ollama server (keyless auth + model discovery), so play can
+  run fully offline / self-hosted alongside the existing Abacus ChatLLM path.
+- **Campaign genre/tone setting (F2).** A new `narrativeTone` setting
+  (default / epic / dark / lighthearted / horror / custom) injects an optional
+  tone directive into the system prompt to colour the Skald's voice. Off by
+  default (`default` = no directive); a `narrativeToneCustom` field allows a
+  free-form tone.
+- **Compendium-aware AI memory (F1).** With the opt-in `ragIndexCompendiums`
+  setting enabled, the GM-only `!reindex-compendiums` command embeds installed
+  compendium packs (lore journals, items/assets, NPCs and — for systems with
+  oracles — roll tables) into the in-browser semantic memory **alongside** the
+  chronicle, so the Skald can recall official/world content. Pack selection is
+  adapter-gated; records are namespaced (`comp:<collection>:<id>`) and indexing
+  is idempotent and additive (it never clears the chronicle vectors).
+- **Session recap & Markdown export (F3).** `!session-recap [n]` composes an
+  AI-authored recap of recent chronicle entries and downloads it as a clean
+  Markdown file. An opt-in `recapObsidianFormat` setting adds Obsidian.md YAML
+  frontmatter and a `[[wikilinks]]` "Linked Entities" section. Read-only — it
+  never writes to the world, and degrades to a raw digest if the AI is offline.
+- **AI-powered NPC roleplay mode (F4).** `!roleplay <name>` steps the Skald
+  into an in-character NPC voice (seeded from the NPC's chronicle entry) until
+  `!roleplay off`. The NPC's full dossier is whispered to the GM only;
+  in-character exchanges are not ingested into the chronicle as canon. Mode
+  state is in-memory and starts inactive on every load.
+
+### Changed
+- **Command routing is now a declarative registry (M2).** `scripts/chat/
+  command-registry.js` owns the command → handler/permission/alias mapping;
+  `dispatchCommand` looks up a descriptor instead of a hand-maintained switch.
+  Behaviour is identical for every existing command; the registry also adds a
+  per-command permission gate (first used by the GM-only `!reindex-compendiums`).
+- **Prompt templates are externalised (M4).** The static persona, rules-digest
+  and guidance blocks moved to `/prompts/*.mjs`, loaded through a build-free
+  `scripts/ai/prompt-loader.js` (`{{variable}}` substitution). The assembled
+  system prompt is byte-identical to before; only the storage location changed.
+
 ## [0.19.0] — 2026-06-13
 
 A maintainability and portability pass (developer-facing "Phase B"). No gameplay,
