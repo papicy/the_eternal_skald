@@ -2,7 +2,12 @@ import { LOG_PREFIX, MODULE_ID } from "../core/constants.js";
 import { Settings } from "../core/settings.js";
 import { escapeHtml, formatMarkdown } from "../chat/display.js";
 import { IronswornData } from "../ironsworn-data.js";
-import { IronswornController } from "../ironsworn-controller.js";
+// Phase 2: move / progress-track / asset entity recognition is resolved
+// through the active system adapter instead of a hard Ironsworn import. For an
+// Ironsworn world `getActiveAdapter()` returns the same IronswornController
+// (identical behaviour); on any other / no system it returns the NullAdapter,
+// whose isActive() is false, so these system-specific link kinds are skipped.
+import { getActiveAdapter } from "../systems/registry.js";
 import { JournalSystem } from "./journal-system.js";
 // Call-time cross-imports (safe cycle): Integration (-> narrative step 9) and
 // OracleInterpreter (-> narrative step 8) still live in eternal-skald.js.
@@ -206,8 +211,9 @@ export const EntityLinker = {
 
     // --- 2) Ironsworn moves (case-SENSITIVE to avoid verb false-positives) ---
     try {
-      if (IronswornController?.isActive?.() && Array.isArray(IronswornController.moves)) {
-        for (const m of IronswornController.moves) {
+      const adapter = getActiveAdapter();
+      if (adapter.isActive?.() && Array.isArray(adapter.moves)) {
+        for (const m of adapter.moves) {
           const name = (m?.name ?? "").trim();
           if (name.length < 3) continue;
           const key = name.toLowerCase();
@@ -251,10 +257,11 @@ export const EntityLinker = {
     //        combat tracks). Proper-noun-ish names; case-insensitive like
     //        journal entities. Clicking shows / marks the track. -----------
     try {
-      if (IronswornController?.isActive?.() && typeof IronswornController.getProgressTracks === "function") {
-        const actor = IronswornController.getActiveCharacter?.();
+      const adapter = getActiveAdapter();
+      if (adapter.isActive?.() && typeof adapter.getProgressTracks === "function") {
+        const actor = adapter.getActiveCharacter?.();
         if (actor) {
-          for (const track of IronswornController.getProgressTracks(actor)) {
+          for (const track of adapter.getProgressTracks(actor)) {
             const name = (track?.name ?? "").trim();
             if (name.length < 3) continue;
             // Never turn a GENERIC track noun ("vow", "journey", "bond", ...)
@@ -262,7 +269,7 @@ export const EntityLinker = {
             // proper name, and linking it produces a phantom card disconnected
             // from the real vow on the sheet. Such words are resolved to the
             // actual current track only when explicitly acted on, not linked.
-            if (IronswornController.isGenericTrackWord?.(name)) continue;
+            if (adapter.isGenericTrackWord?.(name)) continue;
             const key = name.toLowerCase();
             if (byName.has(key)) continue; // first definition wins
             byName.set(key, {
@@ -282,8 +289,9 @@ export const EntityLinker = {
     //        (primed on `ready`; empty until then — degrades gracefully).
     //        Case-insensitive; asset names are distinctive proper nouns. ---
     try {
-      if (IronswornController?.isActive?.() && typeof IronswornController.getAssetNames === "function") {
-        for (const asset of IronswornController.getAssetNames()) {
+      const adapter = getActiveAdapter();
+      if (adapter.isActive?.() && typeof adapter.getAssetNames === "function") {
+        for (const asset of adapter.getAssetNames()) {
           const name = (asset?.name ?? "").trim();
           if (name.length < 3) continue;
           const key = name.toLowerCase();

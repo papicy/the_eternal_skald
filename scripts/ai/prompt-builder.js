@@ -4,7 +4,12 @@ import { Settings } from "../core/settings.js";
 // cycle is safe. Repoint when Integration -> narrative/ (step 9) and JournalSystem -> chronicle/ (step 6).
 import { Integration } from "../narrative/integration.js";
 import { JournalSystem } from "../chronicle/journal-system.js";
-import { IronswornController } from "../ironsworn-controller.js";
+// Phase 2: system-specific data is now resolved through the active system
+// adapter (registry) instead of a hard Ironsworn import. For an Ironsworn
+// world `getActiveAdapter()` returns the very same IronswornController, so
+// behaviour is identical; on any other / no system it returns the NullAdapter
+// and these blocks feature-detect to "" — graceful degradation.
+import { getActiveAdapter } from "../systems/registry.js";
 
 /**
  * Builds the system prompt that establishes the Eternal Skald persona,
@@ -332,8 +337,9 @@ Proposal rules:
  */
 export function buildFoeGuidance() {
   try {
-    if (!IronswornController || typeof IronswornController.getCompendiumFoeNames !== "function") return "";
-    const foes = IronswornController.getCompendiumFoeNames();
+    const adapter = getActiveAdapter();
+    if (typeof adapter.getCompendiumFoeNames !== "function") return "";
+    const foes = adapter.getCompendiumFoeNames();
     if (!Array.isArray(foes) || foes.length === 0) return "";
 
     // Group foe names by canonical rank, in ascending threat order; anything
@@ -397,7 +403,8 @@ RULES FOR CREATING FOES:
  */
 export function buildCompendiumContextBlock() {
   try {
-    if (!IronswornController || typeof IronswornController.getCompendiumContextNames !== "function") return "";
+    const adapter = getActiveAdapter();
+    if (typeof adapter.getCompendiumContextNames !== "function") return "";
     // setting key → [enabled-by-default category, human label]
     const CATEGORIES = [
       ["contextMoves",      "moves",      "Ironsworn Moves"],
@@ -410,7 +417,7 @@ export function buildCompendiumContextBlock() {
     const lines = [];
     for (const [setting, category, label] of CATEGORIES) {
       if (Settings.get(setting) === false) continue;
-      const names = IronswornController.getCompendiumContextNames(category);
+      const names = adapter.getCompendiumContextNames(category);
       if (!Array.isArray(names) || names.length === 0) continue;
       lines.push(`Available ${label}: ${names.join(", ")}`);
     }
@@ -436,7 +443,8 @@ ${lines.join("\n")}`;
 export function buildIronswornPromptBlock({ allowMoves = false, allowEffects = false, allowFollowups = false, allowTrackEffects = false, context = "" } = {}) {
   if (!Integration.active()) return "";
 
-  const moveList = IronswornController.moves
+  const adapter = getActiveAdapter();
+  const moveList = (Array.isArray(adapter.moves) ? adapter.moves : [])
     .filter(m => m.cat !== "Fate")
     .map(m => {
       const stats = m.stats.filter(s => s !== "progress" && s !== "supply");
