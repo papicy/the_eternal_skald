@@ -1,4 +1,5 @@
 import { Settings } from "../core/settings.js";
+import { TONE_DIRECTIVES } from "../core/constants.js";
 // Temporary cross-import: Integration & JournalSystem still live in eternal-skald.js and are
 // referenced only at call-time inside these build functions (never at module-eval), so this
 // cycle is safe. Repoint when Integration -> narrative/ (step 9) and JournalSystem -> chronicle/ (step 6).
@@ -82,6 +83,21 @@ GUIDELINES:
 • Refuse to play characters in distressing detail — keep the lens
   cinematic, not gratuitous.`;
 
+  // (v0.20.0 F2) Campaign genre / tone directive. Steers vocabulary, cadence
+  // and themes toward the GM-chosen genre without replacing the persona above.
+  // "default" → "" (omitted by .filter(Boolean)); "custom" pulls the GM's
+  // free-text directive. Reads never throw — any failure yields no injection.
+  const toneBlock = (() => {
+    try {
+      const tone = Settings.get("narrativeTone") || "default";
+      if (tone === "custom") {
+        const custom = Settings.get("narrativeToneCustom");
+        return (typeof custom === "string" && custom.trim()) ? custom.trim() : "";
+      }
+      return TONE_DIRECTIVES[tone] || "";
+    } catch (_) { return ""; }
+  })();
+
   const taskAddendum = extras.task ? `\n\nTASK FOR THIS RESPONSE:\n${extras.task}` : "";
 
   // Ironsworn system-integration guidance + live game state. Only added
@@ -117,7 +133,7 @@ GUIDELINES:
   // Reads a cached snapshot; returns "" when every category is OFF/unprimed.
   const compendiumBlock = buildCompendiumContextBlock();
 
-  return [persona, rulesDigest, guidance, compendiumBlock, memoryBlock, ironswornBlock, journalBlock, contextBlock]
+  return [persona, rulesDigest, guidance, toneBlock, compendiumBlock, memoryBlock, ironswornBlock, journalBlock, contextBlock]
     .filter(Boolean)
     .join("\n\n") + taskAddendum;
 }

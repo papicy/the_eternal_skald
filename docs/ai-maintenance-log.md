@@ -2700,3 +2700,26 @@ GATE:         Covered by the Phase C gate above (exceeds 3-file limit; new provi
 ROLLBACK:     Revert this commit on phase-c-feature-enrichment.
 RESIDUAL RISK: LOW. Purely additive; default provider unchanged (abacus). Hosted-provider
               key guard preserved exactly.
+
+### [2026-06-13 18:30 EEST] — F2: Campaign genre / tone directives
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    IMPLEMENT (gated — see Phase C gate above)
+EVIDENCE:     constants.js:336-369 (TONE_DIRECTIVES frozen map: default/epic/dark/
+              lighthearted/horror); settings.js:188-219 (narrativeTone + narrativeToneCustom
+              world settings, default "default"); prompt-builder.js:2 (TONE_DIRECTIVES import),
+              :86-99 (toneBlock selector), :136 (toneBlock spliced into system-prompt array
+              after guidance); lang/en.json (narrativeTone/narrativeToneCustom i18n).
+CHANGE:       Added an opt-in Campaign Tone world setting that injects a genre/tone-directive
+              paragraph into the system prompt to steer the Skald's vocabulary, cadence and
+              themes WITHOUT replacing its core persona. Presets: Epic Norse, Dark & Gritty,
+              Lighthearted, Horror, plus Custom (free-text via narrativeToneCustom). Default
+              "default" → empty directive → no behavioural change for existing worlds. Reads
+              are wrapped in try/catch (never throw); blank/unknown → omitted via .filter.
+FILES TOUCHED: scripts/core/constants.js, scripts/core/settings.js, scripts/ai/prompt-builder.js,
+              lang/en.json, test/campaign-tone.test.mjs (new).
+TESTS:        node test/campaign-tone.test.mjs → 36/36; full suite 43/43; node --check + en.json
+              JSON-valid.
+GATE:         Covered by the Phase C gate above (new world settings + prompt-surface change).
+ROLLBACK:     Revert this commit on phase-c-feature-enrichment.
+RESIDUAL RISK: LOW. Purely additive and default-off; signature Norse voice unchanged unless a
+              GM opts in. No existing setting/directive/i18n key removed or renamed.

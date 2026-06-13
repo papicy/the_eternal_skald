@@ -47,6 +47,22 @@
         "name": "Skald Intensity",
         "hint": "How dramatic and verbose the Skald speaks (1 = terse, 10 = full saga-singer operatic)."
       },
+      "narrativeTone": {
+        "name": "Campaign Tone",
+        "hint": "Steers the Skald's vocabulary, cadence and themes toward a chosen genre WITHOUT replacing its core voice. Default leaves the signature Norse tone unchanged.",
+        "choices": {
+          "default": "Default (Skald's signature voice)",
+          "epic": "Epic Norse",
+          "dark": "Dark & Gritty",
+          "lighthearted": "Lighthearted",
+          "horror": "Horror",
+          "custom": "Custom (use directive below)"
+        }
+      },
+      "narrativeToneCustom": {
+        "name": "Custom Tone Directive",
+        "hint": "Free-text tone instruction, used only when Campaign Tone is set to Custom. Leave blank to inject nothing."
+      },
       "autoNarrateCombat": {
         "name": "Auto-Narrate Combat",
         "hint": "When enabled, the Skald posts a short flavour line at the start of each combatant's turn."

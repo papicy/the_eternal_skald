@@ -185,6 +185,39 @@ export const Settings = {
       range: { min: 1, max: 10, step: 1 }
     });
 
+    // (v0.20.0 F2) Campaign genre / tone. Selects a tone-directive paragraph
+    // (see TONE_DIRECTIVES in constants.js) that is injected into the system
+    // prompt to steer vocabulary, cadence and thematic emphasis WITHOUT
+    // replacing the Skald's core persona. Default "default" → no injection, so
+    // existing worlds are unaffected unless the GM opts in.
+    game.settings.register(MODULE_ID, "narrativeTone", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.narrativeTone.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.narrativeTone.hint"),
+      scope: "world",
+      config: true,
+      type: String,
+      choices: {
+        default:      game.i18n.localize("ETERNAL_SKALD.settings.narrativeTone.choices.default"),
+        epic:         game.i18n.localize("ETERNAL_SKALD.settings.narrativeTone.choices.epic"),
+        dark:         game.i18n.localize("ETERNAL_SKALD.settings.narrativeTone.choices.dark"),
+        lighthearted: game.i18n.localize("ETERNAL_SKALD.settings.narrativeTone.choices.lighthearted"),
+        horror:       game.i18n.localize("ETERNAL_SKALD.settings.narrativeTone.choices.horror"),
+        custom:       game.i18n.localize("ETERNAL_SKALD.settings.narrativeTone.choices.custom")
+      },
+      default: "default"
+    });
+
+    // (v0.20.0 F2) Free-text tone directive, used only when narrativeTone is
+    // "custom". Blank → no injection (fail-soft).
+    game.settings.register(MODULE_ID, "narrativeToneCustom", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.narrativeToneCustom.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.narrativeToneCustom.hint"),
+      scope: "world",
+      config: true,
+      type: String,
+      default: ""
+    });
+
     game.settings.register(MODULE_ID, "autoNarrateCombat", {
       name: game.i18n.localize("ETERNAL_SKALD.settings.autoNarrateCombat.name"),
       hint: game.i18n.localize("ETERNAL_SKALD.settings.autoNarrateCombat.hint"),
