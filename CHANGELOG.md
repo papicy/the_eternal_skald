@@ -13,6 +13,44 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.22.0] — 2026-06-13
+
+An expansion & ambition pass ("Phase E"). New AI capabilities, two more game
+systems, audible narration, and soft ecosystem interop — all **additive /
+default-safe** and fully backwards-compatible. No existing setting, flag,
+command or i18n key was removed or renamed; every new behaviour is gated behind
+a default-OFF setting or feature-detection.
+
+### Added
+- **AI tool-calling architecture (F5).** A pure tool registry + executor in
+  `ai/tools/` exposes four function-calling tools (roll a move, query an
+  oracle, update a progress track, record a journal entry); a narrative-layer
+  tool-runner binds them to the capability-gated active adapter and the
+  chronicle layer (the AI never writes to your world directly). Hard-gated
+  behind a new **Autonomous Tool Use** world setting (default OFF) — the Skald
+  stays purely narrative until a GM opts in.
+- **Ruleset-aware narration for Starforged & Sundered Isles (Starforged).**
+  When the active `foundry-ironsworn` ruleset is a Starforged-family flag, a
+  SETTING block teaches the AI the space-opera / age-of-sail genre and legacy-
+  track vocabulary. No duplicate adapter — the existing ruleset-aware
+  controller already drives the mechanics.
+- **D&D 5e system adapter (§6.1).** A read-only adapter (system id `dnd5e`)
+  surfaces ability modifiers, HP/AC, spell slots and equipped/attuned items to
+  the AI, with a 5e rules digest. All Ironsworn-only mechanics report
+  unsupported.
+- **Pathfinder 2e system adapter (§6.1).** A read-only adapter (system id
+  `pf2e`) surfaces ability modifiers, HP/AC, Hero & Focus points and invested
+  items, with a PF2e rules digest (degrees of success, three-action economy).
+- **Text-to-speech narration (F7).** An optional 🔊 "read aloud" button on the
+  Skald's chat cards and an auto-narrate toggle, using the browser-native Web
+  Speech API (no account, no extra cost). Voice and playback speed are
+  configurable. Four client-scoped settings, all default OFF.
+- **Soft third-party integrations (§6.2).** Fail-soft feature-detection for
+  Monk's Enhanced Journals, Dice So Nice! and Simple Calendar. When Simple
+  Calendar is present, chronicle timeline events are stamped with the in-game
+  date/time. No new hard dependency; everything degrades to a no-op when a
+  sibling module is absent.
+
 ## [0.21.0] — 2026-06-13
 
 A UX-polish & ecosystem pass ("Phase D"). Four player-facing UI features, an
