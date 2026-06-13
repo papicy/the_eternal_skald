@@ -19,6 +19,7 @@ import { EntityLinker } from "../chronicle/entity-linking.js";
 // IronswornController is referenced only inside a setting onChange callback
 // (call-time), so this import is cycle-safe.
 import { IronswornController } from "../ironsworn-controller.js";
+import { Logger } from "./logger.js";
 
 /* ===================================================================== */
 /*  §2  MODULE SETTINGS                                                   */
@@ -653,6 +654,29 @@ export const Settings = {
       onChange: (v) => { try { IronswornController.setDebug(!!v); } catch (_) {} }
     });
 
+    /* ---- Unified logging level (M1) ----
+     * One knob for how verbose the Skald's console output is, used by the
+     * shared core/logger.js facade. Additive and backwards-compatible: the
+     * legacy `debugLogging` toggle above still works (when ON it forces debug
+     * output regardless of this choice). Default "warn" keeps the console
+     * quiet during normal play. World-scoped, GM-only.
+     */
+    game.settings.register(MODULE_ID, "loggingLevel", {
+      name: "Logging Level",
+      hint: "How much the Skald writes to the browser console. 'Off' silences it, 'Warnings' (default) shows only warnings and errors, 'Info' adds high-level activity, and 'Debug' is fully verbose. The legacy Debug Logging toggle, when on, forces Debug regardless of this setting.",
+      scope: "world",
+      config: true,
+      type: String,
+      choices: {
+        off:   "Off (errors are still shown by the browser)",
+        error: "Errors only",
+        warn:  "Warnings and errors (default)",
+        info:  "Info, warnings and errors",
+        debug: "Debug (everything)"
+      },
+      default: "warn"
+    });
+
     /* ---- Entity linking in narration (v0.5.1) ----
      * When ON, names the Skald narrates that match an auto-scribed
      * chronicle entry (NPC / location / discovery) or a known Ironsworn
@@ -977,7 +1001,7 @@ async function applyProviderPreset(preset) {
 
   try {
     await game.settings.set(MODULE_ID, "apiEndpoint", def.endpoint);
-    console.log(LOG_PREFIX, `Provider preset "${preset}" → endpoint set to ${def.endpoint}`);
+    Logger.info(`Provider preset "${preset}" → endpoint set to ${def.endpoint}`);
     try {
       const label = game.i18n.localize(`ETERNAL_SKALD.settings.providerPreset.choices.${preset}`);
       ui.notifications?.info(
@@ -988,6 +1012,6 @@ async function applyProviderPreset(preset) {
       );
     } catch (_) { /* notification is best-effort */ }
   } catch (e) {
-    console.warn(LOG_PREFIX, "applyProviderPreset failed:", e?.message || e);
+    Logger.warn("applyProviderPreset failed:", e?.message || e);
   }
 }

@@ -1,4 +1,5 @@
 import { LOG_PREFIX, MODULE_ID, SKALD_NAME } from "../core/constants.js";
+import { Logger } from "../core/logger.js";
 import { Settings } from "../core/settings.js";
 import { Client } from "../ai/client.js";
 // Call-time cross-imports (safe cycle): EntityLinker & Integration still live in
@@ -105,6 +106,39 @@ export const Chat = {
       data.whisper = game.users.filter(u => u.isGM).map(u => u.id);
     }
     return ChatMessage.create(data);
+  },
+
+  /**
+   * (H3) Post a styled, fail-soft ERROR card to chat so failures surface in
+   * the saga instead of dying silently in the console. Whispered to GMs by
+   * default. Use this at AI / API / command failure sites: a clear headline,
+   * the raw detail (escaped), and an optional actionable hint.
+   *
+   * @param {string} headline            - short, human-readable summary
+   * @param {object} [opts]
+   * @param {string} [opts.detail]       - raw error text / message (escaped)
+   * @param {string} [opts.hint]         - optional "what to try" guidance
+   * @param {string} [opts.title="The Skald Falters"]
+   * @param {boolean}[opts.gmWhisper=true] - whisper to GMs (set false for all)
+   * @returns {Promise<ChatMessage|null>} never throws; returns null on failure
+   */
+  async postError(headline, opts = {}) {
+    try {
+      const detail = opts.detail
+        ? `<p class="es-error-detail">${escapeHtml(opts.detail)}</p>` : "";
+      const hint = opts.hint
+        ? `<p class="es-error-hint">💡 ${escapeHtml(opts.hint)}</p>` : "";
+      const body = `<p class="es-error"><strong>${escapeHtml(headline)}</strong></p>${detail}${hint}`;
+      return await this.postSkald(body, {
+        variant: "error",
+        title: opts.title ?? "The Skald Falters",
+        gmWhisper: opts.gmWhisper !== false
+      });
+    } catch (e) {
+      // An error card must never itself break the caller's flow.
+      Logger.error("postError failed:", e?.message || e);
+      return null;
+    }
   }
 };
 
