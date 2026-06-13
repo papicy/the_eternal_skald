@@ -144,11 +144,13 @@ ok(DELVE_DOMAINS.includes("Barrow") && DELVE_DOMAINS.includes("Underkeep"), "[1]
   ok(/game\.user\.isGM|ITEM_CREATE|JOURNAL_CREATE/.test(gen), "[7] document writes are permission-gated");
   ok(/buildFallbackSite\(rolled\)/.test(gen), "[7] degrades to the manual-oracle fallback");
 
-  const ctrl = readFileSync(join(SCRIPTS, "ironsworn-controller.js"), "utf8");
-  ok(/_isDiscoverSiteMove\(/.test(ctrl), "[7] controller defines _isDiscoverSiteMove");
+  // Phase B: the discover-site classifier + move-orchestration was extracted
+  // verbatim from the monolithic controller into scripts/ironsworn/moves.js.
+  const ctrl = readFileSync(join(SCRIPTS, "ironsworn", "moves.js"), "utf8");
+  ok(/_isDiscoverSiteMove\(/.test(ctrl), "[7] moves module defines _isDiscoverSiteMove");
   ok(/discover_a_site\$/.test(ctrl), "[7] classifier matches the discover_a_site datasworn id");
-  ok(/await import\(["']\.\/narrative\/generators\.js["']\)/.test(ctrl), "[7] controller dynamically imports the generator");
-  ok(/SiteGenerator\.discover\(/.test(ctrl), "[7] controller branch delegates to SiteGenerator.discover");
+  ok(/await import\(["']\.\.\/narrative\/generators\.js["']\)/.test(ctrl), "[7] moves module dynamically imports the generator");
+  ok(/SiteGenerator\.discover\(/.test(ctrl), "[7] moves branch delegates to SiteGenerator.discover");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

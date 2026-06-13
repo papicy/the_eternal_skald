@@ -13,6 +13,39 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.19.0] — 2026-06-13
+
+A maintainability and portability pass (developer-facing "Phase B"). No gameplay,
+data-model, directive grammar or i18n key changed — everything here is purely
+additive and fully backwards-compatible.
+
+### Changed
+- **Chat commands route through the system adapter.** `scripts/chat/commands.js`
+  no longer reaches for the `IronswornController` directly; it now resolves the
+  active system adapter via `getActiveAdapter()` and gates Ironsworn-specific
+  behaviour on advertised capabilities (`oracles`, `progressTracks`,
+  `detectMoveDeclaration`). On systems whose adapter does not advertise a
+  capability the command degrades gracefully instead of assuming Ironsworn.
+  This completes the adapter migration begun in earlier releases (the
+  prompt-builder, integration and entity-linking layers were migrated first).
+- **The Ironsworn controller was decomposed.** The monolithic
+  `scripts/ironsworn-controller.js` (~4,000 lines) is now a thin composition
+  root that assembles six focused subsystem modules under
+  `scripts/ironsworn/` — `moves`, `character`, `combat`, `progress`,
+  `mechanics` and `meters` — plus a shared `internals` module for the common
+  constants, move catalogs and helpers. The methods were lifted **verbatim**
+  and composed onto a single object, so `this`, shared cache state and the
+  entire public `IronswornController` API (139 members) are byte-for-byte
+  unchanged. Default and named exports are preserved.
+
+### Added
+- Integration test (`test/adapter-commands-migration.test.mjs`) covering the
+  command-layer adapter migration across Ironsworn-like, Nimble-like (read-only)
+  and Null adapter shapes.
+- Settings live-reload audit (`docs/SETTINGS-live-reload-audit.md`) confirming
+  every setting touched by the adapter migration is read live and needs no
+  reload handling.
+
 ## [0.18.0] — 2026-06-13
 
 A reliability and maintainability pass (developer-facing "Phase A"). No gameplay,

@@ -14,7 +14,7 @@ import { MapVision } from "../vision/map-vision.js";
 import { JournalSystem } from "../chronicle/journal-system.js";
 import { EntityLinker } from "../chronicle/entity-linking.js";
 import { IronswornData } from "../ironsworn-data.js";
-import { IronswornController } from "../ironsworn-controller.js";
+import { getActiveAdapter } from "../systems/registry.js";
 import { BrowserRAG } from "../browser-rag.js";
 
 /**
@@ -188,13 +188,22 @@ export const Commands = {
       `<tr><td><code>${c}</code></td><td>${d}</td></tr>`
     ).join("");
 
-    const knownOracles = Object.keys(IronswornData.oracles)
-      .map(k => `<code>${k}</code>`).join(", ");
+    // Oracles are an Ironsworn-system feature; only advertise them when the
+    // active system adapter actually supports oracle tables (capability-gated
+    // so non-Ironsworn worlds, e.g. Nimble, don't see a misleading line).
+    let oracleLine = "";
+    try {
+      if (getActiveAdapter().capabilities?.().oracles) {
+        const knownOracles = Object.keys(IronswornData.oracles)
+          .map(k => `<code>${k}</code>`).join(", ");
+        oracleLine = `<p class="es-help-aside"><em>Oracles available:</em> ${knownOracles}.</p>`;
+      }
+    } catch (_) { /* defensive: no adapter / no oracles → omit the line */ }
 
     const body = `
       <p>I am <strong>${SKALD_NAME}</strong>, your saga-singer at this table. Speak to me with these runes:</p>
       <div class="es-help-scroll"><table class="es-help-table"><tbody>${tableRows}</tbody></table></div>
-      <p class="es-help-aside"><em>Oracles available:</em> ${knownOracles}.</p>
+      ${oracleLine}
       <p class="es-help-aside"><em>GM-only:</em> Combat auto-control may be toggled in <strong>Module Settings → The Eternal Skald</strong>.</p>
     `;
     return Chat.postSkald(body, { variant: "help", title: "Commands of the Skald" });
@@ -224,7 +233,18 @@ export const Commands = {
       );
     }
 
-    const actor = IronswornController.getActiveCharacter();
+    // Route through the active system adapter (Ironsworn in practice, since
+    // Integration.active() above already requires it). Capability-gated so a
+    // non-progress system degrades gracefully instead of throwing.
+    const adapter = getActiveAdapter();
+    if (!adapter.capabilities?.().progressTracks) {
+      return Chat.postSystem(
+        `${escapeHtml(SKALD_NAME)}: progress tracking is not supported by the active game system.`,
+        { gmWhisper: true }
+      );
+    }
+
+    const actor = adapter.getActiveCharacter();
     if (!actor) {
       return Chat.postSystem(
         `${escapeHtml(SKALD_NAME)}: no active character — select a token or assign your user a character first.`,
@@ -252,7 +272,7 @@ export const Commands = {
         (t.kind === "journey") ||
         (!t.kind && !isVowT(t) && !isCombatT(t)
          && t.subtype !== "bond" && t.subtype !== "connection" && t.subtype !== "bondset");
-      const journeys = (IronswornController.getProgressTracks(actor) || []).filter(t => {
+      const journeys = (adapter.getProgressTracks(actor) || []).filter(t => {
         return isJourneyT(t) && !t.completed;
       });
       if (!journeys.length) {
@@ -297,10 +317,10 @@ export const Commands = {
     let track = null;
     try {
       if (nameFilter) {
-        const match = IronswornController.findTrackFuzzy(actor, nameFilter, "journey");
+        const match = adapter.findTrackFuzzy(actor, nameFilter, "journey");
         if (match && !foundry.utils.getProperty(match, "system.completed")) track = match;
       }
-      if (!track && !nameFilter) track = IronswornController._newestOpenTrackItem(actor, "journey");
+      if (!track && !nameFilter) track = adapter._newestOpenTrackItem(actor, "journey");
     } catch (_) { /* fall through to the no-track message */ }
 
     if (!track) {
@@ -312,7 +332,7 @@ export const Commands = {
     }
 
     // 1 box = 4 ticks. markProgress clamps to the 0–40 (0–10 box) range.
-    const res = await IronswornController.markProgress(actor, track.id, boxes * 4);
+    const res = await adapter.markProgress(actor, track.id, boxes * 4);
     if (!res?.ok) {
       return Chat.postSystem(
         `${escapeHtml(SKALD_NAME)}: could not mark progress — ${escapeHtml(res?.error || "unknown error")}.`,
@@ -359,7 +379,7 @@ export const Commands = {
     // throws and any failure simply falls back to narration.
     try {
       if ((Settings.get("interceptMoveDeclarations") ?? true) && Integration.active()) {
-        const decl = IronswornController.detectMoveDeclaration?.(args);
+        const decl = getActiveAdapter().detectMoveDeclaration?.(args);
         if (decl?.move?.name) {
           console.log(`${LOG_PREFIX} [skald] move declaration detected: "${decl.move.name}"${decl.stat ? ` +${decl.stat}` : ""} (confidence=${decl.confidence}) — opening roll dialog, suppressing narration`);
           // doTriggerMove records intent (for post-roll narration) and opens
