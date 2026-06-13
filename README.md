@@ -258,7 +258,7 @@ Also builds on the [Ironsworn & Starforged system for Foundry VTT](https://githu
 
 <div align="center">
 
-*Forged in the Ironlands. Powered by [Abacus AI](https://abacus.ai).*
+*Forged in the Ironlands. Powered by [Abacus AI](https://abacus.ai) & Fried Chicken*
 
 ⚔️
 
