@@ -1,8 +1,8 @@
 {
   "id": "the-eternal-skald",
   "title": "The Eternal Skald",
-  "description": "<p>An AI-powered storyteller, oracle interpreter, and tactical enemy controller for <strong>Ironsworn</strong> and <strong>Ironsworn: Delve</strong> campaigns in Foundry VTT v14, powered by Abacus AI ChatLLM. Just type <code>!</code> followed by your words to speak with the Skald, or <code>!skald-help</code> for all commands.</p><p>v0.19.0 — <strong>A cleaner engine under the hood</strong> (developer-facing &quot;Phase B&quot;). Chat commands now route through the capability-gated system adapter so the module degrades gracefully on non-Ironsworn systems, and the ~4,000-line Ironsworn controller has been split into focused subsystem modules (moves, character, combat, progress, mechanics, meters) behind an unchanged public API. No gameplay, data-model or directive grammar changed — everything here is purely additive and fully backwards-compatible. Full release history is in <a href=\"https://github.com/papicy/the_eternal_skald/blob/main/CHANGELOG.md\">CHANGELOG.md</a>.</p>",
-  "version": "0.19.0",
+  "description": "<p>An AI-powered storyteller, oracle interpreter, and tactical enemy controller for <strong>Ironsworn</strong> and <strong>Ironsworn: Delve</strong> campaigns in Foundry VTT v14, powered by Abacus AI ChatLLM. Just type <code>!</code> followed by your words to speak with the Skald, or <code>!skald-help</code> for all commands.</p><p>v0.20.0 — <strong>Feature enrichment</strong> (&quot;Phase C&quot;). Adds local-LLM support via Ollama, a campaign genre/tone setting, compendium-aware AI memory (<code>!reindex-compendiums</code>), one-click session recaps exported to Markdown/Obsidian (<code>!session-recap</code>), and an in-character NPC roleplay mode (<code>!roleplay</code>). Under the hood, command routing now flows through a declarative registry and prompt templates are externalised. Every addition is opt-in / default-off and fully backwards-compatible. Full release history is in <a href=\"https://github.com/papicy/the_eternal_skald/blob/main/CHANGELOG.md\">CHANGELOG.md</a>.</p>",
+  "version": "0.20.0",
   "compatibility": {
     "minimum": "13",
     "verified": "14",
@@ -42,6 +42,6 @@
   },
   "url": "https://github.com/papicy/the_eternal_skald",
   "manifest": "https://raw.githubusercontent.com/papicy/the_eternal_skald/main/module.json",
-  "download": "https://github.com/papicy/the_eternal_skald/archive/refs/tags/v0.19.0.zip",
+  "download": "https://github.com/papicy/the_eternal_skald/archive/refs/tags/v0.20.0.zip",
   "readme": "https://github.com/papicy/the_eternal_skald/blob/main/README.md"
 }

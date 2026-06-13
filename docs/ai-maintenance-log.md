@@ -2872,3 +2872,19 @@ ROLLBACK:     Revert this commit on phase-c-feature-enrichment. The mode flag de
 RESIDUAL RISK: LOW. In-memory state resets on reload (acceptable for a transient mode). No world
               writes; dossier is GM-whispered; in-character chatter is excluded from chronicle
               ingestion so it can't pollute canon. buildPersonaTask is pure + unit-tested.
+
+### [2026-06-13 21:55 EEST] — Release: v0.19.0 → v0.20.0 (Phase C)
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    RELEASE / VERSION BUMP (gated — see Phase C gate above)
+EVIDENCE:     module.json is the single source of truth; version-consistency.test.mjs (27 guards)
+              enforces module.json == package.json == latest CHANGELOG heading, plus the download URL
+              tag, README alpha badge / server banner / health example, and a concise description.
+CHANGE:       Bumped module.json + package.json to 0.20.0; repointed the download URL to the
+              v0.20.0.zip tag; rewrote module.json description as a concise Phase C summary; updated
+              the three README version references; prepended a "## [0.20.0] — 2026-06-13" CHANGELOG
+              section documenting F6/F2/F1/F3/F4 (Added) and M2/M4 (Changed).
+FILES TOUCHED: module.json, package.json, README.md, CHANGELOG.md.
+TESTS:        node test/version-consistency.test.mjs → 27/27; full suite 48/48.
+GATE:         Covered by the Phase C gate above.
+ROLLBACK:     Revert this commit on phase-c-feature-enrichment.
+RESIDUAL RISK: NONE functional — metadata/docs only.
