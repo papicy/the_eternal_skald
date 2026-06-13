@@ -14,6 +14,7 @@ import { CombatController } from "../eternal-skald.js";
 import { IronswornData } from "../ironsworn-data.js";
 import { IronswornController } from "../ironsworn-controller.js";
 import { BrowserRAG } from "../browser-rag.js";
+import { SystemRegistry, registerSystem } from "../systems/registry.js";
 
 
 /* ===================================================================== */
@@ -174,6 +175,17 @@ Hooks.once("ready", async () => {
   // Sync debug logging flag into the Ironsworn controller.
   try { IronswornController.setDebug(Settings.get("debugLogging")); } catch (_) {}
 
+  // (Phase 1) Register the system adapters with the multi-system registry.
+  // The Ironsworn controller already satisfies the SystemAdapter contract, so
+  // this is a verbatim re-registration — purely additive. NOTHING consumes
+  // getActiveAdapter() yet, so existing Ironsworn behaviour is unchanged.
+  try {
+    registerSystem("foundry-ironsworn", IronswornController);
+    console.log(LOG_PREFIX, "System adapter registry initialised —", JSON.stringify(SystemRegistry.list()));
+  } catch (e) {
+    console.warn(LOG_PREFIX, "System adapter registry init failed:", e?.message ?? e);
+  }
+
   // Expose a small public API for macros and other modules.
   game.modules.get(MODULE_ID).api = {
     chat: Client.chat.bind(Client),
@@ -198,6 +210,8 @@ Hooks.once("ready", async () => {
     // --- Ironsworn rules-engine integration (v0.3.0) ---
     ironsworn: IronswornController,
     integration: Integration,
+    // --- Multi-system adapter registry (Phase 1) ---
+    systems: SystemRegistry,
     // --- Narration entity linking (v0.5.1) ---
     entityLinker: EntityLinker,
     // --- Customisable link styles (v0.9.0) ---
