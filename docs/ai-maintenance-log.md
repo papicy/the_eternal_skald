@@ -2921,3 +2921,28 @@ GATE:         GRANTED by maintainer via the Phase D subtask assignment (this ent
                self-approval is NOT being used — the human assigned the work with specs).
 
 NOTE: Per-feature detailed log entries follow below as each lands.
+
+### [2026-06-13 22:45 EEST] — Doc2: adapter-development tutorial guide
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    DOCUMENT (gated — see Phase D gate above)
+PRE-FLIGHT:   Read adapter-interface.js (SYSTEM_CAPABILITIES, isValidAdapter, makeResult/unsupported,
+              SystemAdapter typedef), registry.js (registerSystem/getActiveAdapter), and the Nimble
+              adapter header as the read-only worked-example reference.
+EVIDENCE:     CLAIM: the adapter contract requires exactly four members and the registry resolves by
+              game.system.id with a NullAdapter fallback.
+              EVIDENCE: scripts/systems/adapter-interface.js:95-104 :: isValidAdapter; scripts/systems/
+              registry.js:96-108 :: getActive; scripts/systems/adapter-interface.js:37-55 :: SYSTEM_CAPABILITIES.
+              CONFIDENCE: HIGH  BASIS: read the exact lines this session.
+CHANGE:       Added docs/ADAPTER-DEVELOPMENT.md — a tutorial (vs. SYSTEMS.md reference): big-picture
+              diagram, the contract in one screen, capability-key table, a full step-by-step read-only
+              D&D 5e adapter skeleton (file → register → verify → grow into writes), capability-by-
+              capability priority guide, a testing checklist with a Foundry-global stubbing pattern,
+              and a "what your users will see" capability→feature map. Pure markdown; references the
+              Ironsworn / Nimble / Null adapters as required.
+FILES TOUCHED (1):
+  - docs/ADAPTER-DEVELOPMENT.md  (+332 / -0, new file)
+TESTS:        No code changed (DOCUMENT). Full suite run anyway: node test/run-all.mjs → 48/48 PASS.
+SUITE:        npm test -> PASS (48 files)
+GATE:         Covered by the Phase D gate above (documentation deliverable Doc2).
+ROLLBACK:     git revert <this commit> — removes the new doc only; zero code impact.
+RESIDUAL RISK: NONE — additive documentation; no source, settings, or commands touched.
