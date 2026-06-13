@@ -2748,3 +2748,31 @@ ROLLBACK:     Revert this commit on phase-c-feature-enrichment.
 RESIDUAL RISK: LOW. Pure routing refactor with identical behaviour; the only new runtime path is
               the "gm" permission gate, which no current command uses. Registry is frozen + unit
               tested for completeness (every COMMANDS token maps exactly once).
+
+### [2026-06-13 20:05 EEST] — M4: Externalise prompt templates + loader
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    REFACTOR (gated — see Phase C gate above)
+EVIDENCE:     prompt-builder.js previously embedded three large static prompt blocks inline
+              (rulesDigest ~22 lines, persona ~8 lines, guidance ~18 lines with a ${intensityNote}
+              interpolation). scene-context.test.mjs:219-226 asserted the guidance wording inside
+              buildSystemPrompt (re-pointed at the template file).
+CHANGE:       Established a build-free prompt-template layer. Moved the three static blocks to
+              /prompts/persona.mjs, /prompts/rules-digest.mjs and /prompts/guidance.mjs
+              (default-export strings; guidance uses a {{intensityNote}} placeholder). Added
+              scripts/ai/prompt-loader.js — imports the templates through the normal ESM graph
+              (loads in-browser with NO build step and NO async fetch, keeping buildSystemPrompt
+              synchronous) and renders {{variable}} placeholders via renderTemplate(). Refactored
+              prompt-builder.js to source the blocks via getPrompt(). Output is byte-identical to
+              the previous inline strings (verified during migration; durable content invariants
+              guard against drift). Loader is fail-soft (unknown template / missing var → "").
+FILES TOUCHED: prompts/persona.mjs (new), prompts/rules-digest.mjs (new), prompts/guidance.mjs (new),
+              scripts/ai/prompt-loader.js (new), scripts/ai/prompt-builder.js,
+              test/prompt-loader.test.mjs (new), test/scene-context.test.mjs (guidance guard
+              re-pointed at the template file — equal strength).
+TESTS:        node test/prompt-loader.test.mjs → 34/34; scene-context 25/25; full suite 45/45;
+              node --check on all new files.
+GATE:         Covered by the Phase C gate above (new prompts/ layer + loader module).
+ROLLBACK:     Revert this commit on phase-c-feature-enrichment.
+RESIDUAL RISK: LOW. Prompt text unchanged (byte-identical); only the storage location moved. The
+              templates are part of the static import graph so they ship in the module zip with
+              no manifest change. Further prompt blocks can migrate incrementally using the loader.

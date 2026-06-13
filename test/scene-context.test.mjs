@@ -217,13 +217,20 @@ eq(gather(undefined, undefined), "", "[1] undefined globals return empty string"
      "[10] gatherContext() pushes the scene block into the context");
 }
 {
-  const persona = extractFrom(SRC, "function buildSystemPrompt(");
-  ok(/can see the active map/i.test(persona),
+  // (v0.20.0 M4) The guidance block was externalised to prompts/guidance.mjs
+  // and pulled in via the prompt loader, so the map/scene wording now lives in
+  // that template (the builder composes it). Same intent, sourced from the
+  // template file — equal-strength guard.
+  const guidanceTpl = readFileSync(join(__dirname, "..", "prompts", "guidance.mjs"), "utf8");
+  ok(/can see the active map/i.test(guidanceTpl),
      "[10] system prompt states the Skald can see the map");
-  ok(/CURRENT\s+SCENE/.test(persona) && /Visible Locations/.test(persona),
+  ok(/CURRENT\s+SCENE/.test(guidanceTpl) && /Visible Locations/.test(guidanceTpl),
      "[10] system prompt references the scene context fields");
-  ok(/never force/i.test(persona) || /natural/i.test(persona),
+  ok(/never force/i.test(guidanceTpl) || /natural/i.test(guidanceTpl),
      "[10] system prompt keeps location references natural / non-forced");
+  // and the builder must actually compose that guidance template into the prompt.
+  const builder = readFileSync(join(__dirname, "..", "scripts", "ai", "prompt-builder.js"), "utf8");
+  ok(/getPrompt\("guidance"/.test(builder), "[10] builder loads the guidance template via the loader");
 }
 
 /* --------------------------------------------------------------------- */
