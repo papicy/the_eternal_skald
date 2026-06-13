@@ -743,6 +743,16 @@ export const Settings = {
       default: 0.3
     });
 
+    // Opt-in HNSW approximate-nearest-neighbour index for large chronicles.
+    game.settings.register(MODULE_ID, "ragUseAnnIndex", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.ragUseAnnIndex.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.ragUseAnnIndex.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: false
+    });
+
     // Verbose RAG console logging for troubleshooting.
     game.settings.register(MODULE_ID, "ragDebugMode", {
       name: game.i18n.localize("ETERNAL_SKALD.settings.ragDebugMode.name"),

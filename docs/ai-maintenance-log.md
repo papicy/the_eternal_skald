@@ -3453,3 +3453,57 @@ RESIDUAL RISK: LOW. Read-only and capability-gated: under PF2e the Skald narrate
               but emits no Ironsworn directives and performs no writes. Field paths follow the pf2e data
               model and degrade to null/omitted if a future PF2e release renames them — no throw, just
               less context.
+
+
+
+### [2026-06-13 22:00 EEST] — L1: opt-in HNSW ANN index for semantic memory
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    feature (L1 — RAG approximate-nearest-neighbour index)
+PRE-FLIGHT:   browser-rag is a self-contained local IndexedDB vector subsystem that degrades to a no-op
+              (§5). A vector index must NOT live in narrative/ (orchestration glue) — owning it there
+              would cross a layer boundary. DECISION: a NEW pure sibling module
+              scripts/browser-rag-hnsw.js (no imports, no Foundry globals) implements HNSW; browser-rag.js
+              (the RAG owner) imports it. Existing brute-force cosine scan stays intact as the fallback;
+              the ANN path is OFF by default, gated behind a new world setting, and only engages above a
+              1000-vector corpus threshold (below that the linear scan is faster). Confirmed the HNSW
+              algorithm (Malkov & Yashunin 2016): multi-layer graph, mL = 1/ln(M), efConstruction/efSearch
+              beams, Mmax0 = 2M, level = floor(-ln(U)*mL).
+EVIDENCE:
+  CLAIM:      Enabling "Use Advanced Memory Index" routes large-corpus semantic search through an HNSW
+              graph that returns near-exact top-k far faster than the linear scan, and ANY failure (or a
+              small corpus, or the setting being off) transparently falls back to the exact scan.
+  EVIDENCE:   scripts/browser-rag-hnsw.js — HnswIndex.add/search (cosine via 1-dot on L2-normalised
+              vectors, deterministic mulberry32 levels). scripts/browser-rag.js:686 search() tries
+              _getHnsw(all) then hydrates+filters hits, wrapped in try/catch that falls through to the
+              linear loop; _getHnsw() (line ~634) returns null unless useAnnIndex() && corpus >=
+              ANN_MIN_CORPUS; _invalidateCorpus() (line ~617) now also drops _hnsw/_hnswById so the graph
+              rebuilds after every write. settings.js:747 registers ragUseAnnIndex (Boolean, world,
+              default false).
+  CONFIDENCE: HIGH
+  BASIS:      New test 17/17 incl. recall@10 >= 0.9 vs brute-force on clustered data, determinism, edge
+              cases (empty/k>size/dim-mismatch/degenerate), and a 4000-vector/384-dim benchmark
+              (ANN ~6ms vs linear ~63ms, recall 0.943). Full suite 60/60.
+CHANGE:       NEW scripts/browser-rag-hnsw.js — pure dependency-free HnswIndex (incremental insert with
+              level assignment + greedy descent + efConstruction layer search + neighbour pruning;
+              ef-width search with cosine scoring). browser-rag.js — import HnswIndex, ANN_MIN_CORPUS=1000
+              const, _hnsw/_hnswById state, useAnnIndex() accessor, _getHnsw() lazy builder, ANN branch in
+              search() with linear fallback, _hnsw invalidation in _invalidateCorpus(). settings.js — new
+              ragUseAnnIndex world Boolean (default false). en.json — ragUseAnnIndex name/hint. New test.
+FILES TOUCHED (5 — gated):
+  - scripts/browser-rag-hnsw.js        (+238 / -0, new pure HNSW module)
+  - scripts/browser-rag.js             (+57 / -1, import + state + accessor + _getHnsw + search branch + invalidate hook)
+  - scripts/core/settings.js           (+10 / -0, register ragUseAnnIndex)
+  - lang/en.json                       (+4 / -0, ragUseAnnIndex name/hint)
+  - test/browser-rag-hnsw.test.mjs     (+200 / -0, new — recall/determinism/edge/perf)
+TESTS:        node test/browser-rag-hnsw.test.mjs → 17/17; node --check on all changed JS; en.json parses.
+SUITE:        npm test -> PASS (60 files)
+GATE:         Covered by the L1 user directive (explicit human authorization to implement the RAG ANN
+              index). This task exceeds the 3-file / 50-line soft limits (5 files); the directive is the
+              authorization, same pattern as the Phase D/E gates.
+ROLLBACK:     git revert <this commit> — removes the HNSW module, the setting, the i18n keys and the test,
+              and restores browser-rag.js to the pure linear scan. With the setting OFF (the default) the
+              ANN code is never reached, so worlds are unaffected until a GM opts in.
+RESIDUAL RISK: LOW. Default OFF and additive: existing exact-search behaviour is byte-for-byte unchanged
+              unless a GM enables the setting AND the corpus exceeds 1000 vectors. The ANN path is wrapped
+              in try/catch with a guaranteed fall-through to the exact scan, the index rebuilds on every
+              corpus write, and results are approximate (recall ~0.94+ on realistic clustered embeddings).
