@@ -109,13 +109,16 @@ console.log("[1] xpForRank maps ranks to the canonical XP scale");
   eq(Data.rankXp.epic, 5, "IronswornData.rankXp table present");
 }
 
-console.log("[2] xpForRank weak-hit halves (rounded up)");
+console.log("[2] xpForRank weak-hit marks rank value minus one (floored at 0, per SRD)");
 {
-  eq(Ctrl.xpForRank("troublesome", { weakHit: true }), 1, "troublesome weak → 1 (ceil(0.5))");
-  eq(Ctrl.xpForRank("dangerous", { weakHit: true }), 1, "dangerous weak → 1 (ceil(1))");
-  eq(Ctrl.xpForRank("formidable", { weakHit: true }), 2, "formidable weak → 2 (ceil(1.5))");
-  eq(Ctrl.xpForRank("extreme", { weakHit: true }), 2, "extreme weak → 2");
-  eq(Ctrl.xpForRank("epic", { weakHit: true }), 3, "epic weak → 3 (ceil(2.5))");
+  eq(Ctrl.xpForRank("troublesome", { weakHit: true }), 0, "troublesome weak → 0 (1-1)");
+  eq(Ctrl.xpForRank("dangerous", { weakHit: true }), 1, "dangerous weak → 1 (2-1)");
+  eq(Ctrl.xpForRank("formidable", { weakHit: true }), 2, "formidable weak → 2 (3-1)");
+  eq(Ctrl.xpForRank("extreme", { weakHit: true }), 3, "extreme weak → 3 (4-1)");
+  eq(Ctrl.xpForRank("epic", { weakHit: true }), 4, "epic weak → 4 (5-1)");
+  // Data module mirror agrees on the SRD weak-hit scale.
+  eq(Data.xpForRank("troublesome", { weakHit: true }), 0, "IronswornData weak troublesome → 0");
+  eq(Data.xpForRank("epic", { weakHit: true }), 4, "IronswornData weak epic → 4");
 }
 
 console.log("[3] getRuleset detects classic vs starforged from world flags");
@@ -224,10 +227,10 @@ console.log("[10] grantVowXp weak-hit half only when the rule is enabled");
   const a1 = new MockActor({ system: { xp: 0 }, items: [{ name: "V", type: "progress", system: { subtype: "vow", rank: 5, completed: true } }] });
   await Ctrl.grantVowXp(a1, a1.items[0], { outcome: "weak", weakHitHalf: false });
   eq(getProperty(a1, "system.xp"), 5, "epic full = 5 when rule off");
-  // Rule ON + weak → half (ceil(2.5)=3).
+  // Rule ON + weak → rank value minus one (5-1=4) per the SRD.
   const a2 = new MockActor({ system: { xp: 0 }, items: [{ name: "V", type: "progress", system: { subtype: "vow", rank: 5, completed: true } }] });
   await Ctrl.grantVowXp(a2, a2.items[0], { outcome: "weak", weakHitHalf: true });
-  eq(getProperty(a2, "system.xp"), 3, "epic weak half = 3 when rule on");
+  eq(getProperty(a2, "system.xp"), 4, "epic weak = 4 (5-1) when rule on");
   // Rule ON + strong → full.
   const a3 = new MockActor({ system: { xp: 0 }, items: [{ name: "V", type: "progress", system: { subtype: "vow", rank: 5, completed: true } }] });
   await Ctrl.grantVowXp(a3, a3.items[0], { outcome: "strong", weakHitHalf: true });

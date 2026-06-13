@@ -428,8 +428,9 @@ const RANK_XP = Object.freeze({
  *        "epic"), case-insensitive, or the numeric ChallengeRank 1–5 the
  *        foundry-ironsworn data model stores.
  * @param {{weakHit?: boolean}} [opts]  when `weakHit` is true the OPTIONAL
- *        half-XP rule applies — the award is halved and rounded UP (so a
- *        Troublesome weak hit still yields 1, never 0).
+ *        reduced-XP rule applies — per the Ironsworn SRD / Datasworn "Fulfill
+ *        Your Vow" move, a weak hit marks experience equal to the rank value
+ *        MINUS ONE, floored at 0 (so a Troublesome weak hit yields 0).
  * @returns {number}  whole experience points (0 for an unknown rank).
  */
 function xpForRank(rank, { weakHit = false } = {}) {
@@ -439,7 +440,7 @@ function xpForRank(rank, { weakHit = false } = {}) {
   else key = String(rank ?? "").toLowerCase().trim();
   const base = RANK_XP[key] ?? 0;
   if (!base) return 0;
-  return weakHit ? Math.ceil(base / 2) : base;
+  return weakHit ? Math.max(0, base - 1) : base;
 }
 
 /**
