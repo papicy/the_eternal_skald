@@ -2303,3 +2303,83 @@ RESIDUAL RISK: NONE-to-LOW. No executable code changed. The only machine-checked
               module.json `download` URL still points at an older release zip — left
               untouched as it is out of scope for this phase and governed by the release/
               tagging process, not this docs change.
+
+
+
+---
+
+## 2026-06-13 — Journey weak-hit framing (#3, option b) + recent-intent persistence (#5)
+
+TASK TYPE:    IMPLEMENT (budget 5,000 tokens).
+
+PROBLEM:      Two journey-mechanic issues remained after the v0.11–v0.13 journey
+              work. (#3) On "Undertake a Journey" a weak hit was advanced and
+              narrated identically to a strong hit, so a weak hit never read as
+              the setback it is. (#5) The player's RECENT intent (_lastIntent /
+              _lastIntentTs) lived ONLY in memory, so a Foundry reload wiped it
+              and the Skald fell back to older RAG/journal facts.
+
+PRE-FLIGHT CHECKLIST:
+  [x] 1. Read engineering-brief.md (SKILL.md) + repository-map.md in full.
+  [x] 2. Task classified IMPLEMENT (budget 5,000 tokens).
+  [x] 3. Located exact targets — evidence below.
+  [x] 4. Change touches 2 code files; <= 50 changed lines/file (integration.js 35).
+  [x] 5. ADDITIVE + backwards-compatible (new accessors / new prompt note only).
+  [x] 6. No setting / flag / directive / i18n key removed or renamed.
+  [x] 7. Crosses no layer boundary; edits the 🔴 LOCKED narrative spine — GATE recorded below.
+  [x] 8. Regression test added (test/journey-fixes.test.mjs [5] + [6], OPEN).
+  [x] 9. Rollback = revert the single commit on the feature branch.
+
+EVIDENCE:
+  CLAIM:      #3 — a weak hit marked + narrated progress identically to a strong hit.
+  EVIDENCE:   scripts/narrative/integration.js:2338,2386 :: _autoJourneyFlow
+  CONFIDENCE: HIGH  · BASIS: read lines directly.
+  CLAIM:      #5 — _lastIntent/_lastIntentTs were in-memory only; no restore path on load.
+  EVIDENCE:   scripts/narrative/integration.js:44 (decl) + grep (no localStorage/flag restore)
+  CONFIDENCE: HIGH  · BASIS: read lines directly + grep over the whole file.
+
+APPROACH:
+  #3 (option b — keep Ironsworn RAW): a weak hit STILL marks progress (unchanged);
+     added an `if (!strong)` framing note inside the existing hit branch that tells
+     the AI to narrate the advance as gained AT A COST (a setback/mishap) while the
+     party stays on the path. Pure advisory text — no mechanical change.
+  #5: replaced the in-memory `_lastIntent: ""` field with transparent get/set
+     accessors (+ _intentMem backing, _intentKey/_loadIntent/_saveIntent helpers)
+     persisting to a per-world localStorage key. Lazy restore on first read; every
+     existing read/write site is unchanged. Optional-chained + try/catch so it
+     degrades to a pure in-memory field when localStorage is absent/blocked.
+
+CHANGES:
+  - scripts/narrative/integration.js (+35 / -2): persistence accessors at L43-67;
+    weak-hit framing note in _autoJourneyFlow hit branch.
+  - test/journey-fixes.test.mjs (+36): new guard blocks [5] (persistence accessors,
+    optional-chained localStorage, fail-closed load) and [6] (weak framing inside
+    the hit branch, after markProgressByRank, gated by !strong).
+
+FILES TOUCHED (3):
+  - scripts/narrative/integration.js   (🔴 LOCKED — gated, see GATE)
+  - test/journey-fixes.test.mjs        (🟢 OPEN)
+  - docs/ai-maintenance-log.md         (this entry)
+
+TESTS:        npm test (node test/run-all.mjs) -> PASS — 37 files passed, 0 failed.
+              journey-fixes.test.mjs -> 28 passed, 0 failed (was 20).
+              load-smoke.mjs -> clean module-graph import.
+              Runtime smoke (stubbed Foundry globals + mock localStorage): write
+              persists, simulated reload restores intent + ts, and an absent
+              localStorage degrades to "" with no throw.
+
+GATE:         APPROVAL RECORDED — user instructed "go ahead option b". Covers (a) editing
+              the 🔴 LOCKED scripts/narrative/integration.js (the only home of the journey
+              + intent logic) and (b) the weak-hit framing decision (keep RAW progress,
+              improve narration only). Items #1 (naming), #2 (single active journey) and
+              #4 (10/10 auto-completion) were ALREADY implemented & test-green at v0.17.0
+              (no change needed). The user-specified "weak = no progress" was NOT applied
+              (it contradicts Ironsworn RAW); option (b) was chosen instead.
+
+ROLLBACK:     Feature branch unmerged; PR opened against main for review. Abandon the
+              branch or `git revert <commit-sha>` — a single commit removes both fixes,
+              the test additions, and this log entry.
+
+RESIDUAL RISK: LOW. #3 is advisory prompt text (no mechanical effect). #5 is additive,
+              optional-chained, fail-closed, and per-world scoped; worst case it silently
+              no-ops to the prior in-memory behaviour. No settings/flags/directives changed.
