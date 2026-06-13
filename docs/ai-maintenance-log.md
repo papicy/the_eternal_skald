@@ -2606,3 +2606,46 @@ GATE:         User explicitly approved pushing the progress-track fix and reques
               version bump.
 ROLLBACK:     git revert <bump-commit-sha> restores 0.17.1 across all four files.
 RESIDUAL RISK: NONE. Metadata/docs only; no runtime behaviour changed by this commit.
+
+
+
+---
+
+### [2026-06-13 17:36 EEST] — History rewrite: remove "Abacus AI Agent" commit authorship
+AGENT:        Abacus.AI Agent (SkaldCoder)
+TASK TYPE:    MAINTENANCE / REPO-HYGIENE (git metadata only — no file content changed)
+TOKEN BUDGET: 1,000  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] located all commits carrying the Abacus identity (git log author/committer scan)
+  [x] task classified (MAINTENANCE: rewrite commit authorship, no shipped code touched)
+  [x] additive/safe to working tree — verified HEAD tree hash UNCHANGED after rewrite
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] no architectural boundary crossed (no 🔴 LOCKED runtime source edited)
+  [x] full suite kept green
+  [x] rollback plan defined (pre-rewrite .git backed up to /tmp before running)
+
+CONTEXT:      User reported "abacusai-agent in the commits all over the place." Repo had NO
+              contributors/AUTHORS list naming Abacus (package.json author/contributors
+              undefined; module.json authors = [{"The Eternal Skald Project"}]). The real
+              occurrences were 3 commits authored AND committed by
+              "Abacus AI Agent <agent@abacus.ai>":
+                - 2950e0d fix(chat): auto-scroll chat log during streaming narration
+                - 5b6988b fix(chat): smart auto-scroll — follow stream only when at bottom
+                - 8242d8c chore: bump version to v0.16.1 (smart auto-scroll release)
+
+CHANGE:       git filter-branch --env-filter remapped GIT_AUTHOR_* and GIT_COMMITTER_* for
+              email agent@abacus.ai -> "papicy <32144216+papicy@users.noreply.github.com>"
+              across --branches --tags. The 3 commits (and their descendants' hashes) were
+              rewritten; commit messages, dates and file contents are byte-identical.
+              Verified: HEAD tree 9000c59 == pre-rewrite ce4e687 tree 9000c59 (no content
+              diff); `git log main` now shows ZERO Abacus authorship.
+FILES TOUCHED: NONE (commit metadata only; docs/ai-maintenance-log.md appended here).
+TESTS:        npm test -> PASS (38 files passed, 0 failed).
+GATE:         User explicitly requested removing abacusai-agent from the commits; this
+              authorizes the history rewrite + force-push to main (otherwise forbidden by
+              the brief).
+ROLLBACK:     Pre-rewrite .git tree backed up at /tmp/the_eternal_skald_git_backup. Local
+              refs/original/* also retain the original commits until expired.
+RESIDUAL RISK: LOW. History rewrite changes commit SHAs from 2950e0d onward, so any external
+              clone must re-pull. No runtime behaviour or file content changed.
