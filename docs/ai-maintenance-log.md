@@ -2059,3 +2059,149 @@ RESIDUAL RISK: LOW. For Ironsworn the resolved adapter is the identical singleto
               the pre-existing try/catch / null-guard armor instead of through the old
               controller's internal isActive() no-ops — same observable result (nothing
               happens), reached one layer later. Verified by the [B] degradation test.
+
+
+### [2026-06-13 10:48 UTC] — Phase 4: add NimbleAdapter (read-only) + register "nimble"
+AGENT:        Abacus.AI Agent (SkaldCoder)
+TASK TYPE:    IMPLEMENT (pre-approved adapter phase)
+TOKEN BUDGET: 5,000  |  USED: ~within  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md + repository-map.md + PROPOSAL-multi-system-adapter-architecture.md
+  [x] task classified: IMPLEMENT — Phase 4, the first NON-Ironsworn adapter, which the
+        proposal designates as the pattern-proving phase enabled by the Phase 1–3 seam.
+  [x] target file(s)+line(s) located (evidence below)
+  [x] <= 3 source/test files changed (1 new adapter + 1 hook edit + 1 new test) + log
+  [x] additive & backwards-compatible (byte-for-byte identical for any Ironsworn /
+        standalone world; the new branch only ADDS a registration for system id "nimble")
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] no architectural boundary crossed: both 🔴 LOCKED files (ironsworn-controller.js,
+        narrative/integration.js) UNTOUCHED — read by range only. 🧊 module.json UNTOUCHED.
+  [x] regression test added (test/nimble-adapter.test.mjs, 59 assertions); existing suite
+        kept 100% green, nothing weakened/disabled.
+  [x] rollback plan defined (single git revert / branch is unmerged)
+
+PROBLEM:      Phases 1–3 built the adapter registry, migrated the leaf consumers, and
+              repointed the orchestration spine at getActiveAdapter(). The seam was
+              proven inert for Ironsworn and degrade-safe (via NullAdapter) for unknown
+              systems, but NO second real adapter existed, so the multi-system claim was
+              still unexercised. Phase 4 adds the first non-Ironsworn adapter — Nimble 2
+              (Foundry system id "nimble") — to prove a third party can light up the
+              character-read + prompt + map-vision surface with zero edits to the spine
+              or the locked controller.
+
+EVIDENCE (brief §4 format):
+  CLAIM:      Nimble character abilities live at system.abilities.{strength,dexterity,
+              intelligence,will} and each carries a derived integer modifier `.mod`
+              alongside the raw `.baseValue`.
+  EVIDENCE:   FoundryVTT-Nimble/src/models/actor/common.ts — abilities schema defines
+              strength/dexterity/intelligence/will, each {baseValue, bonus, mod,
+              defaultRollMode}.
+  CONFIDENCE: HIGH
+  BASIS:      read the system source data-model directly (not inferred from a sheet).
+              getCharacterStats() reads `.mod` first, falls back to `.baseValue`, then a
+              bare number, then null — so it survives schema drift without throwing.
+
+  CLAIM:      Nimble resource pools are attributes.hp{value,max,temp}, attributes.wounds
+              {value,max}, attributes.hitDice (a Record<dieSize,{current,...}>) and
+              resources.mana{current,baseMax,value,max}.
+  EVIDENCE:   FoundryVTT-Nimble/src/models/actor/CharacterDataModel.ts — attributes.hp,
+              attributes.wounds, attributes.hitDice (keyed by die size) and resources.mana.
+  CONFIDENCE: HIGH
+  BASIS:      read the system source; getResourcePools() aggregates hitDice as
+              Σcurrent / Σmax across the record, maps mana value←(value??current) and
+              max←(max??baseMax), and OMITS any pool whose container is absent rather
+              than emitting zeros — never throws on a partial/foreign actor.
+
+  CLAIM:      Adding NimbleAdapter is byte-for-byte behaviour-preserving for every
+              Ironsworn and standalone (non-"nimble") world.
+  EVIDENCE:   the only spine-visible change is registry.js gaining a "nimble"→NimbleAdapter
+              entry via the ready-hook; getActiveAdapter() keys off game.system.id, so for
+              any id !== "nimble" resolution is identical to before this branch.
+  CONFIDENCE: HIGH
+  BASIS:      read registry resolution; NimbleAdapter.isActive() === (game.system.id ===
+              "nimble"); registration is purely additive.
+
+APPROACH:     Implemented a CONSERVATIVE READ-ONLY adapter. The proposal's §5.3 sketch
+              speculated a richer Nimble adapter (sheetWrites/impacts/moves/xp/
+              compendiumFoes = true; applyHarm → reduce HP; triggerMove → roll damage) but
+              EXPLICITLY flagged that sketch MEDIUM-confidence and "MUST be confirmed
+              against a running Nimble instance before coding." No such instance is
+              available here, and a wrong write path risks corrupting live character
+              sheets. The subtask itself scopes Phase 4 to READS (map STR/DEX/INT/WIL,
+              map HP/Wounds/Mana/Hit Dice, buildSystemPrompt) plus "graceful handling for
+              missing features." Therefore NimbleAdapter advertises only characterReads +
+              mapVision + systemActive; oracles, progressTracks, vows, momentum, impacts,
+              moves, xp, compendium* and createCharacter are all FALSE, and every write
+              method returns unsupported("nimble: …") (or null for rollOracle). This is a
+              DELIBERATE divergence from the proposal's speculative write-mapping; the
+              write surface can be added later under its own gate once verifiable.
+
+CHANGE:       (1) scripts/systems/nimble-adapter.js (NEW): frozen NimbleAdapter object,
+              id "nimble", label "Nimble". isActive()=game.system.id==="nimble".
+              capabilities()=emptyCapabilities(false) with systemActive=isActive(),
+              characterReads=true, mapVision=true (all else false). getActiveCharacter()
+              mirrors IronswornController priority (controlled token → user character →
+              sole owned actor). getCharacterStats→{STR,DEX,INT,WIL} (alias getStats).
+              getResourcePools→{hp,wounds,mana,hitDice} (alias getMeters). describeCharacter
+              + buildSystemPrompt (Nimble rules digest) + getPromptProfile. All mutators
+              (adjustResource/applyHarm/applyStress/setStat/setImpact/markProgress/
+              setProgress/createProgressTrack/completeTrack/grantXp/triggerMove/
+              createFoeActor/addAssetToActor/createCharacter) → unsupported; rollOracle→null.
+              (2) scripts/hooks/foundry-hooks.js: added
+              `import { NimbleAdapter } from "../systems/nimble-adapter.js";` and, in the
+              ready-hook registry block right after the Ironsworn registration,
+              `registerSystem("nimble", NimbleAdapter);`. (Two small additive edits.)
+
+FILES TOUCHED (1 new adapter + 1 hook edit + 1 new test + this log = 4):
+  - scripts/systems/nimble-adapter.js          (NEW, read-only adapter)
+  - scripts/hooks/foundry-hooks.js             (+2 lines: import + registerSystem)
+  - test/nimble-adapter.test.mjs               (NEW, 59 assertions)
+  - docs/ai-maintenance-log.md                 (this entry)
+TESTS:        test/nimble-adapter.test.mjs — RESULT: 59 passed, 0 failed. Groups:
+              [1] contract/identity (id/label/frozen, isValidAdapter, isActive on/off);
+              [2] capabilities (characterReads+mapVision+systemActive true; oracles,
+                  progressTracks, vows, momentum, impacts, moves, xp, compendium*,
+                  createCharacter, sheetWrites all false);
+              [3] getCharacterStats {STR,DEX,INT,WIL} + .mod→.baseValue→bare→null
+                  fallbacks + getStats alias parity;
+              [4] getResourcePools hp/wounds/mana/hitDice (hitDice Σ aggregation, mana
+                  value/max fallbacks, absent pools omitted) + getMeters alias parity;
+              [5] describeCharacter ("" when inactive, note when no actor, summary text);
+              [6] buildSystemPrompt non-empty rules digest / "" when inactive +
+                  getPromptProfile shape;
+              [7] every write returns unsupported(ok:false) and rollOracle()===null;
+              [8] registry resolution: registerSystem("nimble") → getActiveAdapter()
+                  returns NimbleAdapter when game.system.id==="nimble".
+SUITE:        npm test (node test/run-all.mjs) -> PASS (37 files passed, 0 failed; was 36,
+              +1 new). load-smoke + check-imports advisory scripts also run clean except a
+              KNOWN-BENIGN check-imports flag (see note). No existing test weakened.
+NOTE (benign advisory): test/check-imports.mjs flags nimble-adapter.js for the symbol
+              `buildSystemPrompt` because that name also exists as an export in the
+              prompt-builder module and the checker's `\bsym\b` regex does not distinguish
+              a `this.`/method-qualified reference from a bare imported one. The adapter
+              defines buildSystemPrompt as its OWN method (the subtask explicitly requires
+              this method name); it imports nothing of that name. This is the same false-
+              positive class as the pre-existing registry.js `warn` flag. check-imports.mjs
+              is advisory only — it is NOT part of run-all.mjs / npm test — so the gate is
+              unaffected. The method name was kept as required.
+BEHAVIOURAL CHANGE: NONE for Ironsworn or any standalone (non-"nimble") world — the change
+              is a purely additive registry entry. On a world running system id "nimble",
+              the module now lights up: character stat reads (STR/DEX/INT/WIL), resource
+              pool reads (HP/Wounds/Mana/Hit Dice), a Nimble rules digest in the system
+              prompt, and map vision. All sheet-writing / Ironsworn-specific mechanics
+              (vows, momentum, progress tracks, oracles, moves, XP, compendium foes/assets)
+              remain cleanly unsupported and degrade through the existing spine armor.
+GATE:         Pre-approved adapter phase. The proposal (docs/PROPOSAL-multi-system-adapter-
+              architecture.md) records Phase 4 as the planned first third-party adapter
+              built on the Phase 1–3 seam. This change stays within the normal file/line
+              caps and touches NO locked/contract file, so no dedicated gate is consumed.
+ROLLBACK:     branch feat/phase4-nimble-adapter is unmerged; abandon the branch, or
+              git revert <phase4-commit-sha> (single commit removes the adapter, the two
+              hook lines, the test, and this entry). Independent of Phases 1–3.
+RESIDUAL RISK: LOW. Additive registration; resolution keys on game.system.id so no other
+              world is affected. The adapter is read-only and every read is null/try
+              guarded, so a partial or schema-drifted Nimble actor yields omitted fields
+              rather than a throw. The only deferred work is the (unverified) write surface,
+              intentionally left unsupported until it can be confirmed against a running
+              Nimble instance under its own gate.

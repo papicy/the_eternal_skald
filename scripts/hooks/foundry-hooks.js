@@ -15,6 +15,7 @@ import { IronswornData } from "../ironsworn-data.js";
 import { IronswornController } from "../ironsworn-controller.js";
 import { BrowserRAG } from "../browser-rag.js";
 import { SystemRegistry, registerSystem } from "../systems/registry.js";
+import { NimbleAdapter } from "../systems/nimble-adapter.js";
 
 
 /* ===================================================================== */
@@ -181,6 +182,10 @@ Hooks.once("ready", async () => {
   // getActiveAdapter() yet, so existing Ironsworn behaviour is unchanged.
   try {
     registerSystem("foundry-ironsworn", IronswornController);
+    // (Phase 4) Register the Nimble adapter. It lights up character READS,
+    // the Nimble rules digest, and map vision; Ironsworn-only mechanics
+    // (oracles / progress tracks / vows / momentum) report unsupported.
+    registerSystem("nimble", NimbleAdapter);
     console.log(LOG_PREFIX, "System adapter registry initialised —", JSON.stringify(SystemRegistry.list()));
   } catch (e) {
     console.warn(LOG_PREFIX, "System adapter registry init failed:", e?.message ?? e);
