@@ -3131,3 +3131,28 @@ ROLLBACK:     git revert <this commit> — removes the doc + the guard test. No 
 RESIDUAL RISK: NONE (no production code changed). The guard test could, in principle, flag a future
               legitimate top-level ApplicationV2 subclass; the documented lazy-factory convention is the
               intended pattern, so that is the desired behaviour.
+
+
+### [2026-06-13 21:35 EEST] — Release: bump v0.20.0 → v0.21.0 (Phase D)
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    RELEASE (gated — see Phase D gate above)
+PRE-FLIGHT:   Phase D feature work complete (U1, U4, U5, S1, Doc1, Doc2 all committed). Followed the
+              version-consistency contract enforced by test/version-consistency.test.mjs.
+EVIDENCE:     CLAIM: module.json is the single source of truth and 4 surfaces must agree (package.json,
+              README badge + server/health examples, CHANGELOG latest heading, download URL, description).
+              EVIDENCE: test/version-consistency.test.mjs:[1][5][6][8][10][11]. CONFIDENCE: HIGH BASIS:
+              read the test; ran it green (27/27).
+CHANGE:       module.json version 0.20.0→0.21.0, download URL tag →v0.21.0.zip, description rewritten to
+              a concise Phase D summary (still references vCURRENT, <4000 chars, no v0.4.0). package.json
+              version →0.21.0. README alpha badge + server-banner + health-JSON examples →v0.21.0.
+              Prepended a "## [0.21.0] — 2026-06-13" CHANGELOG section (Added/Changed/Documentation).
+FILES TOUCHED (4):
+  - module.json        (version, download, description)
+  - package.json       (version)
+  - README.md          (3 version literals)
+  - CHANGELOG.md        (+39 / -0, new release section)
+TESTS:        node test/version-consistency.test.mjs → 27/27; full suite → 53/53. JSON validated.
+SUITE:        npm test -> PASS (53 files)
+GATE:         Covered by the Phase D gate above (release of the gated feature set).
+ROLLBACK:     git revert <this commit> — restores the 0.20.0 version literals + CHANGELOG.
+RESIDUAL RISK: NONE. Metadata-only; no runtime behaviour change. CI version-consistency leg passes.

@@ -13,6 +13,46 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.21.0] — 2026-06-13
+
+A UX-polish & ecosystem pass ("Phase D"). Four player-facing UI features, an
+ApplicationV2 adoption convention, and two new documentation guides — all
+**additive / default-safe** and fully backwards-compatible. No existing
+setting, flag, command or i18n key was removed or renamed.
+
+### Added
+- **First-run onboarding wizard (U4).** A guided, multi-step `ApplicationV2`
+  wizard greets a new GM on first activation and surfaces the four settings
+  that matter most — AI provider + API key, system integration, narration tone
+  and journaling density — then records a hidden `firstRunComplete` world flag
+  so it never nags a returning world. A new **Show Setup Wizard** settings menu
+  re-opens it any time. GM-only, one-shot, and skipped if `ApplicationV2` is
+  unavailable.
+- **Tabbed settings panel (S1).** A custom `ApplicationV2` settings window
+  groups the module's 60+ settings into four tabs — AI Provider, Narrative,
+  Memory, Advanced — opened from a new settings menu. Purely an alternate
+  editor: every setting keeps `config: true`, so Foundry's native flat list is
+  unchanged, and unknown/future keys fall back to Advanced automatically.
+- **Inline command autocomplete (U5).** Typing `!` in the chat input now shows
+  a floating, filterable dropdown of available commands (with descriptions and
+  GM-only gating), navigable by arrow keys; Enter/Tab inserts the command. It
+  only rewrites the input text — it never sends or dispatches.
+- **In-game command reference (Doc1).** A new `!commands` window (and the
+  `docs/COMMANDS.md` reference) lists every command, searchable by name,
+  alias or description, built from the single-source command registry.
+
+### Changed
+- **ApplicationV2 adoption convention (U1).** All new UI is built on Foundry's
+  modern `ApplicationV2` framework via a lazy-factory pattern (documented in
+  `docs/UI-CONVENTIONS.md` and enforced by a guard test), and every classic
+  `Dialog` is now a graceful fallback behind a `DialogV2`-first path. No
+  deprecated `Application`/`FormApplication` base classes remain.
+
+### Documentation
+- **Adapter-development guide (Doc2).** `docs/ADAPTER-DEVELOPMENT.md` — a
+  step-by-step tutorial (with a worked D&D 5e example, capability map and
+  testing checklist) for adding support for a new game system.
+
 ## [0.20.0] — 2026-06-13
 
 A feature-enrichment pass ("Phase C"). Five player-facing features and two
