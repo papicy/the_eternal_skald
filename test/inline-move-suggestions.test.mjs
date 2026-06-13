@@ -132,12 +132,15 @@ ok(!/suggest the appropriate Ironsworn move and stat using the \[\[MOVE/.test(SR
   "!skald task no longer instructs the [[MOVE:…]] directive");
 
 // B4: the inline link-move handler still rolls through the progress-aware
-//     controller path (so progress moves work when clicked).
+//     triggerMove path (so progress moves work when clicked). Phase 3 routed
+//     this through the active system adapter — `sys().triggerMove` — which for
+//     a foundry-ironsworn world resolves to the very same IronswornController
+//     method, so the behavioural contract is unchanged.
 ok(/action === "link-move"/.test(SRC), "inline 'link-move' click handler present");
 const linkMoveIdx = SRC.indexOf('action === "link-move"');
 const linkMoveBlock = SRC.slice(linkMoveIdx, linkMoveIdx + 1500);
-ok(/IronswornController\.triggerMove/.test(linkMoveBlock),
-  "clicking an inline move link routes through IronswornController.triggerMove");
+ok(/(?:sys\(\)|IronswornController)\.triggerMove/.test(linkMoveBlock),
+  "clicking an inline move link routes through the active adapter's triggerMove");
 
 // B5: the renderer still emits a clickable link-move anchor for move names.
 ok(/data-skald-action="link-move"/.test(SRC) && /data-es-kind="move"/.test(SRC),
