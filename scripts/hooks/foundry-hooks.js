@@ -18,6 +18,7 @@ import { BrowserRAG } from "../browser-rag.js";
 import { SystemRegistry, registerSystem } from "../systems/registry.js";
 import { NimbleAdapter } from "../systems/nimble-adapter.js";
 import { Dnd5eAdapter } from "../systems/dnd5e-adapter.js";
+import { Pf2eAdapter } from "../systems/pf2e-adapter.js";
 import { getSettingsPanelClass } from "../ui/settings-panel.js";
 import { installChatAutocomplete } from "../ui/command-autocomplete.js";
 import { getWizardClass, maybeLaunchFirstRun } from "../ui/first-run-wizard.js";
@@ -241,6 +242,11 @@ Hooks.once("ready", async () => {
     // READS (abilities/HP/AC/spell slots/items), the 5e rules digest, and map
     // vision; all Ironsworn-only mechanical writes report unsupported.
     registerSystem("dnd5e", Dnd5eAdapter);
+    // (Phase E) Register the Pathfinder 2e adapter. Read-only: it lights up
+    // character READS (abilities/HP/AC/hero & focus points/items), the PF2e
+    // rules digest, and map vision; all Ironsworn-only mechanical writes report
+    // unsupported.
+    registerSystem("pf2e", Pf2eAdapter);
     console.log(LOG_PREFIX, "System adapter registry initialised —", JSON.stringify(SystemRegistry.list()));
   } catch (e) {
     console.warn(LOG_PREFIX, "System adapter registry init failed:", e?.message ?? e);

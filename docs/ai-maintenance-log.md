@@ -3414,3 +3414,42 @@ RESIDUAL RISK: LOW. No module is declared in module.json or required to be insta
               field is purely additive — the !timeline reader ignores unknown fields — so worlds without
               Simple Calendar behave exactly as before. DSN/MEJ are detection-only (no behavioural change
               this slice); DSN animation already works through the system Roll pipeline.
+
+### [2026-06-13 21:44 EEST] — §6.1: read-only Pathfinder 2e system adapter
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    feature (Phase E — §6.1 system adapter)
+PRE-FLIGHT:   Mirrored the proven read-only adapter shape (Dnd5eAdapter / NimbleAdapter): satisfy the
+              SystemAdapter contract, light up character READS + map-vision, and report unsupported() for
+              every Ironsworn-shaped write. Verified PF2e data paths: abilities expose `.mod` directly
+              (system.abilities.<k>.mod), hp/ac under system.attributes, hero points under
+              system.resources.heroPoints, focus pool under system.resources.focus, level under
+              system.details.level.value, and PF2e's `actor.class` / `actor.ancestry` convenience getters
+              + invested/carryType item flags.
+EVIDENCE:
+  CLAIM:      A new adapter can narrate PF2e characters with full sheet context yet drive no mechanics,
+              and the registry resolves it when "pf2e" is the active system.
+  EVIDENCE:   scripts/systems/pf2e-adapter.js — capabilities() leaves all write flags off;
+              foundry-hooks.js registerSystem("pf2e", Pf2eAdapter); test asserts getActiveAdapter()
+              resolves to it under game.system.id "pf2e".
+  CONFIDENCE: HIGH
+  BASIS:      70/70 unit assertions (contract + reads + prompt + unsupported writes + registry);
+              full suite 59/59.
+CHANGE:       NEW scripts/systems/pf2e-adapter.js — read-only Pf2eAdapter (system id "pf2e") mirroring
+              Dnd5eAdapter: six ability mods (with score→mod fallback), HP/AC + Hero/Focus point pools,
+              level/ancestry/class descriptor, invested/held/worn inventory highlights, and a PF2e
+              GUIDANCE system prompt (d20 + proficiency, degrees of success, three-action economy, hero/
+              focus points) that keeps dice in the players' hands and disclaims Ironsworn concepts. All
+              mechanical writes report unsupported(); rollOracle() → null. Registered after D&D 5e.
+FILES TOUCHED (3 — gated):
+  - scripts/systems/pf2e-adapter.js (+330 / -0, new, read-only adapter)
+  - scripts/hooks/foundry-hooks.js  (+7 / -0, import + registerSystem("pf2e", ...))
+  - test/pf2e-adapter.test.mjs       (+185 / -0, new — full contract + behaviour parity with 5e)
+TESTS:        node test/pf2e-adapter.test.mjs → 70/70; full suite → 59/59.
+SUITE:        npm test -> PASS (59 files)
+GATE:         Covered by the Phase E gate above (new read-only system adapter + registration).
+ROLLBACK:     git revert <this commit> — removes the adapter, its registration and its test. Ironsworn /
+              Nimble / 5e worlds are unaffected (the adapter only activates under game.system.id "pf2e").
+RESIDUAL RISK: LOW. Read-only and capability-gated: under PF2e the Skald narrates with character context
+              but emits no Ironsworn directives and performs no writes. Field paths follow the pf2e data
+              model and degrade to null/omitted if a future PF2e release renames them — no throw, just
+              less context.
