@@ -2888,3 +2888,271 @@ TESTS:        node test/version-consistency.test.mjs → 27/27; full suite 48/48
 GATE:         Covered by the Phase C gate above.
 ROLLBACK:     Revert this commit on phase-c-feature-enrichment.
 RESIDUAL RISK: NONE functional — metadata/docs only.
+
+### [2026-06-13 22:30 EEST] — Phase D UX-polish & ecosystem: recorded approval gate
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    IMPLEMENT + DOCUMENT (multi-task umbrella)
+TOKEN BUDGET: gated  |  USED: n/a  |  WITHIN BUDGET: GATED
+
+GATE REQUEST
+  TASK:        Implement Phase D (U1 ApplicationV2 adoption, U4 first-run wizard, U5 inline
+               command autocomplete, S1 settings tabs, Doc1 interactive command reference,
+               Doc2 adapter-development guide). Adds a NEW scripts/ui/ layer, new ApplicationV2
+               windows + templates, a new chat-input listener, tabbed settings UI, and two new
+               docs/*.md guides; several features exceed the §0 hard limits (3 files / 50 lines)
+               and touch the §5.1 public surface (new settings menu/button, new command for the
+               in-game command reference).
+  LIMIT HIT:   §0(1,2) hard limits (multi-file features > 50 lines); §5.1 public command/setting-
+               menu surface (new "Show wizard" + command-reference buttons/commands); new UI
+               module layer (scripts/ui/).
+  WHY NEEDED:  Explicit, detailed Phase D assignment from the maintainer (super-agent task) with a
+               per-feature spec list and an explicit "bump v0.20.0 → v0.21.0, commit after each
+               feature" directive; this entry records that human approval for the gate.
+  SMALLEST SAFE OPTION: implement each feature incrementally, one feature per commit, full suite
+               green after each; build new UI on ApplicationV2 + HandlebarsApplicationMixin
+               (Foundry-native, no new deps/build step); first-run detection via a single world
+               flag (default unset); all new settings default-safe; docs are pure markdown.
+  BLAST RADIUS: new scripts/ui/ (wizard, autocomplete, settings app, command-reference), templates
+               for the new windows, hooks wiring (first-run launch + chat-input listener),
+               core/settings.js (new menu/flag registrations), lang/en.json (i18n), docs/COMMANDS.md
+               + docs/ADAPTER-DEVELOPMENT.md (new); rollback = revert the per-feature commits on
+               phase-d-ux-ecosystem.
+GATE:         GRANTED by maintainer via the Phase D subtask assignment (this entry records it;
+               self-approval is NOT being used — the human assigned the work with specs).
+
+NOTE: Per-feature detailed log entries follow below as each lands.
+
+### [2026-06-13 22:45 EEST] — Doc2: adapter-development tutorial guide
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    DOCUMENT (gated — see Phase D gate above)
+PRE-FLIGHT:   Read adapter-interface.js (SYSTEM_CAPABILITIES, isValidAdapter, makeResult/unsupported,
+              SystemAdapter typedef), registry.js (registerSystem/getActiveAdapter), and the Nimble
+              adapter header as the read-only worked-example reference.
+EVIDENCE:     CLAIM: the adapter contract requires exactly four members and the registry resolves by
+              game.system.id with a NullAdapter fallback.
+              EVIDENCE: scripts/systems/adapter-interface.js:95-104 :: isValidAdapter; scripts/systems/
+              registry.js:96-108 :: getActive; scripts/systems/adapter-interface.js:37-55 :: SYSTEM_CAPABILITIES.
+              CONFIDENCE: HIGH  BASIS: read the exact lines this session.
+CHANGE:       Added docs/ADAPTER-DEVELOPMENT.md — a tutorial (vs. SYSTEMS.md reference): big-picture
+              diagram, the contract in one screen, capability-key table, a full step-by-step read-only
+              D&D 5e adapter skeleton (file → register → verify → grow into writes), capability-by-
+              capability priority guide, a testing checklist with a Foundry-global stubbing pattern,
+              and a "what your users will see" capability→feature map. Pure markdown; references the
+              Ironsworn / Nimble / Null adapters as required.
+FILES TOUCHED (1):
+  - docs/ADAPTER-DEVELOPMENT.md  (+332 / -0, new file)
+TESTS:        No code changed (DOCUMENT). Full suite run anyway: node test/run-all.mjs → 48/48 PASS.
+SUITE:        npm test -> PASS (48 files)
+GATE:         Covered by the Phase D gate above (documentation deliverable Doc2).
+ROLLBACK:     git revert <this commit> — removes the new doc only; zero code impact.
+RESIDUAL RISK: NONE — additive documentation; no source, settings, or commands touched.
+
+### [2026-06-13 23:05 EEST] — Doc1: command reference (docs/COMMANDS.md + in-game searchable window)
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    IMPLEMENT + DOCUMENT (gated — see Phase D gate above)
+PRE-FLIGHT:   Read COMMANDS map (constants.js:377-415), COMMAND_REGISTRY (command-registry.js), the
+              help() handler + insertion point (commands.js:189-206), and verified the ApplicationV2
+              render API (_renderHTML/_replaceHTML + DEFAULT_OPTIONS) via Foundry docs/wiki.
+EVIDENCE:     CLAIM: COMMAND_REGISTRY is the single source of truth (command/aliases/permission/help)
+              that both the doc and the window can render without drift.
+              EVIDENCE: scripts/chat/command-registry.js:37-63 :: COMMAND_REGISTRY; findCommand at :69-79.
+              CONFIDENCE: HIGH  BASIS: read the exact lines.
+              CLAIM: a top-level `extends foundry…` would throw under Node and break load-smoke; the
+              class must be lazy. EVIDENCE: test/_skald-source.mjs walks all scripts/ subdirs (so ui/
+              is in the corpus + load-smoke import path). CONFIDENCE: HIGH BASIS: read the helper.
+CHANGE:       (1) docs/COMMANDS.md — comprehensive, categorised reference with syntax, permission and
+              examples for every command. (2) NEW scripts/ui/command-reference.js — an ApplicationV2
+              window (lazy class, manual inline-HTML render matching the repo convention) with pure,
+              unit-tested helpers (buildCommandEntries/filterCommandEntries/renderReferenceHtml/
+              escapeRefHtml), a live search filter, and "Try it" buttons that pre-fill the chat input
+              (no dispatch). Falls back to the classic help card if ApplicationV2 is unavailable.
+              (3) wired a new !commands command: constants.js (COMMANDS_REF), command-registry.js
+              (descriptor), commands.js (commandReference handler + import).
+FILES TOUCHED (6 — gated):
+  - docs/COMMANDS.md                         (+170 / -0, new)
+  - scripts/ui/command-reference.js          (+210 / -0, new)
+  - scripts/chat/commands.js                 (+14 / -0)
+  - scripts/core/constants.js                (+2 / -0)
+  - scripts/chat/command-registry.js         (+1 / -0)
+  - test/command-reference.test.mjs          (+95 / -0, new)
+TESTS:        node test/command-reference.test.mjs → 22/22; full suite → 49/49. node --check on all
+              changed JS.
+SUITE:        npm test -> PASS (49 files)
+GATE:         Covered by the Phase D gate above (new ui/ layer + new public command).
+ROLLBACK:     git revert <this commit> — removes the doc, the UI module, the command token/descriptor/
+              handler and the test together; no other behaviour touched.
+RESIDUAL RISK: LOW. Purely additive: a new opt-in command that opens a read-only window; the window
+              never dispatches commands (only pre-fills the input). Lazy class keeps Node import safe.
+
+### [2026-06-13 23:30 EEST] — S1: tabbed settings panel (ApplicationV2)
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    IMPLEMENT (gated — see Phase D gate above)
+PRE-FLIGHT:   Enumerated all 67 register(MODULE_ID,"…") keys (settings.js), confirmed no registerMenu
+              exists yet, located the Settings.register() call site in the init hook (foundry-hooks.js)
+              and the en.json structure. Verified ApplicationV2 form handling (tag:"form" + form.handler
+              + formData.object) via Foundry docs.
+EVIDENCE:     CLAIM: every Skald setting is registered with config:true, so a custom panel is purely an
+              ADDITIVE alternate editor — the native flat list is untouched.
+              EVIDENCE: scripts/core/settings.js (67 game.settings.register calls, all config:true save
+              the few storage flags filtered at runtime by cfg.config!==true). CONFIDENCE: HIGH BASIS:
+              grepped + read the registry. CLAIM: init hook is the correct place to registerMenu (game
+              ready). EVIDENCE: foundry-hooks.js:57-70 :: Hooks.once("init") → Settings.register().
+              CONFIDENCE: HIGH BASIS: read the lines.
+CHANGE:       NEW scripts/ui/settings-panel.js — an ApplicationV2 form (lazy class, manual inline-HTML
+              render) that reads each setting's REGISTERED definition (game.settings.settings) + current
+              value and renders it under one of four tabs (AI Provider / Narrative / Memory / Advanced)
+              via the pure, unit-tested categorizeSetting/assignSettingsToTabs (unknown keys → Advanced,
+              so nothing is ever hidden). World-scoped controls are disabled for non-GMs; submit writes
+              only changed, permitted keys through the public game.settings.set API. Registered a
+              "tabbedSettings" settings MENU in the init hook (foundry-hooks.js) + en.json i18n. No
+              setting registered, renamed or removed; native flat list unchanged.
+FILES TOUCHED (4 — gated):
+  - scripts/ui/settings-panel.js        (+205 / -0, new)
+  - scripts/hooks/foundry-hooks.js      (+24 / -0)
+  - lang/en.json                        (+7 / -0)
+  - test/settings-panel.test.mjs        (+85 / -0, new)
+TESTS:        node test/settings-panel.test.mjs → 22/22 (incl. a drift guard: every registered setting
+              maps to a valid tab); full suite → 50/50. node --check on changed JS; en.json valid JSON.
+SUITE:        npm test -> PASS (50 files)
+GATE:         Covered by the Phase D gate above (new ui/ layer + new settings menu surface).
+ROLLBACK:     git revert <this commit> — removes the panel, the menu registration and the test; the
+              native settings list is unaffected at every step.
+RESIDUAL RISK: LOW. Additive alternate editor; writes go through the same public API as the native
+              panel and only for permitted, changed keys. Menu registration is wrapped + skipped if
+              ApplicationV2 is unavailable.
+
+### [2026-06-13 23:55 EEST] — U5: inline command autocomplete
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    IMPLEMENT (gated — see Phase D gate above)
+PRE-FLIGHT:   Confirmed the chat input is textarea#chat-message and that renderChatLog is the render
+              hook (foundry-hooks.js already registers chatMessage/preCreateChatMessage). Reused
+              COMMAND_REGISTRY (command + aliases + permission + help) as the data source.
+EVIDENCE:     CLAIM: COMMAND_REGISTRY carries everything the dropdown needs (token, aliases, permission,
+              help). EVIDENCE: scripts/chat/command-registry.js:37-63 :: COMMAND_REGISTRY.
+              CONFIDENCE: HIGH BASIS: read the lines. CLAIM: chat input is #chat-message and listeners
+              attach on render. EVIDENCE: prefillChatInput selectors mirror the same id used by Doc1;
+              renderChatLog is the standard chat render hook. CONFIDENCE: MEDIUM BASIS: standard
+              Foundry id + the install fn probes 4 selectors and degrades to a no-op if absent.
+CHANGE:       NEW scripts/ui/command-autocomplete.js — pure matching (autocompleteQuery: trigger only
+              on a bare "!"-token, suppress after a space; matchCommands: prefix-match token+aliases,
+              GM filtering via includeGm, sorted + capped at 8) plus a defensive DOM layer that renders
+              a floating, Foundry-styled dropdown above the chat input with ArrowUp/Down navigation,
+              Enter/Tab to insert the token (+trailing space — never dispatches), Escape/blur to close.
+              Wired in foundry-hooks.js on renderChatLog + a ready fallback; attach is idempotent.
+FILES TOUCHED (3 — gated):
+  - scripts/ui/command-autocomplete.js   (+185 / -0, new)
+  - scripts/hooks/foundry-hooks.js       (+12 / -0)
+  - test/command-autocomplete.test.mjs   (+80 / -0, new)
+TESTS:        node test/command-autocomplete.test.mjs → 24/24; full suite → 51/51. node --check on
+              changed JS.
+SUITE:        npm test -> PASS (51 files)
+GATE:         Covered by the Phase D gate above (new ui/ layer + chat-input listener).
+ROLLBACK:     git revert <this commit> — removes the module + the two install hooks; chat input behaves
+              exactly as before.
+RESIDUAL RISK: LOW. The dropdown only rewrites the input text (never sends/dispatches). Listener attach
+              is idempotent and fully guarded; if the input can't be found the feature is simply absent.
+
+
+### [2026-06-13 21:07 EEST] — U4: first-run onboarding wizard
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    IMPLEMENT (gated — see Phase D gate above)
+PRE-FLIGHT:   Confirmed the four critical settings already exist and their exact keys/types —
+              providerPreset (String, choices), apiKey (String), ironswornIntegration (Boolean),
+              narrativeTone (String, choices), journalingDensity (String, choices), intensity
+              (Number, range). Reused the S1 lazy-ApplicationV2 + registerMenu wiring pattern so the
+              file imports safely under plain Node (load-smoke).
+EVIDENCE:     CLAIM: the wizard's target settings are registered with these keys/types. EVIDENCE:
+              scripts/core/settings.js:92 (providerPreset), :110 (apiKey), :178 (intensity),
+              :193 (narrativeTone), :251 (ironswornIntegration), :564 (journalingDensity).
+              CONFIDENCE: HIGH BASIS: read the registration blocks. CLAIM: registerMenu + lazy class
+              is the established pattern. EVIDENCE: foundry-hooks.js:82 (tabbedSettings menu),
+              settings-panel.js:184 (getSettingsPanelClass lazy factory). CONFIDENCE: HIGH BASIS: read
+              the lines; mirrored them.
+CHANGE:       NEW scripts/ui/first-run-wizard.js — pure step/validation logic (WIZARD_STEPS ×4 with
+              clampStep/getStep/next/prev/isLastStep navigation, isFirstRun flag check,
+              providerNeedsKey + validateStep gating the API-key step, wizardSettingKeys +
+              collectWizardValues with number coercion & unknown-key rejection, escapeWizHtml) plus a
+              lazy ApplicationV2 multi-step form that reads/writes ONLY existing settings via the public
+              game.settings API and sets firstRunComplete on finish. Registered a NEW hidden world flag
+              "firstRunComplete" (config:false, default false) in settings.js. Wired in foundry-hooks.js:
+              a GM-restricted "firstRunWizard" settings menu (re-open any time) + a ready hook that
+              auto-launches once for a new world (maybeLaunchFirstRun: GM-only, AI-Mode-on, flag-unset).
+              Added en.json wizard.menu.{name,label,hint}.
+FILES TOUCHED (5 — gated):
+  - scripts/ui/first-run-wizard.js      (+317 / -0, new)
+  - scripts/core/settings.js            (+15 / -0)
+  - scripts/hooks/foundry-hooks.js      (+30 / -0)
+  - lang/en.json                        (+7 / -0)
+  - test/first-run-wizard.test.mjs      (+118 / -0, new)
+TESTS:        node test/first-run-wizard.test.mjs → 53/53 (steps, clamping, validation, key-collection,
+              escaping; wiring + i18n guards; Node-import safety); full suite → 52/52. node --check on
+              changed JS; en.json valid JSON.
+SUITE:        npm test -> PASS (52 files)
+GATE:         Covered by the Phase D gate above (new ui/ layer + new settings-menu surface + new flag).
+ROLLBACK:     git revert <this commit> — removes the wizard module, the flag, the menu + ready hook and
+              the test. Existing settings and onboarding-free startup are unaffected at every step.
+RESIDUAL RISK: LOW. The wizard only writes settings the user already owns, through the same public API
+              as the native panel, and only for permitted keys. Auto-launch is GM-only, one-shot
+              (flag-guarded) and skipped if ApplicationV2 is unavailable; the flag defaults false so
+              existing worlds see the wizard once but can dismiss/finish it immediately.
+
+
+### [2026-06-13 21:25 EEST] — U1: ApplicationV2 adoption — audit, convention doc + guard test
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    INVESTIGATE + IMPLEMENT (gated — see Phase D gate above)
+PRE-FLIGHT:   Audited every UI surface for the deprecated v1 base classes and the dialog API in use,
+              to determine what (if anything) needs migrating for U1.
+EVIDENCE:     CLAIM: there are NO `extends FormApplication` / `extends Application` usages in scripts/.
+              EVIDENCE: grep over scripts/ returned zero matches (only ApplicationV2 + DialogV2).
+              CONFIDENCE: HIGH BASIS: ran the grep. CLAIM: all new Phase D UI is built on ApplicationV2.
+              EVIDENCE: settings-panel.js:184 getSettingsPanelClass, first-run-wizard.js getWizardClass,
+              command-reference.js:146 getReferenceAppClass — all lazy ApplicationV2 factories.
+              CONFIDENCE: HIGH BASIS: read the lines. CLAIM: all 5 classic `new Dialog(` calls are
+              guarded fallbacks behind a DialogV2-first path. EVIDENCE: commands.js:940 & :1535,
+              integration.js:1240, token-control.js:364, progress.js:904 — each preceded by a
+              `const DV2 = foundry?.applications?.api?.DialogV2` preference + "fall back to classic
+              Dialog" comment. CONFIDENCE: HIGH BASIS: read the surrounding lines.
+CONCLUSION:   U1 is already satisfied by construction — no migration of deprecated classes is needed.
+              The right deliverable is to CODIFY the convention so it stays true going forward.
+CHANGE:       NEW docs/UI-CONVENTIONS.md — documents (1) the lazy ApplicationV2 factory pattern for new
+              windows (so plain-Node load-smoke import never throws), (2) the DialogV2-first /
+              classic-Dialog-fallback pattern for prompts, (3) the three hard rules. NEW
+              test/ui-conventions.test.mjs — static source guard enforcing: no v1 base classes; every
+              `new Dialog(` co-occurs with DialogV2; every scripts/ui/*.js window module guards on the
+              Foundry global, returns null when absent, and defines no top-level class. NO production
+              code changed — purely documentation + a regression guard.
+FILES TOUCHED (2 — gated):
+  - docs/UI-CONVENTIONS.md               (+118 / -0, new)
+  - test/ui-conventions.test.mjs         (+96 / -0, new)
+TESTS:        node test/ui-conventions.test.mjs → 17/17; full suite → 53/53.
+SUITE:        npm test -> PASS (53 files)
+GATE:         Covered by the Phase D gate above (docs + test only; no behaviour change).
+ROLLBACK:     git revert <this commit> — removes the doc + the guard test. No runtime impact.
+RESIDUAL RISK: NONE (no production code changed). The guard test could, in principle, flag a future
+              legitimate top-level ApplicationV2 subclass; the documented lazy-factory convention is the
+              intended pattern, so that is the desired behaviour.
+
+
+### [2026-06-13 21:35 EEST] — Release: bump v0.20.0 → v0.21.0 (Phase D)
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    RELEASE (gated — see Phase D gate above)
+PRE-FLIGHT:   Phase D feature work complete (U1, U4, U5, S1, Doc1, Doc2 all committed). Followed the
+              version-consistency contract enforced by test/version-consistency.test.mjs.
+EVIDENCE:     CLAIM: module.json is the single source of truth and 4 surfaces must agree (package.json,
+              README badge + server/health examples, CHANGELOG latest heading, download URL, description).
+              EVIDENCE: test/version-consistency.test.mjs:[1][5][6][8][10][11]. CONFIDENCE: HIGH BASIS:
+              read the test; ran it green (27/27).
+CHANGE:       module.json version 0.20.0→0.21.0, download URL tag →v0.21.0.zip, description rewritten to
+              a concise Phase D summary (still references vCURRENT, <4000 chars, no v0.4.0). package.json
+              version →0.21.0. README alpha badge + server-banner + health-JSON examples →v0.21.0.
+              Prepended a "## [0.21.0] — 2026-06-13" CHANGELOG section (Added/Changed/Documentation).
+FILES TOUCHED (4):
+  - module.json        (version, download, description)
+  - package.json       (version)
+  - README.md          (3 version literals)
+  - CHANGELOG.md        (+39 / -0, new release section)
+TESTS:        node test/version-consistency.test.mjs → 27/27; full suite → 53/53. JSON validated.
+SUITE:        npm test -> PASS (53 files)
+GATE:         Covered by the Phase D gate above (release of the gated feature set).
+ROLLBACK:     git revert <this commit> — restores the 0.20.0 version literals + CHANGELOG.
+RESIDUAL RISK: NONE. Metadata-only; no runtime behaviour change. CI version-consistency leg passes.

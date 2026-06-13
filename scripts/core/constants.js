@@ -383,6 +383,8 @@ export const COMMANDS = Object.freeze({
   LORE:     "!lore",
   COMBAT:   "!combat",
   HELP:     "!skald-help",
+  // --- Interactive command reference (v0.21.0, Doc1) ---
+  COMMANDS_REF: "!commands",
   // --- Journal system (v0.4.0) ---
   JOURNAL:  "!journal",
   JOURNALS: "!journals",

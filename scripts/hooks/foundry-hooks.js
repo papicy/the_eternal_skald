@@ -16,6 +16,9 @@ import { IronswornController } from "../ironsworn-controller.js";
 import { BrowserRAG } from "../browser-rag.js";
 import { SystemRegistry, registerSystem } from "../systems/registry.js";
 import { NimbleAdapter } from "../systems/nimble-adapter.js";
+import { getSettingsPanelClass } from "../ui/settings-panel.js";
+import { installChatAutocomplete } from "../ui/command-autocomplete.js";
+import { getWizardClass, maybeLaunchFirstRun } from "../ui/first-run-wizard.js";
 
 
 /* ===================================================================== */
@@ -66,6 +69,52 @@ Hooks.once("init", () => {
     console.log(LOG_PREFIX, "Settings registered.");
   } catch (err) {
     console.error(LOG_PREFIX, "Settings.register() failed:", err);
+  }
+
+  /* === Tabbed settings panel (v0.21.0, S1) ============================
+   * Register a settings MENU that opens the custom ApplicationV2 panel
+   * grouping the module's settings into tabs. Purely additive — the native
+   * flat list (every setting keeps config:true) is unchanged. Skipped
+   * gracefully if ApplicationV2 is unavailable.
+   * =================================================================== */
+  try {
+    const PanelCls = getSettingsPanelClass();
+    if (PanelCls) {
+      game.settings.registerMenu(MODULE_ID, "tabbedSettings", {
+        name: game.i18n.localize("ETERNAL_SKALD.settingsPanel.menu.name"),
+        label: game.i18n.localize("ETERNAL_SKALD.settingsPanel.menu.label"),
+        hint: game.i18n.localize("ETERNAL_SKALD.settingsPanel.menu.hint"),
+        icon: "fas fa-sliders",
+        type: PanelCls,
+        restricted: false
+      });
+      console.log(LOG_PREFIX, "Tabbed settings menu registered.");
+    }
+  } catch (err) {
+    console.warn(LOG_PREFIX, "Tabbed settings menu registration failed:", err?.message ?? err);
+  }
+
+  /* === First-run setup wizard (v0.21.0, U4) ===========================
+   * Register a settings MENU that re-opens the guided onboarding wizard at
+   * any time. The wizard also launches itself automatically on first run
+   * (see the ready hook below). Purely additive; skipped if ApplicationV2
+   * is unavailable.
+   * =================================================================== */
+  try {
+    const WizardCls = getWizardClass();
+    if (WizardCls) {
+      game.settings.registerMenu(MODULE_ID, "firstRunWizard", {
+        name: game.i18n.localize("ETERNAL_SKALD.wizard.menu.name"),
+        label: game.i18n.localize("ETERNAL_SKALD.wizard.menu.label"),
+        hint: game.i18n.localize("ETERNAL_SKALD.wizard.menu.hint"),
+        icon: "fas fa-hat-wizard",
+        type: WizardCls,
+        restricted: true
+      });
+      console.log(LOG_PREFIX, "First-run wizard menu registered.");
+    }
+  } catch (err) {
+    console.warn(LOG_PREFIX, "First-run wizard menu registration failed:", err?.message ?? err);
   }
 
   /* === Keybinding: toggle AI Mode (v0.3.2) =============================
@@ -687,3 +736,23 @@ Hooks.once("ready", () => {
   } catch (_) { /* defensive */ }
 });
 
+
+// --- Inline command autocomplete (v0.21.0, U5) ----------------------
+// Attach the "!"-command autocomplete dropdown to the chat input. We try on
+// every chat-log render (covers re-renders / popout) and once on ready as a
+// fallback. attachAutocomplete() is idempotent (flags the element), so
+// repeated calls are safe. Fully defensive — a no-op if the input is absent.
+Hooks.on("renderChatLog", (_app, html) => {
+  try { installChatAutocomplete(html); } catch (_) { /* defensive */ }
+});
+Hooks.once("ready", () => {
+  try { installChatAutocomplete(); } catch (_) { /* defensive */ }
+});
+
+// --- First-run onboarding wizard (v0.21.0, U4) ----------------------
+// On the very first ready of a new world (firstRunComplete flag unset), the
+// GM is greeted with the guided setup wizard. Fully defensive and a no-op
+// for returning worlds, players, or when AI Mode is off.
+Hooks.once("ready", () => {
+  try { maybeLaunchFirstRun(); } catch (_) { /* defensive */ }
+});

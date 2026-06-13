@@ -19,6 +19,7 @@ import { IronswornData } from "../ironsworn-data.js";
 import { getActiveAdapter } from "../systems/registry.js";
 import { BrowserRAG } from "../browser-rag.js";
 import { findCommand } from "./command-registry.js";
+import { openCommandReference } from "../ui/command-reference.js";
 
 /**
  * Master dispatcher. Returns true if the message was a recognised Skald
@@ -187,6 +188,20 @@ export const Commands = {
       <p class="es-help-aside"><em>GM-only:</em> Combat auto-control may be toggled in <strong>Module Settings → The Eternal Skald</strong>.</p>
     `;
     return Chat.postSkald(body, { variant: "help", title: "Commands of the Skald" });
+  },
+
+  /* ----------------------------- !commands ------------------------- */
+  /**
+   * (v0.21.0, Doc1) Open the interactive, searchable command reference
+   * window (ApplicationV2). Falls back to the classic !skald-help card when
+   * ApplicationV2 is unavailable, so the command always does something useful.
+   */
+  commandReference() {
+    let shown = false;
+    try { shown = openCommandReference(); }
+    catch (e) { console.warn(LOG_PREFIX, "commandReference failed:", e?.message ?? e); }
+    if (!shown) return this.help();
+    return true;
   },
 
   /* ----------------------------- !progress ------------------------- */
