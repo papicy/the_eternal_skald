@@ -16,6 +16,7 @@ import { IronswornController } from "../ironsworn-controller.js";
 import { BrowserRAG } from "../browser-rag.js";
 import { SystemRegistry, registerSystem } from "../systems/registry.js";
 import { NimbleAdapter } from "../systems/nimble-adapter.js";
+import { Dnd5eAdapter } from "../systems/dnd5e-adapter.js";
 import { getSettingsPanelClass } from "../ui/settings-panel.js";
 import { installChatAutocomplete } from "../ui/command-autocomplete.js";
 import { getWizardClass, maybeLaunchFirstRun } from "../ui/first-run-wizard.js";
@@ -235,6 +236,10 @@ Hooks.once("ready", async () => {
     // the Nimble rules digest, and map vision; Ironsworn-only mechanics
     // (oracles / progress tracks / vows / momentum) report unsupported.
     registerSystem("nimble", NimbleAdapter);
+    // (Phase E) Register the D&D 5e adapter. Read-only: it lights up character
+    // READS (abilities/HP/AC/spell slots/items), the 5e rules digest, and map
+    // vision; all Ironsworn-only mechanical writes report unsupported.
+    registerSystem("dnd5e", Dnd5eAdapter);
     console.log(LOG_PREFIX, "System adapter registry initialised —", JSON.stringify(SystemRegistry.list()));
   } catch (e) {
     console.warn(LOG_PREFIX, "System adapter registry init failed:", e?.message ?? e);

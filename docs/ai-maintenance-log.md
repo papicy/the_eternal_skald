@@ -3293,3 +3293,38 @@ ROLLBACK:     git revert <this commit> — removes the ruleset block + test. Cla
               either way (block returns "" for them).
 RESIDUAL RISK: LOW. Additive, default-safe, fantasy worlds unchanged. The setting hint only appears
               when a Starforged-family ruleset flag is the sole active ruleset.
+
+
+### [2026-06-13 21:32 EEST] — D&D 5e read-only system adapter
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    IMPLEMENT (gated — see Phase E gate above)
+PRE-FLIGHT:   Read scripts/systems/nimble-adapter.js IN FULL (the canonical read-only adapter
+              template) + test/nimble-adapter.test.mjs (the test template) + adapter-interface.js
+              (SYSTEM_CAPABILITIES + helpers) + the registration site in foundry-hooks.js.
+EVIDENCE:     CLAIM: a read-only adapter mirrors NimbleAdapter exactly — frozen object, isActive()
+              tracks game.system.id, capabilities() lights up characterReads + mapVision only, every
+              write returns unsupported(), reads use foundry.utils.getProperty defensively and never
+              throw. EVIDENCE: nimble-adapter.js:78-110 (identity/caps), :112-135 (getActiveCharacter),
+              :330-348 (unsupported writes). CONFIDENCE: HIGH BASIS: read the whole file.
+              CLAIM: adapters register via registerSystem(id, adapter) in foundry-hooks.js.
+              EVIDENCE: foundry-hooks.js:233-237. CONFIDENCE: HIGH BASIS: read the lines.
+CHANGE:       NEW scripts/systems/dnd5e-adapter.js — read-only Dnd5eAdapter (system id "dnd5e")
+              mirroring NimbleAdapter: six ability mods (STR/DEX/CON/INT/WIS/CHA, with a score→mod
+              fallback), HP/AC/spell-slot (L1–L9 + pact) resource pools, class/level + equipped /
+              attuned inventory highlights, and a 5e GUIDANCE system prompt that keeps dice in the
+              players' hands and disclaims Ironsworn concepts. All mechanical writes report
+              unsupported(); rollOracle() → null. Registered after Nimble in foundry-hooks.js.
+FILES TOUCHED (3 — gated):
+  - scripts/systems/dnd5e-adapter.js (+392 / -0, new, read-only adapter)
+  - scripts/hooks/foundry-hooks.js   (+5 / -0, import + registerSystem("dnd5e", …))
+  - test/dnd5e-adapter.test.mjs      (+180 / -0, new — full contract + behaviour parity with Nimble)
+TESTS:        node test/dnd5e-adapter.test.mjs → 69/69; full suite → 56/56.
+SUITE:        npm test -> PASS (56 files)
+GATE:         Covered by the Phase E gate above (new system adapter + registration).
+ROLLBACK:     git revert <this commit> — removes the adapter, its registration and its test. Ironsworn
+              and Nimble worlds are unaffected (the adapter only activates under game.system.id "dnd5e").
+RESIDUAL RISK: LOW. Read-only and capability-gated: under 5e the Skald narrates with character context
+              but emits no Ironsworn directives and performs no writes. Data-path reads are all
+              defended; field paths follow the dnd5e data model (system.abilities.*.mod,
+              attributes.hp/ac, spells.spell<N>) and degrade to null/omitted if a future 5e release
+              renames them — no throw, just less context.
