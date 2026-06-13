@@ -745,6 +745,54 @@ full breakdown of the decomposition, module-by-module notes, and the commit hist
 
 ## License
 
-This work is licensed under a [![CC BY-SA 4.0][cc-by-sa-shield]][cc-by-sa]
+This work is licensed under a
+[Creative Commons Attribution-ShareAlike 4.0 International License][cc-by-sa].
 
-Buy the official Ironsworn books to support the creator.
+[![CC BY-SA 4.0][cc-by-sa-image]][cc-by-sa]
+[![CC BY-SA 4.0][cc-by-sa-shield]][cc-by-sa]
+
+See [`LICENSE.md`](LICENSE.md) for the full license text. In short, you are free
+to **share** and **adapt** this module for any purpose, even commercially, as
+long as you give appropriate credit and distribute your contributions under the
+same license.
+
+### Attribution
+
+**The Eternal Skald** is an unofficial, fan-made Foundry VTT module. It is based
+on several works created by **Shawn Tomkin** — including
+[**Ironsworn**](https://tomkinpress.com/pages/ironsworn),
+[**Ironsworn: Delve**](https://tomkinpress.com/pages/ironsworn-delve),
+[**Ironsworn: Starforged**](https://tomkinpress.com/pages/ironsworn-starforged),
+and [**Sundered Isles**](https://tomkinpress.com/pages/sundered-isles) — which
+are licensed under the
+[Creative Commons Attribution-NonCommercial-ShareAlike 4.0 License (CC-BY-NC-SA)](http://creativecommons.org/licenses/by-nc-sa/4.0/),
+as detailed at <https://tomkinpress.com/pages/licensing>.
+
+This module also builds on the
+[Ironsworn & Starforged system for Foundry VTT](https://github.com/ben/foundry-ironsworn)
+by Ben and contributors.
+
+### Support the creator
+
+If you enjoy the Ironsworn games, please **buy the official books** to support
+their creator, Shawn Tomkin:
+
+- [Ironsworn](https://tomkinpress.com/pages/ironsworn) (the core rules are also available free)
+- [Ironsworn: Delve](https://tomkinpress.com/pages/ironsworn-delve)
+- [Ironsworn: Starforged](https://tomkinpress.com/pages/ironsworn-starforged)
+- [Sundered Isles](https://tomkinpress.com/pages/sundered-isles)
+
+All official titles are available from [Tomkin Press](https://tomkinpress.com/).
+
+### Disclaimer
+
+This is an independent, unofficial project and is **not affiliated with,
+endorsed by, or sponsored by** Shawn Tomkin, Tomkin Press, or Foundry Gaming LLC.
+*Ironsworn*, *Ironsworn: Delve*, *Ironsworn: Starforged*, and *Sundered Isles*
+are trademarks of their respective owners. All trademarks are the property of
+their respective owners and are used here for identification purposes only. The
+software is provided "as is", without warranty of any kind.
+
+[cc-by-sa]: http://creativecommons.org/licenses/by-sa/4.0/
+[cc-by-sa-image]: https://licensebuttons.net/l/by-sa/4.0/88x31.png
+[cc-by-sa-shield]: https://img.shields.io/badge/License-CC%20BY--SA%204.0-lightgrey.svg
