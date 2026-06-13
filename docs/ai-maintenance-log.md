@@ -3248,3 +3248,48 @@ ROLLBACK:     git revert <this commit> — removes the tools layer, chatWithTool
 RESIDUAL RISK: LOW. The whole feature is dormant unless a GM turns on autonomousTools. The ai/ layer
               performs no Foundry writes (verified: registry/executor import nothing from Foundry; all
               writes are in narrative/tool-runner.js). No existing call path or contract changed.
+
+
+### [2026-06-13 21:29 EEST] — Starforged: ruleset-aware narration (NOT a duplicate adapter)
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    INVESTIGATE + IMPLEMENT (gated — see Phase E gate above)
+PRE-FLIGHT:   The Phase E spec asks for a "Starforged adapter mirroring nimble". Before building one,
+              audited how the repo already handles Starforged (engineering principle: repo is the
+              source of truth; smallest safe change).
+EVIDENCE:     CLAIM: Starforged is the SAME foundry-ironsworn system module, already served end-to-end
+              by the ruleset-aware IronswornController — NOT a distinct game.system.id.
+              EVIDENCE: scripts/ironsworn/character.js:197-217 getRuleset()/isStarforgedRuleset()
+              read the four foundry-ironsworn world flags; ironsworn/internals.js:197 indexes
+              `foundry-ironsworn.starforgedmoves`; ironsworn/progress.js:77-90 writes legacy-tick XP
+              for the starforged model; combat.js:291 / mechanics.js:123 pull Starforged
+              encounters/assets. CONFIDENCE: HIGH BASIS: read the lines.
+              CLAIM: a second adapter for "foundry-ironsworn" would be ARCHITECTURALLY WRONG — the
+              registry keys ONE adapter per system id and a re-register REPLACES the incumbent.
+              EVIDENCE: scripts/systems/registry.js:50-66 (_adapters.set(id, …); "replacing existing
+              adapter" warning). CONFIDENCE: HIGH BASIS: read the lines. The spec's own §6.1 row
+              agrees ("Same system module, different game … Much can be shared with the Ironsworn
+              adapter").
+CONCLUSION:   Building scripts/systems/starforged-adapter.js would shadow the rich IronswornController
+              with a thin duplicate and break Ironsworn worlds. Starforged mechanics are ALREADY
+              supported. The genuine remaining gap is NARRATIVE: the AI was always told the generic
+              "Ironsworn / Starforged system" and defaulted to Iron-age fantasy imagery, with no
+              signal when a Starforged / Sundered Isles (sci-fi / age-of-sail) ruleset is active.
+CHANGE:       NEW pure exported prompt-builder helper buildRulesetSettingBlock(): when game.system.id
+              is foundry-ironsworn AND only a Starforged-family ruleset flag is set (classic/delve take
+              priority — parity with character.js getRuleset), it injects a short SETTING block steering
+              genre, imagery and progress vocabulary (legacy tracks: Quests/Bonds/Discoveries) toward
+              Starforged or Sundered Isles. Wired into the system-prompt array after toneBlock. Reads
+              only (ai/ layer); never throws; classic/non-Ironsworn → "" so existing behaviour is
+              byte-identical.
+FILES TOUCHED (2 — gated):
+  - scripts/ai/prompt-builder.js     (+43 / -1, new buildRulesetSettingBlock + array wiring)
+  - test/starforged-ruleset.test.mjs (+82 / -0, new — structural + behavioural over all ruleset states)
+TESTS:        node test/starforged-ruleset.test.mjs → 13/13; full suite → 55/55.
+SUITE:        npm test -> PASS (55 files)
+GATE:         Covered by the Phase E gate above. NOTE: the evidence-based decision was to NOT add a
+              duplicate system adapter (it would violate the one-adapter-per-system-id invariant and
+              regress Ironsworn worlds) — the smallest safe change that fulfils the Starforged intent.
+ROLLBACK:     git revert <this commit> — removes the ruleset block + test. Classic worlds unaffected
+              either way (block returns "" for them).
+RESIDUAL RISK: LOW. Additive, default-safe, fantasy worlds unchanged. The setting hint only appears
+              when a Starforged-family ruleset flag is the sole active ruleset.
