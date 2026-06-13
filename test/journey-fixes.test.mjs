@@ -108,5 +108,41 @@ const integration = readFileSync(join(SCRIPTS, "narrative", "integration.js"), "
      "[4] _parseFromHtml wraps its body in try/catch");
 }
 
+/* --------------------------------------------------------------------- *
+ * [5] Fix #5 — recent intent persists across reload (integration.js).
+ *     _lastIntent/_lastIntentTs are backed by localStorage so a Foundry
+ *     reload restores RECENT intent instead of falling back to older facts.
+ *     Must degrade to a no-op when localStorage is unavailable.
+ * --------------------------------------------------------------------- */
+{
+  ok(/get _lastIntent\(\)\s*\{[\s\S]*?_loadIntent\(\)/.test(integration),
+     "[5] _lastIntent getter restores from persistent store");
+  ok(/set _lastIntent\([^)]*\)\s*\{[\s\S]*?_saveIntent\(\)/.test(integration),
+     "[5] _lastIntent setter persists to store");
+  ok(/get _lastIntentTs\(\)/.test(integration) && /set _lastIntentTs\(/.test(integration),
+     "[5] _lastIntentTs is also a persisted accessor");
+  ok(/globalThis\.localStorage\?\./.test(integration),
+     "[5] persistence uses optional-chained localStorage (degrades to no-op)");
+  ok(/_loadIntent\(\)\s*\{[\s\S]*?try\s*\{[\s\S]*?catch/.test(integration),
+     "[5] _loadIntent is fail-closed (try/catch around storage read)");
+}
+
+/* --------------------------------------------------------------------- *
+ * [6] Fix #3 — weak-hit framing on Undertake a Journey (option b).
+ *     RAW kept: a weak hit STILL marks progress (it is inside the hit
+ *     branch, gated by `if (!strong)`), but the narration is framed as a
+ *     setback/mishap "at a cost" while the party stays on the path.
+ * --------------------------------------------------------------------- */
+{
+  ok(/if \(!strong\) notes\.push\(/.test(integration),
+     "[6] weak-hit branch adds a framing note only when not a strong hit");
+  ok(/WEAK HIT on[\s\S]*?progress IS marked, but the party advances AT A COST/.test(integration),
+     "[6] weak-hit note keeps RAW progress yet frames it as a cost");
+  // The weak-hit framing must live INSIDE the hit branch (progress still marked),
+  // i.e. after markProgressByRank — NOT in the miss branch.
+  ok(/markProgressByRank[\s\S]*?if \(!strong\) notes\.push\([\s\S]*?AT A COST/.test(integration),
+     "[6] weak framing sits after markProgressByRank (progress is still marked)");
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
