@@ -18,6 +18,7 @@ import { SystemRegistry, registerSystem } from "../systems/registry.js";
 import { NimbleAdapter } from "../systems/nimble-adapter.js";
 import { getSettingsPanelClass } from "../ui/settings-panel.js";
 import { installChatAutocomplete } from "../ui/command-autocomplete.js";
+import { getWizardClass, maybeLaunchFirstRun } from "../ui/first-run-wizard.js";
 
 
 /* ===================================================================== */
@@ -91,6 +92,29 @@ Hooks.once("init", () => {
     }
   } catch (err) {
     console.warn(LOG_PREFIX, "Tabbed settings menu registration failed:", err?.message ?? err);
+  }
+
+  /* === First-run setup wizard (v0.21.0, U4) ===========================
+   * Register a settings MENU that re-opens the guided onboarding wizard at
+   * any time. The wizard also launches itself automatically on first run
+   * (see the ready hook below). Purely additive; skipped if ApplicationV2
+   * is unavailable.
+   * =================================================================== */
+  try {
+    const WizardCls = getWizardClass();
+    if (WizardCls) {
+      game.settings.registerMenu(MODULE_ID, "firstRunWizard", {
+        name: game.i18n.localize("ETERNAL_SKALD.wizard.menu.name"),
+        label: game.i18n.localize("ETERNAL_SKALD.wizard.menu.label"),
+        hint: game.i18n.localize("ETERNAL_SKALD.wizard.menu.hint"),
+        icon: "fas fa-hat-wizard",
+        type: WizardCls,
+        restricted: true
+      });
+      console.log(LOG_PREFIX, "First-run wizard menu registered.");
+    }
+  } catch (err) {
+    console.warn(LOG_PREFIX, "First-run wizard menu registration failed:", err?.message ?? err);
   }
 
   /* === Keybinding: toggle AI Mode (v0.3.2) =============================
@@ -723,4 +747,12 @@ Hooks.on("renderChatLog", (_app, html) => {
 });
 Hooks.once("ready", () => {
   try { installChatAutocomplete(); } catch (_) { /* defensive */ }
+});
+
+// --- First-run onboarding wizard (v0.21.0, U4) ----------------------
+// On the very first ready of a new world (firstRunComplete flag unset), the
+// GM is greeted with the guided setup wizard. Fully defensive and a no-op
+// for returning worlds, players, or when AI Mode is off.
+Hooks.once("ready", () => {
+  try { maybeLaunchFirstRun(); } catch (_) { /* defensive */ }
 });

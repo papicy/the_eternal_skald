@@ -3051,3 +3051,47 @@ ROLLBACK:     git revert <this commit> — removes the module + the two install 
               exactly as before.
 RESIDUAL RISK: LOW. The dropdown only rewrites the input text (never sends/dispatches). Listener attach
               is idempotent and fully guarded; if the input can't be found the feature is simply absent.
+
+
+### [2026-06-13 21:07 EEST] — U4: first-run onboarding wizard
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    IMPLEMENT (gated — see Phase D gate above)
+PRE-FLIGHT:   Confirmed the four critical settings already exist and their exact keys/types —
+              providerPreset (String, choices), apiKey (String), ironswornIntegration (Boolean),
+              narrativeTone (String, choices), journalingDensity (String, choices), intensity
+              (Number, range). Reused the S1 lazy-ApplicationV2 + registerMenu wiring pattern so the
+              file imports safely under plain Node (load-smoke).
+EVIDENCE:     CLAIM: the wizard's target settings are registered with these keys/types. EVIDENCE:
+              scripts/core/settings.js:92 (providerPreset), :110 (apiKey), :178 (intensity),
+              :193 (narrativeTone), :251 (ironswornIntegration), :564 (journalingDensity).
+              CONFIDENCE: HIGH BASIS: read the registration blocks. CLAIM: registerMenu + lazy class
+              is the established pattern. EVIDENCE: foundry-hooks.js:82 (tabbedSettings menu),
+              settings-panel.js:184 (getSettingsPanelClass lazy factory). CONFIDENCE: HIGH BASIS: read
+              the lines; mirrored them.
+CHANGE:       NEW scripts/ui/first-run-wizard.js — pure step/validation logic (WIZARD_STEPS ×4 with
+              clampStep/getStep/next/prev/isLastStep navigation, isFirstRun flag check,
+              providerNeedsKey + validateStep gating the API-key step, wizardSettingKeys +
+              collectWizardValues with number coercion & unknown-key rejection, escapeWizHtml) plus a
+              lazy ApplicationV2 multi-step form that reads/writes ONLY existing settings via the public
+              game.settings API and sets firstRunComplete on finish. Registered a NEW hidden world flag
+              "firstRunComplete" (config:false, default false) in settings.js. Wired in foundry-hooks.js:
+              a GM-restricted "firstRunWizard" settings menu (re-open any time) + a ready hook that
+              auto-launches once for a new world (maybeLaunchFirstRun: GM-only, AI-Mode-on, flag-unset).
+              Added en.json wizard.menu.{name,label,hint}.
+FILES TOUCHED (5 — gated):
+  - scripts/ui/first-run-wizard.js      (+317 / -0, new)
+  - scripts/core/settings.js            (+15 / -0)
+  - scripts/hooks/foundry-hooks.js      (+30 / -0)
+  - lang/en.json                        (+7 / -0)
+  - test/first-run-wizard.test.mjs      (+118 / -0, new)
+TESTS:        node test/first-run-wizard.test.mjs → 53/53 (steps, clamping, validation, key-collection,
+              escaping; wiring + i18n guards; Node-import safety); full suite → 52/52. node --check on
+              changed JS; en.json valid JSON.
+SUITE:        npm test -> PASS (52 files)
+GATE:         Covered by the Phase D gate above (new ui/ layer + new settings-menu surface + new flag).
+ROLLBACK:     git revert <this commit> — removes the wizard module, the flag, the menu + ready hook and
+              the test. Existing settings and onboarding-free startup are unaffected at every step.
+RESIDUAL RISK: LOW. The wizard only writes settings the user already owns, through the same public API
+              as the native panel, and only for permitted keys. Auto-launch is GM-only, one-shot
+              (flag-guarded) and skipped if ApplicationV2 is unavailable; the flag defaults false so
+              existing worlds see the wizard once but can dismiss/finish it immediately.

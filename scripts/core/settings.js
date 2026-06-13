@@ -787,6 +787,18 @@ export const Settings = {
       }
     });
 
+    // (v0.21.0 U4) Onboarding flag. Set true once the first-run setup wizard
+    // has been completed (or dismissed). Hidden from the config UI; world-
+    // scoped so the wizard runs once per world. Default false → new worlds
+    // get the guided wizard; existing worlds can re-open it from the settings
+    // menu ("Show setup wizard").
+    game.settings.register(MODULE_ID, "firstRunComplete", {
+      scope: "world",
+      config: false,
+      type: Boolean,
+      default: false
+    });
+
     /* ---- Context-aware next-step suggestions (v0.9.0) ----
      * When ON, the Skald may close a narration with a brief, optional hint
      * that references the party's current location/scene
