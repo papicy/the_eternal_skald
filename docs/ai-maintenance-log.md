@@ -3020,3 +3020,34 @@ ROLLBACK:     git revert <this commit> — removes the panel, the menu registrat
 RESIDUAL RISK: LOW. Additive alternate editor; writes go through the same public API as the native
               panel and only for permitted, changed keys. Menu registration is wrapped + skipped if
               ApplicationV2 is unavailable.
+
+### [2026-06-13 23:55 EEST] — U5: inline command autocomplete
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    IMPLEMENT (gated — see Phase D gate above)
+PRE-FLIGHT:   Confirmed the chat input is textarea#chat-message and that renderChatLog is the render
+              hook (foundry-hooks.js already registers chatMessage/preCreateChatMessage). Reused
+              COMMAND_REGISTRY (command + aliases + permission + help) as the data source.
+EVIDENCE:     CLAIM: COMMAND_REGISTRY carries everything the dropdown needs (token, aliases, permission,
+              help). EVIDENCE: scripts/chat/command-registry.js:37-63 :: COMMAND_REGISTRY.
+              CONFIDENCE: HIGH BASIS: read the lines. CLAIM: chat input is #chat-message and listeners
+              attach on render. EVIDENCE: prefillChatInput selectors mirror the same id used by Doc1;
+              renderChatLog is the standard chat render hook. CONFIDENCE: MEDIUM BASIS: standard
+              Foundry id + the install fn probes 4 selectors and degrades to a no-op if absent.
+CHANGE:       NEW scripts/ui/command-autocomplete.js — pure matching (autocompleteQuery: trigger only
+              on a bare "!"-token, suppress after a space; matchCommands: prefix-match token+aliases,
+              GM filtering via includeGm, sorted + capped at 8) plus a defensive DOM layer that renders
+              a floating, Foundry-styled dropdown above the chat input with ArrowUp/Down navigation,
+              Enter/Tab to insert the token (+trailing space — never dispatches), Escape/blur to close.
+              Wired in foundry-hooks.js on renderChatLog + a ready fallback; attach is idempotent.
+FILES TOUCHED (3 — gated):
+  - scripts/ui/command-autocomplete.js   (+185 / -0, new)
+  - scripts/hooks/foundry-hooks.js       (+12 / -0)
+  - test/command-autocomplete.test.mjs   (+80 / -0, new)
+TESTS:        node test/command-autocomplete.test.mjs → 24/24; full suite → 51/51. node --check on
+              changed JS.
+SUITE:        npm test -> PASS (51 files)
+GATE:         Covered by the Phase D gate above (new ui/ layer + chat-input listener).
+ROLLBACK:     git revert <this commit> — removes the module + the two install hooks; chat input behaves
+              exactly as before.
+RESIDUAL RISK: LOW. The dropdown only rewrites the input text (never sends/dispatches). Listener attach
+              is idempotent and fully guarded; if the input can't be found the feature is simply absent.

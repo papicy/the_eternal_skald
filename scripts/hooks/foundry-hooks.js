@@ -17,6 +17,7 @@ import { BrowserRAG } from "../browser-rag.js";
 import { SystemRegistry, registerSystem } from "../systems/registry.js";
 import { NimbleAdapter } from "../systems/nimble-adapter.js";
 import { getSettingsPanelClass } from "../ui/settings-panel.js";
+import { installChatAutocomplete } from "../ui/command-autocomplete.js";
 
 
 /* ===================================================================== */
@@ -711,3 +712,15 @@ Hooks.once("ready", () => {
   } catch (_) { /* defensive */ }
 });
 
+
+// --- Inline command autocomplete (v0.21.0, U5) ----------------------
+// Attach the "!"-command autocomplete dropdown to the chat input. We try on
+// every chat-log render (covers re-renders / popout) and once on ready as a
+// fallback. attachAutocomplete() is idempotent (flags the element), so
+// repeated calls are safe. Fully defensive — a no-op if the input is absent.
+Hooks.on("renderChatLog", (_app, html) => {
+  try { installChatAutocomplete(html); } catch (_) { /* defensive */ }
+});
+Hooks.once("ready", () => {
+  try { installChatAutocomplete(); } catch (_) { /* defensive */ }
+});
