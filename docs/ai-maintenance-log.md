@@ -1700,3 +1700,90 @@ GATE:         none — version bumping is an explicitly-supported op (bump tool 
               NOT in the §5.1 locked contract surface (id/esmodules/compatibility).
 ROLLBACK:     git revert <bump-commit-sha>   (single commit)
 RESIDUAL RISK: none identified — no runtime code changed.
+
+
+---
+
+### [2026-06-13 10:11 UTC] — Phase 1: initialise multi-system adapter registry (zero blast radius)
+AGENT:        Abacus.AI Agent (SkaldCoder)
+TASK TYPE:    IMPLEMENT
+TOKEN BUDGET: 5,000  |  USED: ~within  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md + repository-map.md (+ PROPOSAL-multi-system-adapter-architecture.md)
+  [x] task classified: IMPLEMENT
+  [x] target file(s)+line(s) located (evidence below)
+  [~] <= 3 files / <= 50 changed lines per file — EXCEEDED (new layer); covered by GATE below
+  [x] additive & backwards-compatible
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [ ] no architectural boundary crossed → CROSSED (new scripts/systems/ layer) → GATE recorded below
+  [x] regression test added (test/systems-registry.test.mjs)
+  [x] rollback plan defined
+
+PROBLEM:      The Skald is hard-coupled to Ironsworn via direct imports of the
+              IronswornController/IronswornData singletons. Phase 1 of the approved
+              multi-system architecture introduces a registrable adapter seam so
+              other systems (Nimble next) can be supported — without touching any
+              existing Ironsworn behaviour.
+
+EVIDENCE (brief §4 format):
+  CLAIM:      IronswornController already satisfies an adapter contract (self-identifies
+              the active system, reports a capability map), so it can be registered verbatim.
+  EVIDENCE:   scripts/ironsworn-controller.js:279-304 :: isActive() / api() / capabilities()
+  CONFIDENCE: HIGH
+  BASIS:      read the lines directly.
+
+  CLAIM:      The public module API is assembled once in the ready hook — the correct,
+              single wiring point to register adapters and expose the registry.
+  EVIDENCE:   scripts/hooks/foundry-hooks.js:172-214 :: Hooks.once("ready") + game.modules.get(MODULE_ID).api
+  CONFIDENCE: HIGH
+  BASIS:      read the lines directly; added registration after the existing setDebug call.
+
+  CLAIM:      A new scripts/<subdir>/ folder is auto-swept into the test source corpus
+              and the import guard, so the new layer is covered by existing safety nets.
+  EVIDENCE:   test/_skald-source.mjs:31-45 :: collectSubmodules(); test/check-imports.mjs:24-39 :: collect()
+  CONFIDENCE: HIGH
+  BASIS:      read both directly; ran check-imports (clean) and full suite (pass).
+
+  CLAIM:      Nimble's data model differs fundamentally (abilities strength/dexterity/
+              intelligence/will; hp/wounds/mana/hitDice; no oracles/vows/progress tracks),
+              confirming the capability-gated adapter design for Phase 4.
+  EVIDENCE:   FoundryVTT-Nimble public/system.json (id "nimble"); src/models/actor/common.ts:33-71;
+              src/models/actor/CharacterDataModel.ts:57-360; src/config.ts:23-27
+  CONFIDENCE: HIGH
+  BASIS:      cloned papicy/FoundryVTT-Nimble and read the data models directly.
+
+CHANGE:       Added a new owned layer scripts/systems/ implementing the adapter seam:
+              • adapter-interface.js — SystemAdapter @typedef contract, SYSTEM_CAPABILITIES
+                constants, emptyCapabilities()/makeResult()/unsupported()/isValidAdapter()
+                helpers. Pure docs + constants, no game logic.
+              • null-adapter.js — frozen safe no-op fallback (reads empty, writes
+                "unsupported", capabilities OFF except mapVision) preserving the
+                "works standalone" promise.
+              • registry.js — SystemRegistry (register/get/has/list/unregister/getActive)
+                plus registerSystem()/getActiveAdapter()/getAdapter() free functions;
+                resolves by game.system.id, falls back to NullAdapter. Defensive throughout.
+              Wired into the ready hook: registered IronswornController under
+              "foundry-ironsworn" and exposed the registry as api.systems. NOTHING
+              consumes getActiveAdapter() yet, so Ironsworn behaviour is unchanged.
+FILES TOUCHED (4 + 1 test + this log):
+  - scripts/systems/adapter-interface.js  (+149 / -0, NEW)
+  - scripts/systems/null-adapter.js       (+89  / -0, NEW)
+  - scripts/systems/registry.js           (+165 / -0, NEW)
+  - scripts/hooks/foundry-hooks.js        (+14  / -0)
+  - test/systems-registry.test.mjs        (+127 / -0, NEW)
+TESTS:        test/systems-registry.test.mjs — RESULT: 39 passed, 0 failed
+SUITE:        npm test -> PASS (34 files passed, 0 failed; was 33, +1 new)
+              check-imports -> clean; load-smoke -> clean.
+GATE:         APPROVED — multi-system adapter architecture (brief §5/§6). User
+              recorded approval to proceed phase-by-phase with the proposal in
+              docs/PROPOSAL-multi-system-adapter-architecture.md. This phase adds a
+              new scripts/systems/ layer and exceeds the §0 file/line limits; the gate
+              covers that. Phase 1 is additive-only (no consumer migrated yet).
+ROLLBACK:     git revert <phase1-commit-sha>  (single commit; deletes the new layer,
+              the test, the wiring, and this log entry's referenced changes).
+RESIDUAL RISK: none identified for existing behaviour — no existing code path calls
+              the registry yet; the only runtime change is one additive registration +
+              one extra api member, both wrapped in try/catch. Nimble capability details
+              are HIGH confidence (read from source) but the Nimble ADAPTER itself is
+              not built until Phase 4.
