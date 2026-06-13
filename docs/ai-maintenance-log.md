@@ -1787,3 +1787,110 @@ RESIDUAL RISK: none identified for existing behaviour — no existing code path 
               one extra api member, both wrapped in try/catch. Nimble capability details
               are HIGH confidence (read from source) but the Nimble ADAPTER itself is
               not built until Phase 4.
+
+
+
+### [2026-06-13 10:23 UTC] — Phase 2: migrate leaf consumers (prompt-builder, entity-linking) to the adapter registry
+AGENT:        Abacus.AI Agent (SkaldCoder)
+TASK TYPE:    IMPLEMENT
+TOKEN BUDGET: 5,000  |  USED: ~within  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md + repository-map.md (+ PROPOSAL-multi-system-adapter-architecture.md)
+  [x] task classified: IMPLEMENT
+  [x] target file(s)+line(s) located (evidence below)
+  [x] <= 3 files / <= 50 changed lines per file — WITHIN LIMITS
+        (prompt-builder.js +14/-6; entity-linking.js +17/-9; new test file)
+  [x] additive & backwards-compatible
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] no architectural boundary crossed (LOCKED files untouched; registry consumed read-only)
+  [x] regression test added (test/adapter-leaf-consumers.test.mjs)
+  [x] rollback plan defined
+
+PROBLEM:      Phase 1 introduced the adapter registry but NOTHING consumed it yet.
+              The two pure LEAF consumers of Ironsworn data — the AI prompt builder
+              and the chronicle entity linker — still imported IronswornController
+              directly, hard-coupling them to one system. Phase 2 repoints them at
+              getActiveAdapter() so an Ironsworn world behaves byte-for-byte the same
+              (the registry returns the very IronswornController instance) while any
+              other / no system degrades gracefully through the NullAdapter.
+
+EVIDENCE (brief §4 format):
+  CLAIM:      prompt-builder & entity-linking are pure LEAF consumers — they only READ
+              Ironsworn data (foe/context names, moves, progress tracks, assets); no
+              other module imports their internals for Ironsworn writes.
+  EVIDENCE:   scripts/ai/prompt-builder.js:339-341,406-407,446-447 (reads only);
+              scripts/chronicle/entity-linking.js:214-215,260-262,292-293 (reads only)
+  CONFIDENCE: HIGH
+  BASIS:      grepped every IronswornController call-site in both files and read each.
+
+  CLAIM:      IronswornController.capabilities() returns the OLD shape
+              {systemActive,prerollDialog,characterSheet,activeCharacter} — NOT the new
+              SYSTEM_CAPABILITIES keys (oracles/moves/progressTracks/…). Gating on
+              capabilities().moves etc. would therefore require editing the LOCKED
+              controller, which is forbidden.
+  EVIDENCE:   scripts/ironsworn-controller.js capabilities() return literal (read by range);
+              scripts/systems/adapter-interface.js:30-101 SYSTEM_CAPABILITIES keys
+  CONFIDENCE: HIGH
+  BASIS:      read both; the key sets do not overlap.
+
+  CLAIM:      getActiveAdapter() is always populated by the time these run — the ready
+              hook registers the Ironsworn adapter unconditionally, and prompt building /
+              entity linking only run after `ready`.
+  EVIDENCE:   scripts/hooks/foundry-hooks.js:172-214 :: Hooks.once("ready") registration
+  CONFIDENCE: HIGH
+  BASIS:      read in Phase 1; registry returns NullAdapter (never null) regardless.
+
+APPROACH:     FEATURE-DETECTION, not capability-key gating (see capabilities() evidence
+              above). Each block resolves `const adapter = getActiveAdapter();` then:
+                • prompt-builder: `if (typeof adapter.getCompendiumFoeNames !== "function") return "";`
+                  and likewise for getCompendiumContextNames; moves via
+                  `Array.isArray(adapter.moves) ? adapter.moves : []`.
+                • entity-linking: `if (adapter.isActive?.() && <method/array present>) { … }`
+              For an Ironsworn world the adapter IS IronswornController, so all guards
+              pass and behaviour is identical. For NullAdapter, isActive()===false and
+              the methods are absent → every system-specific block returns "" / is
+              skipped, with no throw.
+
+CHANGE:       (1) scripts/ai/prompt-builder.js — replaced the
+              `import { IronswornController }` with `import { getActiveAdapter }`
+              (../systems/registry.js) and routed buildFoeGuidance(),
+              buildCompendiumContextBlock() and buildIronswornPromptBlock() through the
+              resolved adapter with the feature-detect guards above.
+              (2) scripts/chronicle/entity-linking.js — same import swap (IronswornData
+              kept; see DEFERRAL) and routed the move / progress-track / asset entity
+              blocks of EntityLinker._build() through the adapter with
+              isActive?.()+method-presence guards.
+DEFERRAL:     The oracle-entity block in entity-linking._build() still reads
+              IronswornData.oracles directly. The adapter contract does not yet expose
+              oracle TABLES (only rollOracle()), so migrating it now would lose data;
+              it is deferred to the Nimble/oracle-capability phase. It references only
+              the static IronswornData import (no IronswornController), so it is
+              unaffected by this change.
+FILES TOUCHED (2 + 1 test + this log):
+  - scripts/ai/prompt-builder.js          (+14 / -6)
+  - scripts/chronicle/entity-linking.js   (+17 / -9)
+  - test/adapter-leaf-consumers.test.mjs  (+~170 / -0, NEW)
+TESTS:        test/adapter-leaf-consumers.test.mjs — RESULT: 22 passed, 0 failed
+              (State A: registered Ironsworn-like adapter → consumers surface its
+               foe/context/move/track/asset data; State B: no adapter → NullAdapter →
+               every system-specific block returns "" / is skipped, no throw.)
+SUITE:        npm test -> PASS (35 files passed, 0 failed; was 34, +1 new)
+BEHAVIOURAL CHANGE (unsupported systems): NONE for any state reachable today. Ironsworn
+              is unchanged (same controller object). Pre-migration, a non-Ironsworn world
+              already hit IronswornController.isActive()===false and produced empty
+              guidance/links; post-migration the NullAdapter yields the identical empty
+              result. The only difference is the seam now lets a FUTURE adapter (e.g.
+              Nimble) light these features up without further edits here.
+GATE:         Covered by the recorded multi-system architecture approval (brief §5/§6;
+              docs/PROPOSAL-multi-system-adapter-architecture.md), executed phase-by-phase.
+              This phase is within §0 file/line limits and crosses no boundary: LOCKED
+              files (ironsworn-controller.js, narrative/integration.js) were NOT edited —
+              the controller was read by range only.
+ROLLBACK:     git revert <phase2-commit-sha> (single commit; restores the two direct
+              IronswornController imports and removes the new test + this log entry's
+              referenced changes). Independent of Phase 1.
+RESIDUAL RISK: LOW. Both consumers are read-only and now fall back to "" on any non-
+              Ironsworn system exactly as before. The one residual coupling is the
+              deferred oracle block (still on IronswornData) — intentional, documented,
+              and harmless until the oracle capability lands.
