@@ -2888,3 +2888,36 @@ TESTS:        node test/version-consistency.test.mjs → 27/27; full suite 48/48
 GATE:         Covered by the Phase C gate above.
 ROLLBACK:     Revert this commit on phase-c-feature-enrichment.
 RESIDUAL RISK: NONE functional — metadata/docs only.
+
+### [2026-06-13 22:30 EEST] — Phase D UX-polish & ecosystem: recorded approval gate
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    IMPLEMENT + DOCUMENT (multi-task umbrella)
+TOKEN BUDGET: gated  |  USED: n/a  |  WITHIN BUDGET: GATED
+
+GATE REQUEST
+  TASK:        Implement Phase D (U1 ApplicationV2 adoption, U4 first-run wizard, U5 inline
+               command autocomplete, S1 settings tabs, Doc1 interactive command reference,
+               Doc2 adapter-development guide). Adds a NEW scripts/ui/ layer, new ApplicationV2
+               windows + templates, a new chat-input listener, tabbed settings UI, and two new
+               docs/*.md guides; several features exceed the §0 hard limits (3 files / 50 lines)
+               and touch the §5.1 public surface (new settings menu/button, new command for the
+               in-game command reference).
+  LIMIT HIT:   §0(1,2) hard limits (multi-file features > 50 lines); §5.1 public command/setting-
+               menu surface (new "Show wizard" + command-reference buttons/commands); new UI
+               module layer (scripts/ui/).
+  WHY NEEDED:  Explicit, detailed Phase D assignment from the maintainer (super-agent task) with a
+               per-feature spec list and an explicit "bump v0.20.0 → v0.21.0, commit after each
+               feature" directive; this entry records that human approval for the gate.
+  SMALLEST SAFE OPTION: implement each feature incrementally, one feature per commit, full suite
+               green after each; build new UI on ApplicationV2 + HandlebarsApplicationMixin
+               (Foundry-native, no new deps/build step); first-run detection via a single world
+               flag (default unset); all new settings default-safe; docs are pure markdown.
+  BLAST RADIUS: new scripts/ui/ (wizard, autocomplete, settings app, command-reference), templates
+               for the new windows, hooks wiring (first-run launch + chat-input listener),
+               core/settings.js (new menu/flag registrations), lang/en.json (i18n), docs/COMMANDS.md
+               + docs/ADAPTER-DEVELOPMENT.md (new); rollback = revert the per-feature commits on
+               phase-d-ux-ecosystem.
+GATE:         GRANTED by maintainer via the Phase D subtask assignment (this entry records it;
+               self-approval is NOT being used — the human assigned the work with specs).
+
+NOTE: Per-feature detailed log entries follow below as each lands.
