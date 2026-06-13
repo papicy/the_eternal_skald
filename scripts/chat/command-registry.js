@@ -48,6 +48,7 @@ export const COMMAND_REGISTRY = Object.freeze([
   { command: COMMANDS.REMIND,      aliases: [],                                          method: "remind",        permission: "all", help: "Recall what has happened so far." },
   { command: COMMANDS.END_SESSION, aliases: [],                                          method: "endSession",    permission: "all", help: "Wrap up and summarise the session." },
   { command: COMMANDS.REINDEX,     aliases: [],                                          method: "reindex",       permission: "all", help: "Rebuild the AI memory (RAG) index." },
+  { command: COMMANDS.REINDEX_COMPENDIUMS, aliases: [],                                  method: "reindexCompendiums", permission: "gm", help: "Embed installed compendium packs into AI memory (GM)." },
   { command: COMMANDS.RAG_STATUS,  aliases: [],                                          method: "ragStatus",     permission: "all", help: "Show AI memory (RAG) status." },
   { command: COMMANDS.TIMELINE,    aliases: [],                                          method: "timeline",      permission: "all", help: "Show / edit the campaign timeline." },
   { command: COMMANDS.RELATIONSHIPS, aliases: [COMMANDS.MAP],                             method: "relationships", permission: "all", help: "Show the relationship map." },

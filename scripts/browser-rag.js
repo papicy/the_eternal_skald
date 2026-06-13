@@ -505,6 +505,86 @@ export const BrowserRAG = {
     return { indexed, total };
   },
 
+  /* ---------------- compendium indexing (v0.20.0, F1) ---------------- */
+
+  /** Setting: should installed compendium packs be embedded into RAG? Opt-in. */
+  indexCompendiumsEnabled() { return this._setting("ragIndexCompendiums") === true; },
+
+  /**
+   * Extract a compact, searchable text blob from a loaded compendium document.
+   * Pulls the document name plus the most prose-bearing fields across the
+   * common Foundry document types — JournalEntry pages, Item/Actor
+   * descriptions, RollTable results. Returns "" when nothing useful is found.
+   * Pure + defensive (never throws), so it is unit-testable in isolation.
+   *
+   * @param {object} doc A Foundry document (or doc-like object).
+   * @returns {string}
+   */
+  _compendiumDocText(doc) {
+    try {
+      if (!doc) return "";
+      const parts = [];
+      const name = doc.name || "";
+      // JournalEntry — concatenate every page's text.
+      const pages = doc.pages?.contents || (Array.isArray(doc.pages) ? doc.pages : null);
+      if (pages) for (const p of pages) { const t = p?.text?.content; if (t) parts.push(t); }
+      // Item / Actor — system description / biography.
+      const sys = doc.system || doc.data?.data || {};
+      const desc = sys?.description?.value ?? (typeof sys?.description === "string" ? sys.description : "")
+                 ?? sys?.details?.biography?.value ?? "";
+      if (typeof desc === "string" && desc) parts.push(desc);
+      // RollTable (oracles) — each result's text.
+      const results = doc.results?.contents || (Array.isArray(doc.results) ? doc.results : null);
+      if (results) for (const r of results) { const t = r?.text || r?.description; if (t) parts.push(t); }
+      const text = parts.join(" ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      return `${name}. ${text}`.trim().replace(/^\.\s*/, "");
+    } catch (_) { return ""; }
+  },
+
+  /**
+   * Embed the documents of the given compendium packs into semantic memory,
+   * ALONGSIDE the chronicle (does not clear the store). Records use a
+   * `comp:<collection>:<id>` key so re-runs are idempotent and never collide
+   * with journal vectors. No-ops softly when RAG is unavailable or the
+   * compendium-indexing setting is off.
+   *
+   * @param {Array} packs  Foundry CompendiumCollection objects (caller selects
+   *                        which, typically adapter-gated by document type).
+   * @param {object} [opts]
+   * @param {(done:number,total:number,label?:string)=>void} [opts.onProgress]
+   * @returns {Promise<{indexed:number,total:number}>}
+   */
+  async indexCompendiums(packs, { onProgress } = {}) {
+    const list = Array.isArray(packs) ? packs.filter(Boolean) : [];
+    let indexed = 0, total = 0;
+    if (!this.isAvailable() || !this.indexCompendiumsEnabled()) return { indexed, total };
+    const ok = await this.init();
+    if (!ok) return { indexed, total };
+    for (const pack of list) {
+      let docs = [];
+      try { docs = await pack.getDocuments(); }
+      catch (e) { this._debug("compendium load failed:", e?.message || e); continue; }
+      const label = pack?.metadata?.label || pack?.title || pack?.collection || "compendium";
+      total += docs.length;
+      for (const doc of docs) {
+        try {
+          const text = this._compendiumDocText(doc);
+          if (!text) continue;
+          const id = `comp:${pack?.collection || label}:${doc?.id || doc?._id}`;
+          const done = await this.indexRecord({
+            id, text,
+            metadata: { type: "compendium", name: doc?.name || "(unnamed)", pack: label, timestamp: Date.now() }
+          });
+          if (done) indexed++;
+        } catch (_) {}
+      }
+      try { onProgress?.(indexed, total, label); } catch (_) {}
+    }
+    this._invalidateCorpus();
+    this._debug(`compendium index complete — ${indexed}/${total} documents embedded.`);
+    return { indexed, total };
+  },
+
   /* ---------------- corpus cache ---------------- */
 
   /**

@@ -646,6 +646,50 @@ export const Commands = {
     }
   },
 
+  /* --------------------- !reindex-compendiums (v0.20.0, F1) -------- */
+  /**
+   * Embed installed compendium packs into semantic memory ALONGSIDE the
+   * chronicle. GM-only and opt-in (setting `ragIndexCompendiums`). Pack
+   * selection is adapter-gated: oracle/RollTable packs are only included when
+   * the active system adapter advertises the `oracles` capability.
+   */
+  async reindexCompendiums(_args) {
+    if (!game.user?.isGM) {
+      return Chat.postSystem(`<em>Only the GM may bind the great tomes to memory.</em>`, { gmWhisper: true });
+    }
+    if (!BrowserRAG?.isAvailable?.()) {
+      return Chat.postSystem(`<em>Semantic memory is unavailable here. Enable it in <strong>Module Settings → The Eternal Skald</strong>.</em>`, { gmWhisper: true });
+    }
+    if (!BrowserRAG.indexCompendiumsEnabled?.()) {
+      return Chat.postSystem(`<em>Compendium indexing is off. Enable <strong>"Index Compendiums"</strong> in Module Settings first.</em>`, { gmWhisper: true });
+    }
+    const caps = getActiveAdapter()?.capabilities?.() || {};
+    const wantTypes = new Set(["JournalEntry", "Item", "Actor"]);
+    if (caps.oracles) wantTypes.add("RollTable");
+    const packs = [...(game.packs ?? [])].filter((p) => wantTypes.has(p?.documentName));
+    if (!packs.length) {
+      return Chat.postSystem(`<em>No suitable compendium packs are installed to bind.</em>`, { gmWhisper: true });
+    }
+    RagProgress.show("Binding the great tomes…");
+    try {
+      const { indexed, total } = await BrowserRAG.indexCompendiums(packs, {
+        onProgress: (done, tot, label) => {
+          const pct = tot ? Math.round((done / tot) * 100) : 0;
+          RagProgress.update(`Binding ${escapeHtml(String(label))} ${done}/${tot}`, pct);
+        }
+      });
+      RagProgress.done(`Tomes bound: ${indexed}/${total} entries.`);
+      return Chat.postSkald(
+        `<p>I have woven <strong>${indexed}</strong> of <strong>${total}</strong> compendium entries into memory, alongside our chronicle.</p>`,
+        { variant: "lore", title: "The Bound Tomes" }
+      );
+    } catch (err) {
+      console.warn(LOG_PREFIX, "[RAG] !reindex-compendiums failed", err);
+      RagProgress.fail("Binding faltered.");
+      return Chat.postSystem(`<strong>The binding faltered:</strong> ${escapeHtml(err?.message || String(err))}`, { gmWhisper: true });
+    }
+  },
+
   /* --------------------------- !rag-status (v0.5.0) ---------------- */
   /** Report semantic-memory health (model, vector count, settings). */
   async ragStatus(_args) {

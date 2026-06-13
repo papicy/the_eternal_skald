@@ -625,6 +625,19 @@ export const Settings = {
       default: true
     });
 
+    // (v0.20.0 F1) Index official / world COMPENDIUM packs into semantic memory
+    // alongside the campaign chronicle, so the Skald can recall lore, moves,
+    // assets and oracle entries. Opt-in (default OFF) because large compendia
+    // take time + storage to embed; run !reindex-compendiums after enabling.
+    game.settings.register(MODULE_ID, "ragIndexCompendiums", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.ragIndexCompendiums.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.ragIndexCompendiums.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: false
+    });
+
     // Maximum tokens of recalled world memory injected per AI call.
     game.settings.register(MODULE_ID, "ragContextTokens", {
       name: game.i18n.localize("ETERNAL_SKALD.settings.ragContextTokens.name"),

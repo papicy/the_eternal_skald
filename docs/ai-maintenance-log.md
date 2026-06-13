@@ -2776,3 +2776,40 @@ ROLLBACK:     Revert this commit on phase-c-feature-enrichment.
 RESIDUAL RISK: LOW. Prompt text unchanged (byte-identical); only the storage location moved. The
               templates are part of the static import graph so they ship in the module zip with
               no manifest change. Further prompt blocks can migrate incrementally using the loader.
+
+### [2026-06-13 20:35 EEST] — F1: Compendium-aware RAG indexing
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    FEATURE (gated — see Phase C gate above)
+PRE-FLIGHT:   Read browser-rag.js (BrowserRAG store/indexRecord/reindexAll/corpus-cache), the
+              command-registry + dispatch path (M2), and adapter capability map (SYSTEM_CAPABILITIES,
+              `oracles`). Confirmed readSkaldSource() excludes top-level browser-rag.js (tests read
+              it directly), and exact-token dispatch means !reindex-compendiums cannot collide with
+              !reindex.
+EVIDENCE:     RAG previously embedded ONLY chronicle journal entries (reindexAll clears + rebuilds
+              from JournalSystem.listEntries()). Installed compendium lore (modules, bestiaries,
+              oracle tables) was invisible to !remind. No store namespace separated journal vs other
+              vectors, so a comp:<collection>:<id> key was needed to add alongside without collision.
+CHANGE:       Added opt-in, GM-only, adapter-gated compendium indexing. (1) New world setting
+              ragIndexCompendiums (default FALSE). (2) BrowserRAG gains indexCompendiumsEnabled(),
+              the pure/defensive _compendiumDocText(doc) extractor (JournalEntry pages, Item/Actor
+              system.description|biography, RollTable results → HTML-stripped, name-led blob; never
+              throws), and async indexCompendiums(packs,{onProgress}) which embeds docs ALONGSIDE
+              the chronicle (does NOT clear the store), keyed comp:<collection>:<id> for idempotent
+              re-runs, no-ops softly when RAG unavailable or the setting is off, and invalidates the
+              corpus cache when done. (3) New command token REINDEX_COMPENDIUMS + registry descriptor
+              (method reindexCompendiums, permission "gm" — the module's first GM-permission command).
+              (4) Commands.reindexCompendiums handler: GM-gated, availability/opt-in checks, adapter-
+              gated pack selection (JournalEntry/Item/Actor always; RollTable only when caps.oracles),
+              progress toast, success card. Fail-soft throughout.
+FILES TOUCHED: scripts/browser-rag.js, scripts/core/settings.js, scripts/core/constants.js,
+              scripts/chat/command-registry.js, scripts/chat/commands.js, lang/en.json,
+              test/command-registry.test.mjs (permission-set guard updated for the new "gm" command),
+              test/compendium-rag.test.mjs (new, 30 assertions).
+TESTS:        node test/compendium-rag.test.mjs → 30/30; command-registry suite green; full suite
+              46/46; node --check on all changed JS; en.json validated as JSON.
+GATE:         Covered by the Phase C gate above (new RAG capability + first "gm" command).
+ROLLBACK:     Revert this commit on phase-c-feature-enrichment. Setting defaults OFF, so even with
+              the code present no behaviour changes until a GM explicitly enables + runs the command.
+RESIDUAL RISK: LOW. Default-off + GM-gated + additive (chronicle vectors untouched). Worst case a
+              very large compendium grows the vector store / slows queries; mitigated by opt-in and
+              the existing corpus cache. Extraction is defensive (returns "" on any odd doc shape).

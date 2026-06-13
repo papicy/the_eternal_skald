@@ -84,8 +84,14 @@ for (const d of COMMAND_REGISTRY) {
   ok(new RegExp(`\\b(async\\s+)?${d.method}\\s*\\(`).test(CMD), `[5] Commands.${d.method} exists in commands.js`);
 }
 ok(Object.isFrozen(COMMAND_REGISTRY), "[5] COMMAND_REGISTRY is frozen (immutable)");
-// Every pre-existing command is "all" so dispatch behaviour is unchanged.
-ok(COMMAND_REGISTRY.every(d => d.permission === "all"), "[5] all current commands are permission 'all' (no behaviour change)");
+// Every command that pre-dates the permission gate stays "all" so dispatch
+// behaviour is unchanged; only newly-added GM-only commands use "gm".
+const GM_ONLY = new Set([COMMANDS.REINDEX_COMPENDIUMS]);
+ok(COMMAND_REGISTRY.filter(d => d.permission === "gm").every(d => GM_ONLY.has(d.command)),
+   "[5] only the designated new commands are 'gm' (pre-existing commands unchanged)");
+eq(findCommand(COMMANDS.REINDEX_COMPENDIUMS).permission, "gm",
+   "[5] !reindex-compendiums is GM-gated at dispatch");
+eq(findCommand(COMMANDS.REINDEX).permission, "all", "[5] !reindex stays permission 'all' (unchanged)");
 
 /* ---- [6] dispatch wiring (source-guard) ------------------------------ */
 ok(/import\s*\{\s*findCommand\s*\}\s*from\s*["']\.\/command-registry\.js["']/.test(CMD),

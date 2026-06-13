@@ -390,6 +390,7 @@ export const COMMANDS = Object.freeze({
   END_SESSION: "!end-session",
   // --- Browser-based RAG / AI memory (v0.5.0) ---
   REINDEX:    "!reindex",
+  REINDEX_COMPENDIUMS: "!reindex-compendiums",
   RAG_STATUS: "!rag-status",
   // --- Living Chronicle (v0.8.0) ---
   TIMELINE:      "!timeline",
