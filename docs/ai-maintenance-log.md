@@ -2649,3 +2649,32 @@ ROLLBACK:     Pre-rewrite .git tree backed up at /tmp/the_eternal_skald_git_back
               refs/original/* also retain the original commits until expired.
 RESIDUAL RISK: LOW. History rewrite changes commit SHAs from 2950e0d onward, so any external
               clone must re-pull. No runtime behaviour or file content changed.
+
+---
+
+### [2026-06-13 17:30 EEST] — Phase C feature-enrichment: recorded approval gate
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    REFACTOR + IMPLEMENT (multi-task umbrella)
+TOKEN BUDGET: gated  |  USED: n/a  |  WITHIN BUDGET: GATED
+
+GATE REQUEST
+  TASK:        Implement Phase C (F6 Ollama, F2 tone, M2 command registry, M4 externalize
+               prompts, F1 compendium RAG, F3 session recap, F4 NPC roleplay). Each adds
+               new files/commands/settings and several cross §5 boundaries (new AI provider
+               preset; new public commands; chat/commands.js registry REFACTOR; new prompts/
+               loader layer) and exceed the §0 hard limits (3 files / 50 lines).
+  LIMIT HIT:   §0(1,2,5) hard limits; §2 REFACTOR budget; §5.1 public command/setting surface
+               + new module layer (prompts/, chat/commands/ registry).
+  WHY NEEDED:  Explicit, detailed Phase C assignment from the maintainer (super-agent task)
+               with per-feature specs; this is the recorded human approval for the gate.
+  SMALLEST SAFE OPTION: implement each feature incrementally behind a default-safe setting,
+               one feature per commit, full suite green after each; Ollama implemented as a
+               provider preset (not a separate client) per recommendations §F6 to minimise
+               blast radius.
+  BLAST RADIUS: new scripts/ai (ollama plumbing), scripts/chat/command-registry.js + chat/
+               commands/, prompts/ + loader, browser-rag compendium indexing, recap/npc
+               commands; rollback = revert the per-feature commits on phase-c-feature-enrichment.
+GATE:         GRANTED by maintainer via the Phase C subtask assignment (this entry records it;
+               self-approval is NOT being used — the human assigned the work with specs).
+
+NOTE: Per-feature detailed log entries follow below as each lands.
