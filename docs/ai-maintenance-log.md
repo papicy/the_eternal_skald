@@ -3095,3 +3095,39 @@ RESIDUAL RISK: LOW. The wizard only writes settings the user already owns, throu
               as the native panel, and only for permitted keys. Auto-launch is GM-only, one-shot
               (flag-guarded) and skipped if ApplicationV2 is unavailable; the flag defaults false so
               existing worlds see the wizard once but can dismiss/finish it immediately.
+
+
+### [2026-06-13 21:25 EEST] — U1: ApplicationV2 adoption — audit, convention doc + guard test
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    INVESTIGATE + IMPLEMENT (gated — see Phase D gate above)
+PRE-FLIGHT:   Audited every UI surface for the deprecated v1 base classes and the dialog API in use,
+              to determine what (if anything) needs migrating for U1.
+EVIDENCE:     CLAIM: there are NO `extends FormApplication` / `extends Application` usages in scripts/.
+              EVIDENCE: grep over scripts/ returned zero matches (only ApplicationV2 + DialogV2).
+              CONFIDENCE: HIGH BASIS: ran the grep. CLAIM: all new Phase D UI is built on ApplicationV2.
+              EVIDENCE: settings-panel.js:184 getSettingsPanelClass, first-run-wizard.js getWizardClass,
+              command-reference.js:146 getReferenceAppClass — all lazy ApplicationV2 factories.
+              CONFIDENCE: HIGH BASIS: read the lines. CLAIM: all 5 classic `new Dialog(` calls are
+              guarded fallbacks behind a DialogV2-first path. EVIDENCE: commands.js:940 & :1535,
+              integration.js:1240, token-control.js:364, progress.js:904 — each preceded by a
+              `const DV2 = foundry?.applications?.api?.DialogV2` preference + "fall back to classic
+              Dialog" comment. CONFIDENCE: HIGH BASIS: read the surrounding lines.
+CONCLUSION:   U1 is already satisfied by construction — no migration of deprecated classes is needed.
+              The right deliverable is to CODIFY the convention so it stays true going forward.
+CHANGE:       NEW docs/UI-CONVENTIONS.md — documents (1) the lazy ApplicationV2 factory pattern for new
+              windows (so plain-Node load-smoke import never throws), (2) the DialogV2-first /
+              classic-Dialog-fallback pattern for prompts, (3) the three hard rules. NEW
+              test/ui-conventions.test.mjs — static source guard enforcing: no v1 base classes; every
+              `new Dialog(` co-occurs with DialogV2; every scripts/ui/*.js window module guards on the
+              Foundry global, returns null when absent, and defines no top-level class. NO production
+              code changed — purely documentation + a regression guard.
+FILES TOUCHED (2 — gated):
+  - docs/UI-CONVENTIONS.md               (+118 / -0, new)
+  - test/ui-conventions.test.mjs         (+96 / -0, new)
+TESTS:        node test/ui-conventions.test.mjs → 17/17; full suite → 53/53.
+SUITE:        npm test -> PASS (53 files)
+GATE:         Covered by the Phase D gate above (docs + test only; no behaviour change).
+ROLLBACK:     git revert <this commit> — removes the doc + the guard test. No runtime impact.
+RESIDUAL RISK: NONE (no production code changed). The guard test could, in principle, flag a future
+              legitimate top-level ApplicationV2 subclass; the documented lazy-factory convention is the
+              intended pattern, so that is the desired behaviour.
