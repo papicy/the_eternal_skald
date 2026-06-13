@@ -378,6 +378,7 @@ export const COMMANDS = Object.freeze({
   SKALD:    "!skald",
   ORACLE:   "!oracle",
   NPC:      "!npc",
+  ROLEPLAY: "!roleplay",
   SCENE:    "!scene",
   LORE:     "!lore",
   COMBAT:   "!combat",

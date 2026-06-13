@@ -39,6 +39,7 @@ export const COMMAND_REGISTRY = Object.freeze([
   { command: COMMANDS.SKALD,       aliases: [],                                          method: "skald",         permission: "all", help: "Speak with the Skald (explicit form)." },
   { command: COMMANDS.ORACLE,      aliases: [],                                          method: "oracle",        permission: "all", help: "Roll an Ironsworn oracle and interpret it." },
   { command: COMMANDS.NPC,         aliases: [],                                          method: "npc",           permission: "all", help: "Conjure or roleplay an NPC." },
+  { command: COMMANDS.ROLEPLAY,    aliases: [],                                          method: "roleplay",      permission: "all", help: "Speak in-character as an NPC (!roleplay <name> / off)." },
   { command: COMMANDS.SCENE,       aliases: [],                                          method: "scene",         permission: "all", help: "Generate a scene / location description." },
   { command: COMMANDS.LORE,        aliases: [],                                          method: "lore",          permission: "all", help: "Generate world-building lore." },
   { command: COMMANDS.COMBAT,      aliases: [],                                          method: "combat",        permission: "all", help: "Tactical narration / advice for the current fight." },

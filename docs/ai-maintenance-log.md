@@ -2843,3 +2843,32 @@ ROLLBACK:     Revert this commit on phase-c-feature-enrichment. The command is p
               read-only; the Obsidian setting defaults OFF.
 RESIDUAL RISK: LOW. Read-only (no world writes); AI failure degrades to a digest export; download is
               defensive (saveDataToFile → Blob fallback → false). buildMarkdown is pure + unit-tested.
+
+### [2026-06-13 21:40 EEST] — F4: AI-powered NPC roleplay mode
+AGENT:        Abacus.AI DeepAgent
+TASK TYPE:    FEATURE (gated — see Phase C gate above)
+PRE-FLIGHT:   Traced runConversation() (system prompt built from a `task` option; channel drives
+              Memory + journal ingestion — allowJournal only for skald/scene/combat) and the skald()
+              handler (token-control / move-declaration / intelligent-action meta-routing before
+              narration). Confirmed Memory keys arbitrary channels, and JournalSystem exposes a fuzzy
+              _findEntry("npc", name) resolver + listEntries("npc").
+EVIDENCE:     The module tracked NPCs in the chronicle and could conjure one-off dialogue (!npc) but
+              had no persistent IN-CHARACTER mode — a flagship FoundryAI feature solo players value.
+CHANGE:       Added !roleplay <name> / off / (status). New scripts/narrative/roleplay-mode.js holds the
+              in-memory, session-scoped persona state (default OFF) and a PURE buildPersonaTask()
+              that instructs the AI to speak first-person, in-character, dossier-consistent, and never
+              surface dice/rules. The handler resolves the NPC against the chronicle (fuzzy → exact),
+              seeds the persona from the entry's text, and whispers the full dossier to the GM only.
+              skald() gains a guard at the top: while roleplay is active it routes through a dedicated
+              "roleplay" channel with allowMoves:false, BYPASSING move/token meta-handling and (by
+              channel design) NOT ingesting the in-character exchange into the chronicle as canon.
+FILES TOUCHED: scripts/narrative/roleplay-mode.js (new), scripts/chat/commands.js (roleplay handler,
+              skald() interception, import), scripts/core/constants.js (ROLEPLAY token),
+              scripts/chat/command-registry.js (descriptor), test/roleplay-mode.test.mjs (new, 26 assertions).
+TESTS:        node test/roleplay-mode.test.mjs → 26/26; full suite 48/48; node --check on changed JS.
+GATE:         Covered by the Phase C gate above (new mode module + command + skald() hook).
+ROLLBACK:     Revert this commit on phase-c-feature-enrichment. The mode flag defaults inactive on
+              every load, so nothing changes until a user explicitly enters !roleplay.
+RESIDUAL RISK: LOW. In-memory state resets on reload (acceptable for a transient mode). No world
+              writes; dossier is GM-whispered; in-character chatter is excluded from chronicle
+              ingestion so it can't pollute canon. buildPersonaTask is pure + unit-tested.

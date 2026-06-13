@@ -10,6 +10,7 @@ import { runConversation, CombatController, SceneContext,
 import { Integration } from "../narrative/integration.js";
 import { TokenControl } from "../narrative/token-control.js";
 import { NpcDialogue, OracleInterpreter, LoreGenerator } from "../narrative/generators.js";
+import { RoleplayMode } from "../narrative/roleplay-mode.js";
 import { MapVision } from "../vision/map-vision.js";
 import { JournalSystem } from "../chronicle/journal-system.js";
 import { EntityLinker } from "../chronicle/entity-linking.js";
@@ -334,6 +335,21 @@ export const Commands = {
       return Chat.postSystem(game.i18n.localize("ETERNAL_SKALD.errors.emptySkald"));
     }
 
+    // ── NPC roleplay mode (v0.20.0, F4) ─────────────────────────────────
+    // While roleplay is active, the Skald answers fully IN CHARACTER as the
+    // chosen NPC. We bypass the move/token meta-handling below (in-character
+    // dialogue is not a mechanical action) and do NOT ingest the exchange into
+    // the chronicle (channel "roleplay" is not a journal channel).
+    if (RoleplayMode.isActive()) {
+      const who = RoleplayMode.current();
+      return runConversation("roleplay", args, {
+        task: RoleplayMode.buildPersonaTask(who, RoleplayMode.dossier()),
+        label: `In Character: ${who}`,
+        variant: "default",
+        allowMoves: false
+      });
+    }
+
     // ── Token control subcommands (v0.16.0) ────────────────────────────
     // `!skald move <token> to <x,y>`, `!skald move <token> <n> <dir>`,
     // `!skald remove <token>`, `!skald undo`. Only fires when the GM has
@@ -414,6 +430,51 @@ export const Commands = {
       return Chat.postSystem(game.i18n.localize("ETERNAL_SKALD.errors.emptyNpc"));
     }
     return NpcDialogue.invoke(args);
+  },
+
+  /* --------------------------- !roleplay (v0.20.0, F4) ------------- */
+  /**
+   * Toggle in-character NPC roleplay. While active, !skald responses come
+   * fully in the NPC's voice (see the skald() interception) until disabled.
+   *   !roleplay <name>  → step into that NPC (seeded from their chronicle entry)
+   *   !roleplay off     → return to the Skald
+   *   !roleplay         → show the current mode
+   * The NPC's full dossier is whispered to the GM only; players see just the
+   * in-character voice. State is in-memory (resets on reload).
+   */
+  async roleplay(args) {
+    const raw = String(args || "").trim();
+    if (!raw) {
+      return RoleplayMode.isActive()
+        ? Chat.postSkald(`<p>You are in conversation with <strong>${escapeHtml(RoleplayMode.current())}</strong>. Say <code>!roleplay off</code> to return to the Skald.</p>`, { variant: "help", title: "Roleplay Mode" })
+        : Chat.postSystem(`<em>No roleplay is afoot. Use <code>!roleplay &lt;name&gt;</code> to step into a character.</em>`, { gmWhisper: true });
+    }
+    if (/^off$/i.test(raw)) {
+      const was = RoleplayMode.stop();
+      return Chat.postSkald(`<p>${was ? `<strong>${escapeHtml(was)}</strong> withdraws, and ` : ""}the Skald resumes the telling.</p>`, { variant: "lore", title: "Roleplay Ended" });
+    }
+    // Resolve the NPC against the chronicle (fuzzy first, then exact name).
+    let entry = null;
+    try { entry = JournalSystem._findEntry?.("npc", raw) || null; } catch (_) {}
+    if (!entry) {
+      try { entry = JournalSystem.listEntries("npc").find(e => e.name?.toLowerCase() === raw.toLowerCase()) || null; }
+      catch (_) {}
+    }
+    const name = entry?.name || raw;
+    let dossier = "";
+    if (entry) {
+      try {
+        const page = entry.pages?.contents?.[0] ?? entry.pages?.find?.(() => true);
+        dossier = String(page?.text?.content || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      } catch (_) {}
+    }
+    RoleplayMode.start(name, dossier);
+    if (dossier) {
+      await Chat.postSystem(`<p><strong>${escapeHtml(name)} — dossier (GM eyes only):</strong></p><p>${escapeHtml(dossier.slice(0, 1500))}</p>`, { gmWhisper: true });
+    } else {
+      await Chat.postSystem(`<em>No chronicle entry found for <strong>${escapeHtml(name)}</strong>; ${SKALD_NAME} will improvise a consistent voice.</em>`, { gmWhisper: true });
+    }
+    return Chat.postSkald(`<p>You now speak with <strong>${escapeHtml(name)}</strong>. Address them with <code>!skald …</code>; say <code>!roleplay off</code> to end.</p>`, { variant: "lore", title: `In Character: ${escapeHtml(name)}` });
   },
 
   /* ----------------------------- !scene ---------------------------- */
