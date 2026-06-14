@@ -1688,6 +1688,27 @@ Narrate this milestone briefly and evocatively as the Skald (1–3 sentences), f
   },
 
   /**
+   * (fix v0.25.2 — actor scatter / duplicate journeys) Resolve the actor that
+   * ACTUALLY rolled this move from the message's speaker, instead of defaulting
+   * to getActiveCharacter() (which keys off the CONTROLLED TOKEN). If the
+   * selected token differs from the rolling character (routine for a GM / multi-
+   * token canvas), the journey opened on the WRONG actor and a duplicate branched
+   * every roll. The old `message?.speakerActor` was dead code. null → caller uses
+   * getActiveCharacter().
+   */
+  _rollActor(message) {
+    try {
+      const sp = message?.speaker;
+      if (!sp) return null;
+      const CM = (typeof ChatMessage !== "undefined") ? ChatMessage : globalThis.ChatMessage;
+      const byApi = CM?.getSpeakerActor?.(sp);
+      if (byApi) return byApi;
+      if (sp.actor && typeof game !== "undefined") return game.actors?.get?.(sp.actor) ?? null;
+    } catch (_) {}
+    return null;
+  },
+
+  /**
    * Ask the AI to narrate an outcome and (optionally) apply effects.
    *
    * @param {ChatMessage|null} message  the originating roll card, if any.
@@ -1702,7 +1723,7 @@ Narrate this milestone briefly and evocatively as the Skald (1–3 sentences), f
    *        prompt so the AI knows what happened (and is told not to re-emit it).
    */
   async _narrateOutcome(message, parsed, opts = {}) {
-    const actor = message?.speakerActor ?? sys().getActiveCharacter();
+    const actor = this._rollActor(message) ?? sys().getActiveCharacter();
     const allowEffects = Settings.get("aiAppliesEffects") ?? true;
 
     // 1. Apply the deterministic combat mechanics FIRST (initiative on
@@ -2427,15 +2448,38 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
     // for a guessed name (vow/scene/generic) we always reuse the newest open
     // journey — robust whether one or many journeys are open.
     const fromIntent = ["regex", "direction", "context", "ai"].includes(resolved.source);
-    this._dbg?.("journey flow:", { name: inferredName, source: resolved.source, specific, fromIntent, hasOpenTrack: !!track });
 
     if (track && specific && fromIntent) {
-      // Reuse only an OPEN journey matching this destination; else branch a new one.
+      // Reuse only an OPEN journey matching this destination; else consider branching.
       const match     = sys().findTrackFuzzy(actor, inferredName, "journey");
       const matchOpen = match && !foundry.utils.getProperty(match, "system.completed");
-      track = matchOpen ? match : null;
-      this._dbg?.("journey disambiguation:", { inferredName, matchedOpen: !!matchOpen, willReuse: !!track });
+      if (matchOpen) {
+        track = match;
+      } else {
+        // (fix v0.25.2 — duplicate guard) The fuzzy match missed. Branch a NEW
+        // track ONLY when the open journey is itself a DISTINCT, specifically
+        // named destination. If the open journey is merely a GENERIC placeholder
+        // ("The Journey"), adopt it for this freshly-named destination instead of
+        // opening a confusing SECOND open journey (a duplicate the player sees).
+        const openIsGeneric = sys().isGenericTrackWord?.(String(track.name ?? ""));
+        track = openIsGeneric ? track : null;
+      }
     }
+
+    // (diagnostic v0.25.2 — ALWAYS ON) One concise line per journey roll exposing
+    // the EXACT reuse-vs-create decision + acting actor, without the debugLogging
+    // gate (the prior _dbg traces were gated, so user logs showed nothing).
+    try {
+      const openJourneys = (Array.from(actor?.items ?? [])).filter(i =>
+        i.type === "progress"
+        && !foundry.utils.getProperty(i, "system.completed")
+        && sys()._trackKindOf?.(i) === "journey").map(i => i.name);
+      console.log(LOG_PREFIX, "journey-flow decision:", {
+        actor: actor?.name, actorId: actor?.id, openJourneys,
+        resolved: inferredName, source: resolved.source, specific, fromIntent,
+        decision: track ? `REUSE "${track.name}"` : `CREATE "${inferredName}"`
+      });
+    } catch (_) {}
 
     if (!track) {
       const name = inferredName;

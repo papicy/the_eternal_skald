@@ -207,6 +207,7 @@ function jAdapter() {
   return { calls, adapter: {
     id: "foundry-ironsworn", isActive: () => true, capabilities: () => ({}), _trackKindOf: kindOf,
     _newestOpenTrackItem: (a, k) => k === "journey" ? (openJ(a)[0] ?? null) : null,
+    isGenericTrackWord: (s) => /^(the\s+)?(journey|vow|fight|combat|track|quest)$/i.test(String(s ?? "").trim()),
     findTrackFuzzy: () => null, getActiveVow: () => ({ name: "Avenge Ravensford" }),
     getProgressTrack: (a, id) => a.items.get(id),
     async createProgressTrack(a, name, _k, rank) { calls.created++;
@@ -252,6 +253,36 @@ console.log("[10] ACCUMULATED duplicates, NO fresh intent — bleed stops, reuse
   eq(calls.created, 0, "no further duplicate created — the bleed stops");
   eq(actor.items.length, 3, "the three accumulated tracks are unchanged in count");
 }
+
+// (v0.25.2) The FRESH-INTENT cases — when the player explicitly states a
+// destination this turn, _resolveJourney returns a specific, fromIntent name.
+const SHJI = { moveName: "Undertake a Journey", outcome: "Strong Hit" };
+console.log("[11] GENERIC placeholder open + fresh specific intent — adopt it, do NOT branch a duplicate");
+{
+  // Root cause of the persistent dup: the lone open journey is a GENERIC
+  // placeholder ("The Journey"); the fresh intent resolves a specific name that
+  // fuzzy-MISSES it. Pre-fix this branched a 2nd open journey (the duplicate the
+  // user reported). Now the generic placeholder is adopted for the destination.
+  const actor = new MockActor(); actor.add(journeyItem("The Journey"));
+  const { adapter, calls } = jAdapter(); registerSystem("foundry-ironsworn", adapter);
+  Integration._lastIntent = "travel to Greymoor"; Integration._lastIntentTs = Date.now();
+  await Integration._autoJourneyFlow(SHJI, actor);
+  eq(calls.created, 0, "no duplicate branched — the generic placeholder is adopted for the stated destination");
+  eq(actor.items.length, 1, "still exactly one journey track");
+  eq(calls.advanced[0], "The Journey", "progress marked on the adopted (formerly generic) journey");
+}
+console.log("[12] DISTINCT specific journey open + fresh intent for a DIFFERENT destination — branch is preserved");
+{
+  // The simultaneous-journeys feature must survive: a genuinely different,
+  // freshly-stated destination still opens its own track.
+  const actor = new MockActor(); actor.add(journeyItem("Journey to Ravensford"));
+  const { adapter, calls } = jAdapter(); registerSystem("foundry-ironsworn", adapter);
+  Integration._lastIntent = "travel to Greymoor"; Integration._lastIntentTs = Date.now();
+  await Integration._autoJourneyFlow(SHJI, actor);
+  eq(calls.created, 1, "a new track is branched for the distinct, freshly-stated destination");
+  eq(actor.items.length, 2, "now two separate journey tracks (no false merge, no false dup)");
+}
+Integration._lastIntent = ""; Integration._lastIntentTs = 0;
 
 console.log("");
 console.log(`${passed} passed, ${failed} failed`);

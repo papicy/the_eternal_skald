@@ -13,6 +13,34 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.25.2] — 2026-06-14
+
+A follow-up **bug-fix** release: the v0.25.1 provenance gate was correct in
+isolation, but real worlds still saw duplicate journey tracks. Runtime tracing
+pinned two upstream causes the gate could not see.
+
+### Fixed
+- **"Undertake a Journey" now advances on the actor that actually rolled.** The
+  post-roll flow resolved its actor via `getActiveCharacter()`, which keys off the
+  **controlled token**. When the selected token differed from the rolling
+  character (routine for a GM, or a player with more than one token on the
+  canvas) the journey was opened on / searched against the *wrong* actor, so the
+  prior open track was never found and a duplicate was branched every roll. The
+  actor is now taken from the roll message's speaker first (the old
+  `message.speakerActor` reference was dead code and always fell through).
+- **A generic placeholder journey is adopted, not duplicated.** When the only
+  open journey is an unnamed placeholder ("The Journey") and the player then
+  states a real destination, the fuzzy match missed and a second open journey was
+  branched. The placeholder is now adopted for the freshly-named destination;
+  genuinely distinct, freshly-stated destinations still branch their own track.
+
+### Changed
+- **Always-on diagnostic logging** at the journey-flow decision point. The
+  v0.25.1 traces were gated behind the Debug Logging setting, so production logs
+  showed nothing. A single concise line per journey roll now reports the acting
+  actor, every open journey, the resolved destination/provenance, and the final
+  reuse-vs-create decision — no setting required.
+
 ## [0.25.1] — 2026-06-14
 
 A **bug-fix** release for journey progress tracking.
