@@ -227,13 +227,30 @@ console.log("[8] SINGLE open journey — reuse it, do NOT branch a duplicate");
   eq(actor.items.length, 1, "still exactly one journey track");
   eq(calls.advanced[0], "The Long Road North", "progress marked on the existing journey");
 }
-console.log("[9] MULTIPLE open journeys — name mismatch still branches a new track");
+console.log("[9] MULTIPLE open journeys, NO fresh intent — reuse newest, do NOT branch");
 {
+  // The bug trigger: a link/dialog roll stamps no fresh intent, so the name is a
+  // vow/scene GUESS (not fromIntent). Even with several open journeys we must NOT
+  // branch a duplicate off a guessed name — reuse the newest open journey.
   const actor = new MockActor(); actor.add(journeyItem("The Long Road North")); actor.add(journeyItem("Pilgrimage to Ironhome"));
   const { adapter, calls } = jAdapter(); registerSystem("foundry-ironsworn", adapter); Integration._lastIntentTs = 0;
   await Integration._autoJourneyFlow(SHJ, actor);
-  eq(calls.created, 1, "a new track is branched when several journeys compete and none match");
-  eq(actor.items.length, 3, "the new journey track was added");
+  eq(calls.created, 0, "no duplicate branched off a GUESSED name even with multiple open journeys");
+  eq(actor.items.length, 2, "still exactly the two pre-existing journey tracks");
+  eq(calls.advanced[0], "The Long Road North", "progress marked on the open journey returned by _newestOpenTrackItem");
+}
+console.log("[10] ACCUMULATED duplicates, NO fresh intent — bleed stops, reuse newest");
+{
+  // Regression for the production bug: once duplicates pile up (from the bug
+  // itself over prior sessions), each fresh link-roll with no intent must REUSE
+  // the newest open track, never adding a 4th, 5th, ... duplicate.
+  const actor = new MockActor();
+  actor.add(journeyItem("Journey toward Ravensford")); actor.add(journeyItem("Journey toward Ravensford"));
+  actor.add(journeyItem("Journey toward Ravensford"));
+  const { adapter, calls } = jAdapter(); registerSystem("foundry-ironsworn", adapter); Integration._lastIntentTs = 0;
+  await Integration._autoJourneyFlow(SHJ, actor);
+  eq(calls.created, 0, "no further duplicate created — the bleed stops");
+  eq(actor.items.length, 3, "the three accumulated tracks are unchanged in count");
 }
 
 console.log("");
