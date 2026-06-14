@@ -13,6 +13,38 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.25.6] — 2026-06-14
+
+A small, purely organisational **settings menu tidy** release. No setting was
+added, removed, renamed or hidden — only the *tab* under which each visible
+setting appears in the custom tabbed settings panel was corrected.
+
+### Changed
+- **Every visible setting is now categorised into a logical tab.** The tabbed
+  settings panel (`scripts/ui/settings-panel.js`) mapped only a subset of the
+  registered settings, so 19 `config: true` settings silently fell through to
+  the catch-all **Advanced** list: the text-to-speech options
+  (`ttsEnabled`, `ttsAutoNarrate`, `ttsRate`, `ttsVoice`), the
+  `autonomousTools` toggle, the semantic-memory / RAG options
+  (`ragEmbedModel`, `ragIndexNarration`, `ragNarrationSources`,
+  `ragNarrationIncludeEmotes`, `ragNarrationMinChars`, `ragNarrationMaxRecords`,
+  `ragUseAnnIndex`) and the seven AI-context toggles (`contextMoves`,
+  `contextDelveMoves`, `contextAssets`, `contextTruths`, `contextDomains`,
+  `contextThemes`, `contextFoes`). TTS and AI-capability toggles now sit under
+  **Narrative**; all memory / RAG / AI-context options now sit under **Memory**.
+- **Removed two dead tab mappings.** `timelineEvents` and `linkStyles` were
+  mapped in the panel but are registered with `config: false` (never shown in
+  the panel), so their mappings were unreachable dead code.
+
+### Notes
+- The native Foundry flat settings list is unchanged — every setting keeps
+  `config: true`. This change only affects which tab a setting appears under in
+  the module's alternate tabbed editor. No behaviour, data or default changed.
+- The panel regression test (`test/settings-panel.test.mjs`) was extended with
+  a stronger drift guard: it now asserts that every `config: true` setting is
+  explicitly categorised (except the two intentional Advanced entries) and that
+  no `config: false` setting is mapped.
+
 ## [0.25.5] — 2026-06-14
 
 A focused **narration-respects-progress** release that makes the AI's narration

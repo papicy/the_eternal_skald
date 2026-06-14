@@ -4226,3 +4226,73 @@ RESIDUAL RISK: (A) The symmetric gate makes vow/combat completion rolls require 
               already sets allowFollowups:true; the conversational path (allowFollowups:false) is
               unchanged.
 ```
+
+```
+### [2026-06-14 22:19 UTC] — Settings menu tidy: categorise every visible setting into a logical tab
+AGENT:        Abacus.AI Agent (SkaldCoder)
+TASK TYPE:    REFACTOR
+TOKEN BUDGET: REFACTOR (standard)  |  USED: within  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read SKILL.md (engineering rules) + repository-map.md
+  [x] task classified (REFACTOR — organisational, no behaviour change)
+  [x] target file(s)+line(s) located (evidence below)
+  [x] <= 3 files / <= 50 changed lines per file (1 code file; version/doc/test files exempt)
+  [x] additive & backwards-compatible
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] regression test extended (settings-panel.test.mjs drift guard)
+  [x] rollback plan defined
+
+PROBLEM:      The custom tabbed settings panel only mapped a subset of registered settings into
+              tabs, so 19 `config: true` settings silently fell through to the catch-all Advanced
+              list (TTS options, autonomousTools, all rag* memory options, the 7 context* AI-context
+              toggles). Two `config: false` settings (timelineEvents, linkStyles) were mapped but
+              never rendered (dead code). No duplicate setting keys, no broken i18n refs, no invalid
+              configs were found — registration in scripts/core/settings.js is clean.
+
+EVIDENCE (brief §4 format):
+  CLAIM:      19 config:true settings were unmapped and fell through to Advanced.
+  EVIDENCE:   scripts/ui/settings-panel.js :: TAB_OF map vs scripts/core/settings.js register() calls
+  CONFIDENCE: HIGH
+  BASIS:      Cross-check script: 84 config:true settings registered (incl. 7 context* via CTX_DEFAULTS
+              loop ~settings.js:1148-1166); TAB_OF mapped only 65 of them -> 19 unmapped =
+              {autonomousTools, ttsEnabled, ttsAutoNarrate, ttsRate, ttsVoice, ragEmbedModel,
+              ragIndexNarration, ragNarrationSources, ragNarrationIncludeEmotes, ragNarrationMinChars,
+              ragNarrationMaxRecords, ragUseAnnIndex, contextMoves, contextDelveMoves, contextAssets,
+              contextTruths, contextDomains, contextThemes, contextFoes}.
+
+  CLAIM:      Two config:false settings were mapped but unreachable.
+  EVIDENCE:   scripts/ui/settings-panel.js :: TAB_OF entries timelineEvents, linkStyles
+  CONFIDENCE: HIGH
+  BASIS:      Both registered with config:false in settings.js; collectGroupedSettings() only renders
+              config:true settings, so the two mappings could never be reached.
+
+  CLAIM:      Settings registration itself is clean (no real config errors / duplicates).
+  EVIDENCE:   scripts/core/settings.js (88 register calls) + lang/en.json
+  CONFIDENCE: HIGH
+  BASIS:      `uniq -d` over register keys -> no duplicates; all 184 localize() keys resolve in
+              en.json (0 missing); PROVIDER_PRESETS keys match providerPreset choices exactly;
+              registration runs on i18nInit (correct timing).
+
+CHANGE:       scripts/ui/settings-panel.js: rewrote the TAB_OF map (tagged comment
+              "gate 2026-06-14 — settings menu tidy"). Added the 19 unmapped config:true settings —
+              TTS + autonomousTools -> narrative (AI capability/narration); all rag* and context*
+              -> memory (semantic-memory grounding). Dropped the 2 dead config:false entries
+              (timelineEvents, linkStyles). New tab distribution: narrative=40, memory=34,
+              aiProvider=8, advanced=2 (debugLogging, loggingLevel intentional). No setting hidden,
+              removed or renamed; native Foundry flat list unchanged (all stay config:true).
+FILES TOUCHED (1 code + test + version/docs):
+  - scripts/ui/settings-panel.js              (TAB_OF rewrite, within 50-line limit)
+  - test/settings-panel.test.mjs              (extended: drift guard asserts every config:true
+                                               setting is categorised except ALLOWED_ADVANCED, and
+                                               no config:false setting is mapped; +5 mapping checks)
+  - module.json / package.json / README.md / CHANGELOG.md (version 0.25.5 -> 0.25.6; version files exempt)
+TESTS:        node test/settings-panel.test.mjs -> 39 passed, 0 failed
+SUITE:        npm test -> PASS (67 files, 0 failed); node test/load-smoke.mjs -> clean import
+GATE:         none required — 1 code file, within the 3-file / 50-line limits; additive & backwards-
+              compatible; no LOCKED/GUARDED file touched (settings-panel.js is OPEN per repository-map).
+ROLLBACK:     git revert <this commit-sha>   (single-commit revert)
+RESIDUAL RISK: Purely cosmetic — only changes which tab a setting appears under in the alternate
+              tabbed editor. No behaviour, data, default or i18n key changed; the native Foundry
+              settings list is untouched. Worst case is a setting appearing under a less-expected tab.
+```

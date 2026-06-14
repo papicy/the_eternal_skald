@@ -68,6 +68,45 @@ ok(registeredKeys.length >= 50, `parsed a plausible number of settings (${regist
 const bad = registeredKeys.filter(k => !tabIds.includes(categorizeSetting(k)));
 eq(bad.length, 0, `every registered setting maps to a valid tab (offenders: ${bad.join(", ") || "none"})`);
 
+/* ── (gate 2026-06-14 — settings menu tidy) Stronger drift guards ──────
+ * The fallback above means a forgotten setting silently lands in "Advanced".
+ * Parse each register block for its config flag and assert:
+ *   1) every USER-VISIBLE (config:true) setting is EXPLICITLY categorized
+ *      (i.e. not relying on the advanced fallback) — except the two genuine
+ *      advanced/debug settings; and
+ *   2) HIDDEN (config:false) storage settings are NOT mapped (dead entries). */
+const blocks = Array.from(SETTINGS.matchAll(
+  /register\(MODULE_ID,\s*"(\w+)",\s*\{([\s\S]*?)\n\s*\}\);/g));
+const configTrue = [];
+const configFalse = [];
+for (const [, key, body] of blocks) {
+  const m = body.match(/config:\s*(true|false)/);
+  (m && m[1] === "false" ? configFalse : configTrue).push(key);
+}
+// The CTX_DEFAULTS loop registers these config:true keys programmatically.
+for (const c of ["contextMoves", "contextDelveMoves", "contextAssets",
+                 "contextTruths", "contextDomains", "contextThemes", "contextFoes"]) {
+  if (!configTrue.includes(c)) configTrue.push(c);
+}
+ok(configTrue.length >= 80, `parsed config:true settings (${configTrue.length})`);
+
+// The only settings allowed to live in "Advanced" are the explicit debug ones.
+const ALLOWED_ADVANCED = new Set(["debugLogging", "loggingLevel"]);
+const dumped = configTrue.filter(k => categorizeSetting(k) === "advanced" && !ALLOWED_ADVANCED.has(k));
+eq(dumped.length, 0, `no visible setting silently dumped into Advanced (offenders: ${dumped.join(", ") || "none"})`);
+
+// Hidden storage settings must not appear in the rendered tab map.
+const deadMapped = configFalse.filter(k => Object.prototype.hasOwnProperty.call(
+  assignSettingsToTabs([k]), "x") ? false : categorizeSetting(k) !== "advanced");
+eq(deadMapped.length, 0, `no hidden (config:false) setting is explicitly mapped (offenders: ${deadMapped.join(", ") || "none"})`);
+
+// Representative mappings for the freshly-categorized settings (regression).
+eq(categorizeSetting("ttsEnabled"), "narrative", "ttsEnabled → Narrative");
+eq(categorizeSetting("autonomousTools"), "narrative", "autonomousTools → Narrative");
+eq(categorizeSetting("ragEmbedModel"), "memory", "ragEmbedModel → Memory");
+eq(categorizeSetting("ragIndexNarration"), "memory", "ragIndexNarration → Memory");
+eq(categorizeSetting("contextMoves"), "memory", "contextMoves → Memory");
+
 /* ── [B] Wiring guards ───────────────────────────────────────────── */
 ok(/registerMenu\(MODULE_ID,\s*"tabbedSettings"/.test(HOOKS), "hooks register the tabbedSettings menu");
 ok(/type:\s*PanelCls/.test(HOOKS), "menu uses the settings panel class");

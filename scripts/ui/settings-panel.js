@@ -34,7 +34,14 @@ export const SETTINGS_TABS = Object.freeze([
 
 const TAB_IDS = Object.freeze(SETTINGS_TABS.map((t) => t.id));
 
-/** Explicit setting-key → tab mapping. Anything absent falls back to "advanced". */
+/* Explicit setting-key → tab mapping. Anything absent falls back to "advanced".
+ * (gate 2026-06-14 — settings menu tidy) Every user-visible (config:true)
+ * setting is mapped here so none silently lands in "Advanced": added the TTS
+ * controls + autonomousTools (narrative), the narration/embed RAG controls and
+ * the AI-compendium-context toggles (memory). Hidden storage settings
+ * (config:false: timelineEvents, linkStyles, ragEmbedModelActive,
+ * firstRunComplete) are intentionally NOT listed — the panel only renders
+ * config:true keys, so mapping them would be dead code. */
 const TAB_OF = Object.freeze({
   // --- AI Provider / connection ---
   aiMode: "aiProvider", providerPreset: "aiProvider", apiKey: "aiProvider",
@@ -55,15 +62,24 @@ const TAB_OF = Object.freeze({
   tokenControlEnabled: "narrative", tokenControlAiTriggers: "narrative", tokenMoveDuration: "narrative",
   autoAnalyzeScenes: "narrative", visionModel: "narrative", mapAnalysisQuality: "narrative",
   maxMapResolution: "narrative", imageFormat: "narrative",
+  autonomousTools: "narrative",
+  // Text-to-speech narration (client-scoped).
+  ttsEnabled: "narrative", ttsAutoNarrate: "narrative", ttsRate: "narrative", ttsVoice: "narrative",
   // --- Memory / chronicle / journaling ---
   ragEnabled: "memory", ragIndexCompendiums: "memory", ragContextTokens: "memory",
   ragMaxResults: "memory", ragAutoIndex: "memory", ragSimilarityThreshold: "memory",
   ragDebugMode: "memory", memoryLength: "memory", autoJournaling: "memory",
   journalNotifications: "memory", journalPermissions: "memory", sessionAutoSummary: "memory",
   journalingDensity: "memory", metadataBackfill: "memory", journalEditMode: "memory",
-  recapObsidianFormat: "memory", sessionAutoMinutes: "memory", timelineEvents: "memory",
+  recapObsidianFormat: "memory", sessionAutoMinutes: "memory",
   contradictionDetection: "memory", entityLinking: "memory", customLinkStyles: "memory",
-  linkStyles: "memory",
+  // Selectable embedding model + narration-indexing controls.
+  ragEmbedModel: "memory", ragIndexNarration: "memory", ragNarrationSources: "memory",
+  ragNarrationIncludeEmotes: "memory", ragNarrationMinChars: "memory",
+  ragNarrationMaxRecords: "memory", ragUseAnnIndex: "memory",
+  // AI compendium context (name catalogues injected into the prompt for grounding).
+  contextMoves: "memory", contextDelveMoves: "memory", contextAssets: "memory",
+  contextTruths: "memory", contextDomains: "memory", contextThemes: "memory", contextFoes: "memory",
   // --- Advanced / debug ---
   debugLogging: "advanced", loggingLevel: "advanced"
 });
