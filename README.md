@@ -71,6 +71,19 @@ If self-hosting, add the following to your Foundry startup flags:
 --import ./Data/modules/the-eternal-skald/scripts/eternal-skald-server.mjs
 ```
 
+On startup you should see the server hook announce itself in the console:
+
+```text
+⚔️  Skald | v0.24.0 — server hook active. /skald-api/* routes ready.
+```
+
+You can confirm the routes are live by hitting the health endpoint
+(`http://your-foundry:30000/skald-api/health`), which returns:
+
+```json
+{"status":"ok","service":"The Eternal Skald","version":"0.24.0"}
+```
+
 > [!NOTE]
 > If you were previously running `skald-proxy.js` or had systemd/PM2 units for it, remove them. The old *Proxy URL* setting no longer exists.
 
