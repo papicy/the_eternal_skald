@@ -79,5 +79,28 @@ ok(!!EN?.ETERNAL_SKALD?.settingsPanel?.menu?.hint, "en.json has settingsPanel.me
 /* ── [C] Node-import safety ──────────────────────────────────────── */
 ok(typeof categorizeSetting === "function", "UI module imports cleanly under plain Node (no Foundry global)");
 
+/* ── [D] Regression: i18n timing + panel sizing ──────────────────── */
+// (D1) Settings + menus must register on i18nInit (translations loaded),
+// NOT on init (where game.i18n.localize returns raw key strings). Guards the
+// "labels show ETERNAL_SKALD.settings.*.name" bug.
+const i18nInitBody = (HOOKS.match(/Hooks\.once\(\s*"i18nInit"\s*,\s*\(\)\s*=>\s*\{([\s\S]*?)\n\}\);/) || [,""])[1];
+// strip line comments so an explanatory "// ... Settings.register() ..." note
+// inside init does not give a false positive for an actual call.
+const initBody     = (HOOKS.match(/Hooks\.once\(\s*"init"\s*,\s*\(\)\s*=>\s*\{([\s\S]*?)\n\}\);/) || [,""])[1]
+                       .replace(/^\s*\/\/.*$/gm, "");
+ok(/Hooks\.once\(\s*"i18nInit"/.test(HOOKS), "an i18nInit hook is registered");
+ok(/Settings\.register\(\)/.test(i18nInitBody), "Settings.register() runs inside i18nInit");
+ok(/registerMenu\(MODULE_ID,\s*"tabbedSettings"/.test(i18nInitBody), "tabbedSettings menu registers inside i18nInit");
+ok(/registerMenu\(MODULE_ID,\s*"firstRunWizard"/.test(i18nInitBody), "firstRunWizard menu registers inside i18nInit");
+ok(!/Settings\.register\(\)/.test(initBody), "Settings.register() is NOT called inside the init hook anymore");
+
+// (D2) Panel CSS must use a flex column with a pinned footer so the Save
+// button is always visible. Guards the "window too small / Save hidden" bug.
+const PANEL = read("scripts", "ui", "settings-panel.js");
+ok(/\.window-content\{[^}]*flex-direction:column/.test(PANEL), "window-content is a flex column");
+ok(/\.es-set-footer\{[^}]*flex:0 0 auto/.test(PANEL), "footer is pinned (flex:0 0 auto)");
+ok(/\.es-set-pane\.active\{[^}]*flex:1 1 auto/.test(PANEL), "active pane flexes to fill available height");
+ok(!/max-height:60vh/.test(PANEL), "the viewport-relative max-height:60vh that caused overflow is gone");
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
