@@ -523,6 +523,21 @@ PROGRESS MOVES — how a journey, vow, or fight is COMPLETED (read carefully):
   – "Reach Your Destination" decides HOW the arrival goes, not WHETHER you arrive.`);
   }
 
+  // (fix — deterministic journey suggestion) When the LIVE game state shows an
+  // OPEN journey track, the advancing move is unambiguous. Surface "Undertake a
+  // Journey" explicitly so the Skald reliably offers it instead of leaving the
+  // choice to discretion (or inventing a travel move). Read-only detection from
+  // the character-sheet context string (describeCharacter lists open journeys).
+  if ((allowMoves || allowFollowups) && /open journeys|🗺️/i.test(String(context || ""))) {
+    parts.push(`\
+ACTIVE JOURNEY IN PROGRESS: the character has at least one OPEN journey track
+(see "Open journeys" in the live game state). Whenever the fiction moves the
+party along that journey, the move to present is "Undertake a Journey" (a Wits
+roll) to mark progress — name it EXACTLY and reference the open journey by its
+EXACT title. Do NOT invent a different travel move, and do NOT offer "Reach Your
+Destination" until the journey's progress is high (≈ 7/10+ boxes).`);
+  }
+
   if (allowMoves) {
     parts.push(`\
 WHEN A MOVE IS WARRANTED — WEAVE IT INTO YOUR PROSE (never a separate card):

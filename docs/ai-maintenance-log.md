@@ -3644,3 +3644,73 @@ RESIDUAL RISK: LOW. capabilities() flips several flags ON (sheetWrites/impacts/m
               GM-gated and feature-detected in their own methods, so no unguarded write is introduced.
               Weak-hit completion now closes tracks that previously lingered — intended, and XP remains
               vow-only (the updateItem XP hook is unchanged).
+
+---
+
+### [2026-06-14 16:40 EEST] — Fix narrated combat closure + scoped completion filter + deterministic "Undertake a Journey"
+
+TASK TYPE:    IMPLEMENT (+ TEST)
+TOKEN BUDGET: IMPLEMENT 20,000  |  USED: ~within budget  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md (SKILL) + repository-map.md + relevant test
+  [x] task classified: IMPLEMENT (+ TEST)
+  [x] target file(s)+line(s) located (evidence below)
+  [x] <= 3 files / <= 50 changed lines per file (integration.js +27/-5; prompt-builder.js +15/-0; new test)
+  [x] additive & backwards-compatible (fallback only runs when the specific close fails; filter drop is NARROWED, never widened)
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] architectural boundary: 🔴 LOCKED integration.js + 🟡 GUARDED prompt-builder.js touched — GATE recorded below (human-approved)
+  [x] regression test added (test/combat-close-journey.test.mjs — RUNTIME, exercises the real Integration)
+  [x] rollback plan defined
+
+PROBLEM:      A narrated "End the Fight — Weak Hit" announced "ended combat 'Warrior'" yet the Warrior
+              combat track stayed OPEN on the sheet. Two defects: (1) the end_combat handler had no
+              robust fallback when no specific foe resolved, so an unresolved narrated ending left the
+              fight open; (2) _filterRedundantCombatEffects dropped a genuine end_combat whenever ANY
+              track auto-completed in the same turn (the /auto-completed/ substring matched the COMBINED
+              autoSummary regardless of which kind closed). Separately, "Undertake a Journey" was only
+              LLM-discretionary prose with no deterministic surfacing when a journey is actually open.
+
+EVIDENCE (brief §4 format):
+  CLAIM:      The end_combat case only tried fuzzy-name → active-combat → literal-name; no robust fallback.
+  EVIDENCE:   scripts/narrative/integration.js:3015-3034 :: applyEffects "end_combat" case (pre-edit)
+  CONFIDENCE: HIGH    BASIS: read the lines directly
+  CLAIM:      closeStaleCombatTracks() marks all open combat tracks completed and returns {ok,closed[]}.
+  EVIDENCE:   scripts/ironsworn/combat.js:156-176 :: closeStaleCombatTracks
+  CONFIDENCE: HIGH    BASIS: read the lines directly
+  CLAIM:      _filterRedundantCombatEffects dropped end_combat for ANY completion move + "auto-completed".
+  EVIDENCE:   scripts/narrative/integration.js:2503-2517 :: _filterRedundantCombatEffects (pre-edit)
+  CONFIDENCE: HIGH    BASIS: read the lines directly
+  CLAIM:      autoSummary is the joined output of all auto-flows; combat AND journey flows emit "auto-completed".
+  EVIDENCE:   scripts/narrative/integration.js:1727-1742, 1862, 2453 :: _narrateOutcome / _autoCombatFlow / _autoJourneyFlow
+  CONFIDENCE: HIGH    BASIS: read the lines directly
+  CLAIM:      "Undertake a Journey" was only static discretionary prose; the live context lists open journeys.
+  EVIDENCE:   scripts/ai/prompt-builder.js:498-523 (guidance) + 887-888 (LIVE GAME STATE inject); scripts/ironsworn/character.js:292-311 (Open journeys lines)
+  CONFIDENCE: HIGH    BASIS: read the lines directly
+
+CHANGE:       (1) integration.js end_combat handler (~3026): when the targeted close fails to resolve a
+              track, fall back to sys().closeStaleCombatTracks(actor,{}) so a narrated ending always
+              closes the fight; reports the swept track name(s). Additive — only runs on a failed close.
+              (2) integration.js _filterRedundantCombatEffects (~2503): the redundant-completion drop is
+              now SCOPED to the kind the rolled move resolved — end_combat is dropped only when the rolled
+              move was the COMBAT completion ("End the Fight"); complete_track/mark_complete still drop on
+              any completion. A vow/journey completion no longer suppresses a genuine end_combat.
+              (3) prompt-builder.js buildIronswornPromptBlock (~526): when the live context shows an OPEN
+              journey ("Open journeys" / 🗺️), deterministically inject an "ACTIVE JOURNEY IN PROGRESS"
+              directive naming "Undertake a Journey" as the advancing move. Read-only context detection.
+FILES TOUCHED (3):
+  - scripts/narrative/integration.js        (+27 / -5)
+  - scripts/ai/prompt-builder.js            (+15 / -0)
+  - test/combat-close-journey.test.mjs      (+~190 / -0, new — 14 runtime assertions on the REAL Integration)
+TESTS:        node test/combat-close-journey.test.mjs → 14 passed, 0 failed
+SUITE:        npm test → PASS (65 of 65 test files green); test/load-smoke.mjs → clean import
+GATE:         GATE-COMBAT-CLOSE-JOURNEY — human-approved in conversation ("proceed") to edit the 🔴 LOCKED
+              scripts/narrative/integration.js and the 🟡 GUARDED scripts/ai/prompt-builder.js.
+ROLLBACK:     git revert <this commit> — restores the prior end_combat handler, the unscoped completion
+              filter, and removes the journey directive + the new test. No settings/flags/directives/i18n
+              keys changed, so the revert is byte-clean with no migration.
+RESIDUAL RISK: LOW. The end_combat fallback only fires when the specific close fails, and closeStaleCombatTracks
+              is feature-detected (typeof guard) so non-Ironsworn adapters degrade to no-op. The filter change
+              only NARROWS what is dropped (never drops more than before), so no effect that previously applied
+              is now suppressed. The journey directive is prose-only guidance gated on an open-journey context
+              match; it adds no write and no new directive grammar. XP remains vow-only (unchanged).
