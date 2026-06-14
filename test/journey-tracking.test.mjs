@@ -187,6 +187,55 @@ console.log("[7] LEGACY JOURNEY — a hand-made progress track is treated as a j
   ok(desc.includes('"The Old Caravan Route"'), "legacy journey listed under Open journeys");
 }
 
+/*  [8/9] _autoJourneyFlow REUSE — link/dialog rolls stamp no fresh intent, so
+ *  _resolveJourney falls back to a vow-guessed name flagged specific:true. With
+ *  ONE open journey that must NOT branch a duplicate (the "new track every time"
+ *  bug); with SEVERAL, a name-mismatch still branches. Exercises real Integration. */
+const mk = () => { const f = function () { return mk(); };
+  return new Proxy(f, { get(_t, p) { return (p === "then" || p === Symbol.iterator || p === Symbol.toPrimitive) ? undefined : mk(); },
+    set() { return true; }, apply() { return mk(); }, construct() { return mk(); } }); };
+for (const n of ["Hooks","ui","CONST","Roll","ChatMessage","Dialog","DialogV2","loadTemplates","renderTemplate","fromUuid","fromUuidSync","getDocumentClass","Handlebars","TextEditor","duplicate","mergeObject","$","jQuery","document","window"])
+  if (globalThis[n] === undefined) globalThis[n] = mk();
+globalThis.game.settings = { get: () => undefined };
+const { registerSystem } = await import("../scripts/systems/registry.js");
+const { Integration } = await import("../scripts/narrative/integration.js");
+
+function jAdapter() {
+  const calls = { created: 0, advanced: [] };
+  const kindOf = (i) => i.flags?.[SCOPE]?.trackKind ?? "journey";
+  const openJ  = (a) => a.items.filter(i => i.type === "progress" && kindOf(i) === "journey" && !getProperty(i, "system.completed"));
+  return { calls, adapter: {
+    id: "foundry-ironsworn", isActive: () => true, capabilities: () => ({}), _trackKindOf: kindOf,
+    _newestOpenTrackItem: (a, k) => k === "journey" ? (openJ(a)[0] ?? null) : null,
+    findTrackFuzzy: () => null, getActiveVow: () => ({ name: "Avenge Ravensford" }),
+    getProgressTrack: (a, id) => a.items.get(id),
+    async createProgressTrack(a, name, _k, rank) { calls.created++;
+      const it = a.add({ name, type: "progress", system: { subtype: "progress", rank, current: 0, completed: false }, flags: { [SCOPE]: { trackKind: "journey" } } });
+      return { ok: true, id: it.id, name }; },
+    async markProgressByRank(a, id) { const t = a.items.get(id); calls.advanced.push(t.name);
+      setProperty(t, "system.current", (getProperty(t, "system.current") || 0) + 4); return { ok: true, track: t.name, boxes: 1 }; }
+  } };
+}
+const SHJ = { moveName: "Undertake a Journey", outcome: "Strong Hit" };  // no fresh intent stamped → the bug trigger
+const journeyItem = (name) => ({ name, type: "progress", system: { subtype: "progress", rank: 2, current: 4, completed: false }, flags: { [SCOPE]: { trackKind: "journey" } } });
+console.log("[8] SINGLE open journey — reuse it, do NOT branch a duplicate");
+{
+  const actor = new MockActor(); actor.add(journeyItem("The Long Road North"));
+  const { adapter, calls } = jAdapter(); registerSystem("foundry-ironsworn", adapter); Integration._lastIntentTs = 0;
+  await Integration._autoJourneyFlow(SHJ, actor);
+  eq(calls.created, 0, "no duplicate journey created when exactly one is open");
+  eq(actor.items.length, 1, "still exactly one journey track");
+  eq(calls.advanced[0], "The Long Road North", "progress marked on the existing journey");
+}
+console.log("[9] MULTIPLE open journeys — name mismatch still branches a new track");
+{
+  const actor = new MockActor(); actor.add(journeyItem("The Long Road North")); actor.add(journeyItem("Pilgrimage to Ironhome"));
+  const { adapter, calls } = jAdapter(); registerSystem("foundry-ironsworn", adapter); Integration._lastIntentTs = 0;
+  await Integration._autoJourneyFlow(SHJ, actor);
+  eq(calls.created, 1, "a new track is branched when several journeys compete and none match");
+  eq(actor.items.length, 3, "the new journey track was added");
+}
+
 console.log("");
 console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

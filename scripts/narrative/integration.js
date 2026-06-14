@@ -2415,7 +2415,20 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
     const specific     = resolved.specific;   // did we identify a real destination?
     let track = sys()._newestOpenTrackItem(actor, "journey");
 
-    if (track && specific) {
+    // (fix — single open journey) When EXACTLY ONE open journey track exists,
+    // it is unambiguously the journey this roll advances, so reuse it regardless
+    // of name specificity. This is the root-cause fix for the "new track every
+    // time" bug: link/dialog rolls don't stamp a fresh intent, so _resolveJourney
+    // falls back to a vow-guessed name flagged specific:true, whose fuzzy match
+    // misses the real open journey and branches a duplicate track. Disambiguation
+    // by name is only needed when MULTIPLE open journeys compete.
+    const openJourneys = (actor.items ?? []).filter(
+      (it) => it?.type === "progress"
+        && sys()._trackKindOf(it) === "journey"
+        && !foundry.utils.getProperty(it, "system.completed")
+    ).length;
+
+    if (track && specific && openJourneys > 1) {
       // Reuse only an OPEN journey matching this destination; else branch a new one.
       const match     = sys().findTrackFuzzy(actor, inferredName, "journey");
       const matchOpen = match && !foundry.utils.getProperty(match, "system.completed");
