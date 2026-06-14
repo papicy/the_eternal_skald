@@ -770,6 +770,69 @@ export const Settings = {
       default: true
     });
 
+    // ---- Narration / story RAG indexing (v0.25.0) ---------------------
+    // Index AI-generated Skald story cards and player IC/EMOTE narration into
+    // semantic memory. Story-only by design: OOC, rolls, system/help/error/
+    // suggest cards, slash-commands and whispers are categorically excluded by
+    // the BrowserRAG.prepareNarrationRecord classifier (not via toggles).
+
+    // Master opt-in for indexing narration/story into semantic memory.
+    game.settings.register(MODULE_ID, "ragIndexNarration", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.ragIndexNarration.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.ragIndexNarration.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: false   // opt-in by design
+    });
+
+    // Which narration sources to index.
+    game.settings.register(MODULE_ID, "ragNarrationSources", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.ragNarrationSources.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.ragNarrationSources.hint"),
+      scope: "world",
+      config: true,
+      type: String,
+      default: "both",
+      choices: {
+        both:   "AI story + player IC narration",
+        ai:     "AI-generated story only",
+        player: "Player in-character narration only"
+      }
+    });
+
+    // Include EMOTE messages as player narration (alongside IC). Default on.
+    game.settings.register(MODULE_ID, "ragNarrationIncludeEmotes", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.ragNarrationIncludeEmotes.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.ragNarrationIncludeEmotes.hint"),
+      scope: "world",
+      config: true,
+      type: Boolean,
+      default: true
+    });
+
+    // Minimum narration length (characters) worth embedding.
+    game.settings.register(MODULE_ID, "ragNarrationMinChars", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.ragNarrationMinChars.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.ragNarrationMinChars.hint"),
+      scope: "world",
+      config: true,
+      type: Number,
+      range: { min: 0, max: 500, step: 5 },
+      default: 20
+    });
+
+    // Rolling retention cap for narration vectors (0 = unlimited).
+    game.settings.register(MODULE_ID, "ragNarrationMaxRecords", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.ragNarrationMaxRecords.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.ragNarrationMaxRecords.hint"),
+      scope: "world",
+      config: true,
+      type: Number,
+      range: { min: 0, max: 20000, step: 100 },
+      default: 4000
+    });
+
     // Minimum cosine similarity for a memory to be considered relevant.
     game.settings.register(MODULE_ID, "ragSimilarityThreshold", {
       name: game.i18n.localize("ETERNAL_SKALD.settings.ragSimilarityThreshold.name"),
