@@ -738,6 +738,7 @@ export const Integration = {
             } else {
               const ref = moveDsId || move;
               const actor = sys().getActiveCharacter();
+              this._captureLinkMoveIntent(btn, move, root); // (gate 2026-06-14 — naming)
               const res = await sys().triggerMove(ref, { actor, stat });
               if (res?.ok && res.method === "milestone") {
                 // Milestone has no roll card — narrate it directly. triggerMove
@@ -1836,6 +1837,16 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
       // separate "What Comes Next" suggestion card — any stray [[MOVE:…]]
       // directive is stripped from the displayed narration instead. The
       // `allowFollowups` flag still gates whether the prompt invites them.
+      //
+      // (gate 2026-06-14 — deterministic progression) Inline prose suggestions
+      // depend on the AI choosing to weave a move in; that is not guaranteed.
+      // When an OPEN journey track exists, deterministically offer the correct
+      // next progress move so the journey lifecycle never stalls. Gated by the
+      // same `suggestMoves`/`allowFollowups` toggle; fully defensive.
+      if (allowFollowups) {
+        try { await this._maybeSuggestJourneyContinuation(actor, parsed); }
+        catch (e) { console.warn(LOG_PREFIX, "_maybeSuggestJourneyContinuation failed", e); }
+      }
     } catch (e) {
       console.warn(LOG_PREFIX, "_narrateOutcome failed", e);
     }
@@ -2512,11 +2523,18 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
           `Narrate a setback or mishap suffered en route (a hardship, lost supply, or hard choice) ` +
           `even as they press on along the path. Do NOT narrate arrival.`
         );
-        // (fix — journey completion) A journey that has reached full progress
-        // (10/10) is finished; close it deterministically so it stops being
-        // reused by later journeys (which caused the grouping bug).
-        const done = await this._autoCompleteIfFull(actor, track.id, "journey");
-        if (done) notes.push(`reached destination “${pr.track}” (10/10 — auto-completed)`);
+        // (gate 2026-06-14 — RAW arrival) A journey at full progress (10/10) is
+        // NOT auto-completed. In Ironsworn the player must roll "Reach Your
+        // Destination" to resolve HOW the arrival goes — auto-closing here would
+        // silently mutate the outcome (player-agency invariant, brief §1.3). The
+        // track is therefore left OPEN; we only steer the narration to prompt the
+        // roll instead of describing arrival. (Reuse of a lingering full track is
+        // handled by the fresh-intent reuse/branch guard above, lines ~2452.)
+        const cur2 = Number(foundry.utils.getProperty(track, "system.current") ?? 0);
+        if (Math.floor(cur2 / 4) >= 10) notes.push(
+          `“${pr.track}” is fully charted (10/10) — the destination is in sight. Do NOT ` +
+          `narrate arrival; prompt the player to roll "Reach Your Destination" to resolve it.`
+        );
       }
     } else if (track && !hit) {
       // (v0.13.0) MISS on "Undertake a Journey" — RAW: mark NO progress. The
@@ -2533,6 +2551,66 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
       );
     }
     return notes.join("; ");
+  },
+
+  /**
+   * (gate 2026-06-14 — context naming) Capture the FULL narration text around an
+   * inline move link as the player's intent BEFORE rolling, so journey auto-naming
+   * (_resolveJourney) can recover a real destination instead of a generic title.
+   * A programmatic card may override via data-raw-intent. Fully defensive: degrades
+   * to the move name and only stamps a fresh intent when non-empty.
+   */
+  _captureLinkMoveIntent(btn, move, root) {
+    let rawIntent = String(btn?.dataset?.rawIntent || "").trim();
+    if (!rawIntent) {
+      try {
+        const host = btn?.closest?.(".message-content") || btn?.closest?.(".chat-message") || root;
+        rawIntent = String(host?.textContent || "").replace(/\s+/g, " ").trim();
+      } catch (_) { /* graceful */ }
+    }
+    if (!rawIntent) rawIntent = String(move || "").trim();
+    if (rawIntent) { this._lastIntent = rawIntent; this._lastIntentTs = Date.now(); }
+    return rawIntent;
+  },
+
+  /**
+   * (gate 2026-06-14 — deterministic journey progression) After a narration,
+   * if the actor has an OPEN journey track, post a small card offering the
+   * correct next progress move so the journey lifecycle never depends on the
+   * AI weaving a move into prose:
+   *   • below 10/10  → offer "Undertake a Journey" (+wits) to advance it;
+   *   • at exactly 10/10 → offer "Reach Your Destination" to resolve arrival.
+   * The card reuses the existing data-skald-action="link-move" wiring. We stamp
+   * an explicit data-raw-intent of the track's own name so clicking it REUSES
+   * the same track (never branches a duplicate). Fully defensive — never throws,
+   * silently no-ops when no open journey exists or the system is inactive.
+   * @returns {Promise<boolean>} true when a card was posted.
+   */
+  async _maybeSuggestJourneyContinuation(actor, parsed) {
+    if (!actor || !this.active()) return false;
+    // Never stack this on the journey-completion roll's own turn.
+    if (this._completionMoveKind(parsed?.moveName) === "journey") return false;
+    const track = sys()._newestOpenTrackItem?.(actor, "journey");
+    if (!track || foundry.utils.getProperty(track, "system.completed")) return false;
+    const cur   = Number(foundry.utils.getProperty(track, "system.current") ?? 0);
+    const boxes = Math.max(0, Math.min(10, Math.floor(cur / 4)));
+    const full  = boxes >= 10;
+    const moveName = full ? "Reach Your Destination" : "Undertake a Journey";
+    const stat     = full ? "" : "wits";
+    const tname    = String(track.name ?? "The Journey");
+    const label    = `${moveName}${stat ? ` +${stat}` : ""}`;
+    const btn = `<button type="button" class="es-action-move-btn" data-skald-action="link-move" ` +
+      `data-move="${escapeHtml(moveName)}"${stat ? ` data-stat="${escapeHtml(stat)}"` : ""} ` +
+      `data-raw-intent="${escapeHtml(tname)}">${escapeHtml(label)}</button>`;
+    const lead = full
+      ? `Your journey <strong>${escapeHtml(tname)}</strong> is fully charted (10/10) — the destination is in sight. Roll to resolve your arrival:`
+      : `Your journey <strong>${escapeHtml(tname)}</strong> continues (${boxes}/10). Press on when ready:`;
+    const tail = `<p class="es-action-confirm-note"><em>Or simply keep narrating — no roll will be made unless you choose to.</em></p>`;
+    try {
+      await Chat.postSkald(`<p>${lead}</p><div class="es-action-move-choices">${btn}</div>${tail}`,
+        { variant: "oracle", title: "The Road Ahead" });
+      return true;
+    } catch (_) { return false; }
   },
 
   /**
