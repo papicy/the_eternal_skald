@@ -13,6 +13,38 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.25.4] — 2026-06-14
+
+A focused **journey-lifecycle** release that hands arrival back to the dice and
+keeps the journey loop self-prompting.
+
+### Changed
+- **A fully-charted journey (10/10) is no longer auto-completed.** Previously the
+  journey progress track silently closed itself the moment it hit 10/10, which
+  pre-empted the player's "Reach Your Destination" roll and quietly decided the
+  outcome of the arrival. The track now stays **OPEN**; the narration is steered
+  to prompt the player to roll *Reach Your Destination* so the dice — not the
+  module — decide *how* the arrival goes (RAW; player-agency invariant).
+- **The "Reach Your Destination" progress gate now requires exactly 10/10 boxes**
+  for journeys. Other progress kinds still honour the `journeyMinProgressBoxes`
+  floor; the `enforceJourneyProgressGate` toggle and the `force` override are
+  unchanged.
+
+### Added
+- **Deterministic journey continuation prompt.** After each narration, if an
+  actor has an open journey, the Skald posts a small card offering the correct
+  next move — *Undertake a Journey* (+wits) while travelling, or *Reach Your
+  Destination* once the track is full. The card reuses the existing inline
+  move-link wiring and is gated by the move-suggestion setting; you can always
+  ignore it and keep narrating.
+- **Inline move links capture the full surrounding narration as intent.** When a
+  move link in the prose is clicked, the surrounding narration text is captured
+  before the roll so journey auto-naming can recover a real destination instead
+  of a generic title. A programmatic card may override with an explicit intent.
+
+All changes are additive and backwards-compatible; no settings, flags, or saved
+journey data change shape.
+
 ## [0.25.3] — 2026-06-14
 
 A small **bug-fix** release fixing two issues in the module settings UI.

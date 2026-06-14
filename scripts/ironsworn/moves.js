@@ -448,12 +448,20 @@ export const MovesMethods = {
     let gateOn = true, minBoxes = 4;
     try { const g = game?.settings?.get?.(ES_SCOPE, "enforceJourneyProgressGate"); gateOn = (g === undefined || g === null) ? true : !!g; } catch (_) {}
     try { const n = Number(game?.settings?.get?.(ES_SCOPE, "journeyMinProgressBoxes")); if (Number.isFinite(n) && n >= 0) minBoxes = n; } catch (_) {}
-    if (kind === "journey" && gateOn && !opts.force && score < minBoxes) {
+    // (gate 2026-06-14 — exact-10 arrival) "Reach Your Destination" RESOLVES the
+    // arrival, so for a JOURNEY it may only be rolled once the track is FULLY
+    // charted (10/10 boxes) — pairing with the integration-layer change that no
+    // longer auto-completes a full journey, leaving it OPEN for this roll. The
+    // enforceJourneyProgressGate toggle and opts.force remain the deliberate
+    // overrides; journeyMinProgressBoxes still governs OTHER progress kinds, but
+    // a journey now requires the full track regardless of that floor.
+    const needBoxes = kind === "journey" ? 10 : minBoxes;
+    if (kind === "journey" && gateOn && !opts.force && score < needBoxes) {
       return {
         ok: false,
         method: "none",
-        error: `“${track.name}” has only ${score}/10 progress box${score === 1 ? "" : "es"} — ` +
-               `you need at least ${minBoxes} before rolling "${move?.name ?? moveRef}". ` +
+        error: `“${track.name}” is only at ${score}/10 — "${move?.name ?? moveRef}" can be rolled ` +
+               `once the journey is fully charted (10/10 boxes). ` +
                `Mark more progress (e.g. "Undertake a Journey" or !progress <boxes>) first, ` +
                `then make the progress roll once you arrive.`
       };

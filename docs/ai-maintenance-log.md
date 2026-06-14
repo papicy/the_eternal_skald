@@ -4074,3 +4074,82 @@ RESIDUAL RISK: LOW. i18nInit fires before setup/ready so settings remain availab
               runtime (onDown), long after i18nInit. CSS uses standard flexbox; if a Foundry
               theme overrides .window-content the worst case degrades to prior behaviour.
 ```
+
+
+```
+### [2026-06-14 23:18 EEST] — Journey lifecycle & pacing: stop auto-completing journeys, deterministic continuation prompt, full-narration intent capture, exact-10/10 arrival gate
+AGENT:        Abacus.AI Agent (SkaldCoder)
+TASK TYPE:    IMPLEMENT
+TOKEN BUDGET: IMPLEMENT (standard)  |  USED: ~moderate  |  WITHIN BUDGET: NO (changed-lines limit busted — see GATE)
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md (SKILL.md) + repository-map.md
+  [x] task classified (IMPLEMENT)
+  [x] target file(s)+line(s) located (evidence below)
+  [ ] <= 3 files / <= 50 changed lines per file  — files OK (2 code), but integration.js +83 lines busts the 50-line limit (GATE-approved, see below)
+  [x] additive & backwards-compatible
+  [x] no setting/flag/directive/i18n key removed or renamed (journeyMinProgressBoxes / enforceJourneyProgressGate preserved)
+  [x] architectural boundary crossed — integration.js + moves.js are LOCKED (GATE recorded)
+  [x] regression test added (test/journey-lifecycle-pacing.test.mjs)
+  [x] rollback plan defined
+
+PROBLEM:      Journeys auto-completed the instant they hit 10/10, pre-empting the player's
+              "Reach Your Destination" roll and deciding the arrival outcome for them. The
+              journey loop also depended on the AI weaving the next move into prose, and
+              inline move-link clicks discarded the surrounding narration that journey
+              auto-naming needs. The arrival gate accepted the journeyMinProgressBoxes floor
+              rather than a full track. Four minimal, user-approved fixes (A–D).
+
+EVIDENCE (brief §4 format):
+  CLAIM:      Journey hit-handler auto-completed a full track via _autoCompleteIfFull(...,"journey").
+  EVIDENCE:   scripts/narrative/integration.js:~2509-2537 :: _autoJourneyFlow hit branch
+  CONFIDENCE: HIGH
+  BASIS:      Read the branch pre-change; the journey _autoCompleteIfFull call is now removed (only the combat call at ~1900 remains) and replaced with an OPEN-track narration steer.
+
+  CLAIM:      "Reach Your Destination" gate used the generic minBoxes floor for journeys.
+  EVIDENCE:   scripts/ironsworn/moves.js:~458-467 :: rollProgressMove gate
+  CONFIDENCE: HIGH
+  BASIS:      Added needBoxes = kind==="journey" ? 10 : minBoxes; gate now `score < needBoxes`; setting reads + opts.force unchanged.
+
+  CLAIM:      Inline move-link clicks discarded the surrounding narration intent.
+  EVIDENCE:   scripts/narrative/integration.js:~739-742 :: link-move handler
+  CONFIDENCE: HIGH
+  BASIS:      Handler now calls _captureLinkMoveIntent(btn, move, root) before triggerMove; helper reads data-raw-intent or the whitespace-collapsed message text and time-stamps _lastIntentTs.
+
+CHANGE:
+  A) integration.js _autoJourneyFlow: removed the journey auto-complete; at 10/10 the track
+     stays OPEN and a narration note prompts the player to roll "Reach Your Destination".
+  B) integration.js link-move handler + new _captureLinkMoveIntent(btn, move, root) helper:
+     captures the full preceding narration (or explicit data-raw-intent) as _lastIntent
+     before the roll, time-stamped for the existing freshness guard.
+  C) integration.js _narrateOutcome (followups branch) + new _maybeSuggestJourneyContinuation:
+     after each narration, an open journey deterministically offers the right next progress
+     move ("Undertake a Journey" +wits, or "Reach Your Destination" at 10/10) via a card that
+     reuses the link-move wiring and stamps the track name as data-raw-intent (reuse, no dup).
+  D) moves.js rollProgressMove: journeys require exactly 10/10 boxes; other kinds keep the
+     journeyMinProgressBoxes floor; enforceJourneyProgressGate + opts.force overrides preserved.
+FILES TOUCHED (2 code + 1 test + version/doc files):
+  - scripts/narrative/integration.js  (+83 / -5)   <-- exceeds 50-line soft limit; GATE-approved
+  - scripts/ironsworn/moves.js         (+11 / -3)
+  - test/journey-lifecycle-pacing.test.mjs (NEW, 25 source-text-guard assertions)
+  - module.json / package.json / README.md / CHANGELOG.md (0.25.3 -> 0.25.4 + entry; enforced by version-consistency.test.mjs)
+TESTS:        node test/journey-lifecycle-pacing.test.mjs -> 25 passed, 0 failed.
+              node test/inline-move-suggestions.test.mjs -> 22 passed, 0 failed (refactored intent capture into a helper to keep triggerMove within the handler's 1500-char guard).
+SUITE:        npm test -> PASS (66 of 66 files); node test/load-smoke.mjs -> clean import.
+GATE:         GATE-2026-06-14-JOURNEY — user explicitly approved (verbatim: "1. disable journey
+              auto complete  2. full preceding narration  3. ok  4. insist on floor change").
+              Approval covers: editing the two LOCKED files (integration.js, moves.js), and the
+              integration.js +83-line change busting the 50-line soft limit (the new
+              _maybeSuggestJourneyContinuation + _captureLinkMoveIntent helpers + doc comments).
+              On D the user overrode the agent's recommendation to skip and insisted on the
+              exact-10/10 floor; recorded and honoured.
+ROLLBACK:     git revert <this commit> — single-commit revert restores auto-completion, the
+              minBoxes arrival gate, the inline-handler, and v0.25.3. No settings/flags/i18n
+              keys changed -> clean revert; saved journey data shape is unchanged.
+RESIDUAL RISK: LOW. (A) leaving the track open relies on the existing fresh-intent reuse/branch
+              guard so a lingering full track is reused, not duplicated. (D) the exact-10 floor
+              is stricter than journeyMinProgressBoxes; GMs who set a lower floor for journeys
+              will find it no longer applies to journeys specifically (intended per user). (C)
+              the continuation card is fully fail-soft (try/catch, no-ops when inactive or on the
+              completion roll's own turn) and gated by the move-suggestion setting.
+```
