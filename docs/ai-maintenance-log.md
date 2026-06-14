@@ -3714,3 +3714,66 @@ RESIDUAL RISK: LOW. The end_combat fallback only fires when the specific close f
               only NARROWS what is dropped (never drops more than before), so no effect that previously applied
               is now suppressed. The journey directive is prose-only guidance gated on an open-journey context
               match; it adds no write and no new directive grammar. XP remains vow-only (unchanged).
+
+---
+
+### [2026-06-14 17:35 EEST] — ROOT CAUSE: parseEffects dropped a nameless end_combat (why PRs #33/#34/#35 "did nothing")
+
+TASK TYPE:    INVESTIGATE → IMPLEMENT (+ TEST)
+TOKEN BUDGET: IMPLEMENT 20,000  |  USED: ~within budget  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md (SKILL) + repository-map.md + relevant test
+  [x] task classified: INVESTIGATE then IMPLEMENT (+ TEST)
+  [x] target file(s)+line(s) located with RUNTIME evidence (below)
+  [x] <= 3 files / <= 50 changed lines per file (integration.js +9 net; test +61)
+  [x] additive & backwards-compatible (a NAMED end_combat parses identically; we only STOP dropping the nameless form)
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] architectural boundary: 🔴 LOCKED integration.js touched — GATE recorded below (human-approved)
+  [x] regression test added AND proven to fail on the pre-fix code (8 failures) and pass after (full pipeline)
+  [x] rollback plan defined
+
+PROBLEM:      After PRs #33/#34/#35, a narrated fight ending STILL left the combat track open. Evidence:
+              the AI narrates the foe's death ("its core ruptures… collapses into cooling glass… your
+              shadow stands alone") and says "No further effects are required", yet the track stays open.
+              All three prior PRs fixed code INSIDE the applyEffects `end_combat` case and the redundancy
+              filter — but the directive was being dropped one step EARLIER, at parse time, so none of
+              those fixes ever executed.
+
+ROOT CAUSE (proven by RUNNING the real parser, not theory):
+  CLAIM:      Integration.parseEffects DROPS a nameless [[EFFECT: end_combat]] (returns null), so it never
+              reaches _filterRedundantCombatEffects or applyEffects — the PR #35 fallback can never run.
+  EVIDENCE:   scripts/narrative/integration.js:545-548 :: parseEffect "end_combat" branch (pre-fix:
+              `return name ? { kind:"end_combat", name } : null;`)
+              PROVEN: ran Integration.parseEffects("…[[EFFECT: end_combat]]") → returned []  (has end_combat? false)
+  CONFIDENCE: HIGH    BASIS: executed the real parseEffects and read the lines
+  CLAIM:      The prompt EXPLICITLY allows the AI to omit the foe name, so a nameless directive is EXPECTED.
+  EVIDENCE:   scripts/ai/prompt-builder.js:798 ("if unsure, you MAY omit the name (e.g. [[EFFECT: complete_vow]])")
+  CONFIDENCE: HIGH    BASIS: read the line
+  CLAIM:      The sibling complete_* branch KEEPS the effect with an empty name, proving the inconsistency.
+  EVIDENCE:   scripts/narrative/integration.js:560-565 (`name: name || ""`)
+              PROVEN: parseEffects("[[EFFECT: complete_vow]]") → [{kind:"complete_track",name:"",trackKind:"vow"}]
+  CONFIDENCE: HIGH    BASIS: executed the real parseEffects and read the lines
+
+CHANGE:       scripts/narrative/integration.js:545-554 — the end_combat parse branch now returns the effect
+              unconditionally with a (possibly empty) _unquote(rest) name, mirroring the complete_* branch.
+              The downstream handler resolves an empty name via getActiveCombat → and the PR #35
+              closeStaleCombatTracks fallback, so the fight reliably closes. _unquote also strips surrounding
+              quotes, fixing a secondary bug where [[EFFECT: end_combat "The Foe"]] kept its quotes.
+FILES TOUCHED (2):
+  - scripts/narrative/integration.js     (+9 net — 1 code line + comment)
+  - test/combat-close-journey.test.mjs   (+61 — new tests [7]/[8]/[9], incl. a FULL-PIPELINE reproduction)
+TESTS:        node test/combat-close-journey.test.mjs → 22 passed, 0 failed
+              PROOF IT CATCHES THE BUG: stashing the fix and re-running → 14 passed, 8 FAILED, incl.
+              "PIPELINE RESULT: combat track is CLOSED" → expected true, got false (the exact reported symptom).
+SUITE:        npm test → PASS (65 of 65 test files green); test/load-smoke.mjs → clean import
+GATE:         GATE-ENDCOMBAT-PARSE — human-approved in conversation ("proceed") to edit the 🔴 LOCKED
+              scripts/narrative/integration.js.
+ROLLBACK:     git revert <this commit> — restores `return name ? {…} : null` and removes the new tests.
+              No settings/flags/directives/i18n keys changed; byte-clean revert, no migration.
+RESIDUAL RISK: LOW for the covered case (AI signals end via a nameless/quoted directive). OUT OF SCOPE /
+              honest residual: when the AI emits NO directive at all (pure prose + "No further effects are
+              required"), there is nothing to parse — that is AI behaviour, not a parse defect, and is not
+              addressed here. Mitigation already exists separately: rolling "End the Fight" auto-completes
+              via _autoCompletionFlow regardless of the narration. A NAMED end_combat parses exactly as
+              before, so no existing behaviour changes.
