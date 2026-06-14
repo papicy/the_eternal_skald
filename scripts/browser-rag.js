@@ -42,6 +42,9 @@
  * ===================================================================== */
 
 import { HnswIndex } from "./browser-rag-hnsw.js";
+import {
+  EMBED_MODELS, DEFAULT_EMBED_MODEL, modelInfo, dimsFor, applyPrefix
+} from "./core/embedding-catalogue.js";
 
 const MODULE_ID   = "the-eternal-skald";
 const LOG_PREFIX  = "The Eternal Skald |";
@@ -51,19 +54,37 @@ const LOG_PREFIX  = "The Eternal Skald |";
  * even when the setting is on. */
 const ANN_MIN_CORPUS = 1000;
 
-/* IndexedDB layout. */
+/* IndexedDB layout.
+ * v1 → only the `journals` vector store.
+ * v2 → adds a tiny key/value `meta` store recording WHICH embedding model the
+ *      stored vectors were built with (so a model switch can be detected and a
+ *      reindex offered). The upgrade is purely additive: existing v1 vectors
+ *      survive untouched and, with no meta record yet, are treated as the
+ *      default MiniLM/384 model — so existing worlds need NO forced reindex. */
 const DB_NAME      = "eternal-skald-vectors";
-const DB_VERSION   = 1;
+const DB_VERSION   = 2;
 const STORE_NAME   = "journals";
+const META_STORE   = "meta";
+const META_KEY     = "index";   // the single meta record's key
 
-/* Embedding model. all-MiniLM-L6-v2 → 384-dim, mean-pooled, normalized. */
-const EMBED_MODEL  = "Xenova/all-MiniLM-L6-v2";
-const EMBED_DIMS   = 384;
+/* Default embedding model. The ACTIVE model is chosen at runtime from the
+ * `ragEmbedModel` setting via the catalogue (see _activeModelId); these
+ * constants are the safe fallback when no setting/catalogue entry is found.
+ * all-MiniLM-L6-v2 → 384-dim, mean-pooled, normalized. */
+const EMBED_MODEL  = DEFAULT_EMBED_MODEL;
+const EMBED_DIMS   = dimsFor(DEFAULT_EMBED_MODEL);
 
-/* transformers.js, loaded lazily from a CDN as an ES module. Pinned to a
- * known-good 2.x release for reproducibility. If this import fails for any
- * reason, RAG disables itself and the Skald carries on without memory. */
-const TRANSFORMERS_CDN = "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2";
+/* transformers.js, loaded lazily from a CDN as an ES module. Two pinned,
+ * known-good releases keyed by MAJOR version: the long-standing 2.x line
+ * (default path, used by the 384-dim models) and the newer 3.x line
+ * (@huggingface/transformers, loaded ONLY when a model in the catalogue
+ * declares tfjsMajor:3 — e.g. GTE-v1.5, Nomic). Keeping 2.x as the default
+ * means existing worlds are byte-for-byte unaffected. If an import fails for
+ * any reason, RAG disables itself and the Skald carries on without memory. */
+const TRANSFORMERS_CDN = Object.freeze({
+  2: "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2",
+  3: "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.0.2"
+});
 
 /* Rough token estimate: ~4 characters per token for English prose. */
 const CHARS_PER_TOKEN = 4;
@@ -110,6 +131,12 @@ class VectorStore {
           const store = db.createObjectStore(STORE_NAME, { keyPath: "id" });
           // A by-type index is handy for filtered reindex/inspection.
           try { store.createIndex("byType", "metadata.type", { unique: false }); }
+          catch (_) {}
+        }
+        // v2: additive meta store. Existing `journals` vectors are left intact,
+        // so upgrading an old (v1) world loses nothing and forces no reindex.
+        if (!db.objectStoreNames.contains(META_STORE)) {
+          try { db.createObjectStore(META_STORE, { keyPath: "key" }); }
           catch (_) {}
         }
       };
@@ -178,6 +205,35 @@ class VectorStore {
       req.onerror   = () => reject(req.error || new Error("count failed"));
     });
   }
+
+  /* ---- v2 meta store: model/dimension provenance ---- */
+
+  /** Read the single meta record's `value` (or null when absent/unavailable). */
+  async getMeta() {
+    const db = await this.open();
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(META_STORE, "readonly");
+        const req = tx.objectStore(META_STORE).get(META_KEY);
+        req.onsuccess = () => resolve(req.result?.value ?? null);
+        req.onerror   = () => resolve(null);
+      } catch (_) { resolve(null); }
+    });
+  }
+
+  /** Write (replace) the meta record's `value`. Resolves true on success. */
+  async putMeta(value) {
+    const db = await this.open();
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(META_STORE, "readwrite");
+        tx.objectStore(META_STORE).put({ key: META_KEY, value });
+        tx.oncomplete = () => resolve(true);
+        tx.onerror    = () => resolve(false);
+        tx.onabort    = () => resolve(false);
+      } catch (_) { resolve(false); }
+    });
+  }
 }
 
 /* ===================================================================== */
@@ -188,6 +244,9 @@ export const BrowserRAG = {
   /* ---------------- internal state ---------------- */
   _store: new VectorStore(),
   _extractor: null,        // transformers.js pipeline (feature-extraction)
+  _loadedModelId: null,    // which catalogue model `_extractor` was built for
+  _tfjsCache: new Map(),   // tfjsMajor → loaded transformers module (cached)
+  _caps: null,             // cached capability probe { webgpu } (null = unprobed)
   _initPromise: null,      // de-dupes concurrent init() calls
   _initFailed: false,      // sticky: don't retry a hard failure every call
   _queryCache: new Map(),  // text → vector (small LRU-ish cache)
@@ -228,7 +287,103 @@ export const BrowserRAG = {
   /** Opt-in HNSW approximate index (default OFF) — for large chronicles. */
   useAnnIndex() { return this._setting("ragUseAnnIndex") === true; },
 
+  /* ---------------- active embedding model ---------------- */
+
+  /**
+   * The id of the model the GM has SELECTED (the `ragEmbedModel` setting),
+   * validated against the catalogue. Unknown / unset → the default model, so
+   * existing worlds and fresh installs both resolve to MiniLM.
+   * @returns {string}
+   */
+  _activeModelId() {
+    const id = this._setting("ragEmbedModel");
+    return (id && EMBED_MODELS[id]) ? id : DEFAULT_EMBED_MODEL;
+  },
+
+  /** Catalogue entry for the active model. @returns {object} */
+  _activeInfo() { return modelInfo(this._activeModelId()); },
+
+  /** Output dimension of the active model. @returns {number} */
+  activeDims() { return this._activeInfo().dims; },
+
+  /**
+   * Detect (once, cached) which acceleration backends the browser offers.
+   * Probing `navigator.gpu.requestAdapter()` is the only reliable WebGPU test;
+   * it is async, so we memoise the result. Always fail-soft to `{webgpu:false}`.
+   * @returns {Promise<{webgpu:boolean}>}
+   */
+  async detectCaps() {
+    if (this._caps) return this._caps;
+    let webgpu = false;
+    try {
+      if (typeof navigator !== "undefined" && navigator.gpu?.requestAdapter) {
+        const adapter = await navigator.gpu.requestAdapter();
+        webgpu = !!adapter;
+      }
+    } catch (_) { webgpu = false; }
+    this._caps = { webgpu };
+    this._debug("capabilities:", JSON.stringify(this._caps));
+    return this._caps;
+  },
+
+  /**
+   * Tear down the loaded embedder so the NEXT init() rebuilds the pipeline for
+   * the currently-selected model. Used when the GM switches models. Does NOT
+   * touch stored vectors — the caller decides whether to reindex.
+   */
+  resetEmbedder() {
+    this._extractor = null;
+    this._loadedModelId = null;
+    this._initFailed = false;
+    this._initPromise = null;
+    this._queryCache.clear();
+    this._debug("embedder reset — next init() will load the selected model.");
+  },
+
+  /** Read the model id the STORE was last built with (from the v2 meta record). */
+  async storedModelId() {
+    try { const m = await this._store.getMeta(); return m?.model || null; }
+    catch (_) { return null; }
+  },
+
+  /**
+   * Record (in the v2 meta store AND the hidden mirror setting) which model the
+   * store is now built with. The meta store is authoritative across worlds; the
+   * `ragEmbedModelActive` setting is a fast mirror the onChange handler reads to
+   * detect the PREVIOUS model without an async IndexedDB call.
+   * @param {string} modelId
+   */
+  async setActiveModel(modelId) {
+    const id = (modelId && EMBED_MODELS[modelId]) ? modelId : DEFAULT_EMBED_MODEL;
+    const info = modelInfo(id);
+    try {
+      await this._store.putMeta({ model: id, dims: info.dims, tfjsMajor: info.tfjsMajor, builtAt: Date.now(), schema: DB_VERSION });
+    } catch (_) {}
+    try { await game.settings.set(MODULE_ID, "ragEmbedModelActive", id); } catch (_) {}
+    this._debug("active model recorded:", id, `(${info.dims}-dim)`);
+  },
+
   /* ---------------- lifecycle / model load ---------------- */
+
+  /**
+   * Lazily import the correct transformers.js MAJOR version for a model, caching
+   * the loaded module so a session never re-fetches the same library. The 2.x
+   * line stays the default; 3.x is only fetched when a tfjsMajor:3 model is
+   * selected, keeping existing worlds on the proven pin.
+   * @param {number} tfjsMajor
+   * @returns {Promise<object>} the transformers module
+   */
+  async _loadTransformers(tfjsMajor) {
+    const major = (tfjsMajor === 3) ? 3 : 2;
+    if (this._tfjsCache.has(major)) return this._tfjsCache.get(major);
+    const cdn = TRANSFORMERS_CDN[major] || TRANSFORMERS_CDN[2];
+    this._debug(`loading transformers.js v${major} from`, cdn);
+    // Kept in a variable so bundlers / `node --check` don't resolve it statically.
+    const url = cdn;
+    const transformers = await import(/* webpackIgnore: true */ url);
+    this._tfjsCache.set(major, transformers);
+    return transformers;
+  },
 
   /** Has the embedding model finished loading? */
   isReady() { return !!this._extractor; },
@@ -257,13 +412,13 @@ export const BrowserRAG = {
 
     this._initPromise = (async () => {
       try {
-        this._debug("loading transformers.js from", TRANSFORMERS_CDN);
+        const modelId = this._activeModelId();
+        const info    = modelInfo(modelId);
+        const caps    = await this.detectCaps();
         onProgress?.({ status: "loading-library", progress: 0 });
 
-        // Dynamic CDN import. Kept in a variable so bundlers/`node --check`
-        // don't try to resolve it statically.
-        const cdn = TRANSFORMERS_CDN;
-        const transformers = await import(/* webpackIgnore: true */ cdn);
+        // Load (and cache) the transformers.js MAJOR version this model needs.
+        const transformers = await this._loadTransformers(info.tfjsMajor);
 
         // Allow remote model fetch + browser cache; disable local file lookups
         // (there is no local model directory inside a Foundry module).
@@ -286,23 +441,35 @@ export const BrowserRAG = {
           }
         } catch (_) {}
 
-        this._debug("transformers.js loaded — building feature-extraction pipeline:", EMBED_MODEL);
-        this._extractor = await transformers.pipeline("feature-extraction", EMBED_MODEL, {
-          progress_callback: (info) => {
+        // Pipeline options. `device` is a v3+ concept; only pass it when the
+        // loaded library understands it (tfjsMajor 3) — passing it to 2.x is
+        // harmless but we keep the 2.x call byte-identical to the old default.
+        const pipeOpts = {
+          progress_callback: (ev) => {
             try {
-              if (!info) return;
-              // info.status: 'initiate' | 'download' | 'progress' | 'done' | 'ready'
-              const pct = typeof info.progress === "number" ? Math.round(info.progress) : undefined;
-              onProgress?.({ status: info.status || "progress", progress: pct, file: info.file });
-              if (info.status === "progress" && pct != null) {
-                this._debug(`model download ${info.file || ""} ${pct}%`);
+              if (!ev) return;
+              // ev.status: 'initiate' | 'download' | 'progress' | 'done' | 'ready'
+              const pct = typeof ev.progress === "number" ? Math.round(ev.progress) : undefined;
+              onProgress?.({ status: ev.status || "progress", progress: pct, file: ev.file });
+              if (ev.status === "progress" && pct != null) {
+                this._debug(`model download ${ev.file || ""} ${pct}%`);
               }
             } catch (_) {}
           }
-        });
+        };
+        if (info.tfjsMajor >= 3) {
+          pipeOpts.device = caps.webgpu ? "webgpu" : "wasm";
+          if (info.requiresWebGPU && !caps.webgpu) {
+            console.warn(`${LOG_PREFIX} [RAG] "${modelId}" runs best with WebGPU, which is unavailable here — embedding will be slower. Consider Chrome/Edge 113+ for hardware acceleration.`);
+          }
+        }
+
+        this._debug(`transformers.js v${info.tfjsMajor} loaded — building pipeline:`, modelId, `(device ${pipeOpts.device || "default"})`);
+        this._extractor = await transformers.pipeline("feature-extraction", modelId, pipeOpts);
+        this._loadedModelId = modelId;
 
         onProgress?.({ status: "ready", progress: 100 });
-        this._debug("embedding model ready.");
+        this._debug("embedding model ready:", modelId, `(${info.dims}-dim)`);
         return true;
       } catch (err) {
         console.warn(LOG_PREFIX, "[RAG] model load failed — semantic memory disabled this session:", err?.message || err);
@@ -328,11 +495,14 @@ export const BrowserRAG = {
    * @param {boolean} [opts.cache=false] - cache the result (used for queries).
    * @returns {Promise<number[]|null>}
    */
-  async embed(text, { cache = false } = {}) {
+  async embed(text, { cache = false, role = "passage" } = {}) {
     const clean = String(text || "").trim();
     if (!clean) return null;
 
-    if (cache && this._queryCache.has(clean)) return this._queryCache.get(clean);
+    // Cache key includes role: query/passage prefixes (for BGE/Nomic) yield
+    // different vectors for the same raw text. Plain models ignore role.
+    const cacheKey = `${role}\u0000${clean}`;
+    if (cache && this._queryCache.has(cacheKey)) return this._queryCache.get(cacheKey);
 
     if (!this._extractor) {
       const ok = await this.init();
@@ -340,7 +510,14 @@ export const BrowserRAG = {
     }
 
     try {
-      const output = await this._extractor(clean, { pooling: "mean", normalize: true });
+      const info = this._activeInfo();
+      // Apply task-specific prefix (no-op for models without query/passage
+      // prefixes such as MiniLM). Keeps default behavior byte-identical.
+      const prepared = applyPrefix(clean, role, info);
+      const output = await this._extractor(prepared, {
+        pooling: info?.pooling || "mean",
+        normalize: info?.normalize !== false
+      });
       // transformers.js returns a Tensor with .data (TypedArray). Convert to
       // a plain Array so it round-trips cleanly through IndexedDB.
       const vec = Array.from(output?.data ?? output ?? []);
@@ -352,7 +529,7 @@ export const BrowserRAG = {
           const firstKey = this._queryCache.keys().next().value;
           this._queryCache.delete(firstKey);
         }
-        this._queryCache.set(clean, vec);
+        this._queryCache.set(cacheKey, vec);
       }
       return vec;
     } catch (err) {
@@ -399,13 +576,18 @@ export const BrowserRAG = {
     const body = String(text || "").trim();
     if (!id || !body) return false;
     try {
-      const vector = await this.embed(body);
+      const vector = await this.embed(body, { role: "passage" });
       if (!vector) return false;
       await this._store.put({
         id: String(id),
         text: body.slice(0, 8000),
         vector,
-        metadata: { timestamp: Date.now(), ...metadata }
+        metadata: {
+          timestamp: Date.now(),
+          model: this._activeModelId(),
+          dims: vector.length,
+          ...metadata
+        }
       });
       this._invalidateCorpus();
       this._debug("indexed record", id, `(${metadata?.type || "?"})`);
@@ -513,6 +695,9 @@ export const BrowserRAG = {
       } catch (_) {}
       onProgress?.(i + 1, total);
     }
+    // Stamp the store with the model it was just (re)built with, so future
+    // sessions can detect dimension mismatches and offer an auto-reindex.
+    try { await this.setActiveModel(this._activeModelId()); } catch (_) {}
     this._debug(`reindex complete — ${indexed}/${total} entries embedded.`);
     return { indexed, total };
   },
@@ -675,15 +860,26 @@ export const BrowserRAG = {
     const minSim = threshold ?? this.threshold();
 
     try {
-      const qVec = await this.embed(q, { cache: true });
+      const qVec = await this.embed(q, { cache: true, role: "query" });
       if (!qVec) return [];
 
       const all = await this._getCorpus();
       if (!all.length) return [];
 
+      // Defensively skip any vector whose dimensionality does not match the
+      // active model. After a model switch the store is reindexed, but this
+      // guards against a partial/interrupted reindex leaving mixed-dim
+      // vectors that would otherwise score as 0 (or throw) in cosineSim.
+      const dims = qVec.length;
+      const usable = all.filter((rec) => Array.isArray(rec?.vector) && rec.vector.length === dims);
+      if (usable.length !== all.length) {
+        this._debug(`search: skipped ${all.length - usable.length} stale-dim vectors (active ${dims})`);
+      }
+      if (!usable.length) return [];
+
       // OPT-IN approximate path: query the HNSW graph, then hydrate + filter.
       // Any failure falls through to the exact linear scan below.
-      const index = this._getHnsw(all);
+      const index = this._getHnsw(usable);
       if (index) {
         try {
           const ann = index.search(qVec, limit, undefined)
@@ -701,7 +897,7 @@ export const BrowserRAG = {
       }
 
       const scored = [];
-      for (const rec of all) {
+      for (const rec of usable) {
         if (!rec || !Array.isArray(rec.vector)) continue;
         const score = this.cosineSim(qVec, rec.vector);
         if (score >= minSim) {
@@ -710,7 +906,7 @@ export const BrowserRAG = {
       }
       scored.sort((a, b) => b.score - a.score);
       const hits = scored.slice(0, limit);
-      this._debug(`search "${q.slice(0, 40)}" → ${hits.length}/${all.length} hits (min ${minSim})`);
+      this._debug(`search "${q.slice(0, 40)}" → ${hits.length}/${usable.length} hits (min ${minSim})`);
       return hits;
     } catch (err) {
       this._debug("search failed:", err?.message || err);
@@ -801,6 +997,10 @@ export const BrowserRAG = {
   async status() {
     let count = 0;
     try { count = await this.count(); } catch (_) {}
+    let stored = "";
+    try { stored = await this.storedModelId(); } catch (_) {}
+    const activeId = this._activeModelId();
+    const info = this._activeInfo();
     return {
       enabled:        this.enabled(),
       indexedDB:      VectorStore.supported(),
@@ -808,8 +1008,13 @@ export const BrowserRAG = {
       modelFailed:    this._initFailed,
       autoIndex:      this.autoIndex(),
       vectorCount:    count,
-      model:          EMBED_MODEL,
-      dims:           EMBED_DIMS,
+      model:          activeId,
+      modelLabel:     info?.label || activeId,
+      dims:           this.activeDims(),
+      storedModel:    stored || activeId,
+      dimMismatch:    !!stored && stored !== activeId &&
+                      (modelInfo(stored)?.dims !== this.activeDims()),
+      loadedModel:    this._loadedModelId || null,
       maxResults:     this.maxResults(),
       contextTokens:  this.contextTokens(),
       threshold:      this.threshold()

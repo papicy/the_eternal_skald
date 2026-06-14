@@ -3507,3 +3507,73 @@ RESIDUAL RISK: LOW. Default OFF and additive: existing exact-search behaviour is
               unless a GM enables the setting AND the corpus exceeds 1000 vectors. The ANN path is wrapped
               in try/catch with a guaranteed fall-through to the exact scan, the index rebuilds on every
               corpus write, and results are approximate (recall ~0.94+ on realistic clustered embeddings).
+
+### [2026-06-14 10:26 EEST] — Future-proof selectable embedding-model architecture (Phase 1 + 2)
+AGENT:        Abacus.AI Agent (Claude-backed)
+TASK TYPE:    IMPLEMENT
+TOKEN BUDGET: large (multi-file architecture, explicit user gate)  |  USED: ~ within  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md + repository-map.md (SkaldCoder SKILL.md)
+  [x] task classified (IMPLEMENT)
+  [x] target file(s)+line(s) located (evidence below)
+  [ ] <= 3 files / <= 50 changed lines per file — EXCEEDED on purpose (GATE below; user pre-approved)
+  [x] additive & backwards-compatible (existing v1 stores treated as MiniLM/384; no forced reindex)
+  [x] no setting/flag/directive/i18n key removed or renamed (only additions)
+  [x] no architectural boundary crossed (catalogue is a pure core/ module; settings→commands via dynamic import)
+  [x] regression test added/extended (test/embed-model-select.test.mjs — 53 assertions)
+  [x] rollback plan defined
+
+PROBLEM:      The browser-RAG embedder hardcoded a single model id + dimension (all-MiniLM-L6-v2 / 384).
+              The user requested a complete, future-proof architecture letting the GM choose among several
+              local embedding models (384-dim Phase 1 + 768-dim/transformers.js v3 Phase 2), with safe
+              dimension-mismatch handling and zero forced reindex for existing worlds.
+
+EVIDENCE (brief §4 format):
+  CLAIM:      The embedder is now data-driven: model facts live in a pure catalogue, the active model is
+              chosen from a world setting, and the vector store records which model built it (IndexedDB v2
+              meta store) so dimension mismatches are detected and a confirm-then-auto-reindex flow rebuilds.
+  EVIDENCE:   scripts/core/embedding-catalogue.js :: EMBED_MODELS/modelInfo/applyPrefix/buildEmbedModelChoices;
+              scripts/browser-rag.js:65 DB_VERSION=2, :67 META_STORE, :212 getMeta/:225 putMeta,
+              :298 _activeModelId/:307 activeDims/:315 detectCaps/:356 setActiveModel/:376 _loadTransformers,
+              :498 embed(role) + applyPrefix, :874 per-record dims filter in search();
+              scripts/core/settings.js:687 ragEmbedModel + :710 hidden ragEmbedModelActive;
+              scripts/chat/commands.js:795 switchEmbedModel + :888 _confirmModelSwitch.
+  CONFIDENCE: HIGH
+  BASIS:      New test 53/53 (catalogue dims/tfjs/prefixes/WebGPU hint, source guards, behavioural
+              setActiveModel/storedModelId/resetEmbedder round-trip). Full suite 60/61 files PASS (the one
+              failure, version-consistency.test.mjs, is PRE-EXISTING on clean main — README banner drift —
+              and unrelated to this change; confirmed via git stash).
+
+CHANGE:       NEW scripts/core/embedding-catalogue.js — pure, frozen catalogue of 5 models
+              (MiniLM default, BGE-small, GTE-small, GTE-small-en-v1.5, Nomic-embed v1.5) with dims,
+              tfjsMajor, requiresWebGPU, pooling/normalize, query/passage prefixes + helpers.
+              browser-rag.js — IndexedDB v1→v2 with additive `meta` store (getMeta/putMeta), active-model
+              accessors, async WebGPU probe (detectCaps), lazy+cached transformers.js v3 loader (v2.x stays
+              default), role-aware embed() applying instruction prefixes, per-record model/dims stamping,
+              defensive stale-dim filter in search(), setActiveModel() meta+mirror write, reindexAll() meta
+              stamp, richer status(). settings.js — ragEmbedModel dropdown (catalogue choices, WebGPU hint)
+              + hidden ragEmbedModelActive mirror; onChange delegates to Commands via dynamic import.
+              commands.js — switchEmbedModel() (GM-only, confirm → resetEmbedder + reindex chronicle [+
+              compendiums when enabled] → setActiveModel; revert on cancel) + _confirmModelSwitch dialog;
+              rag-status surfaces model label + dimension-mismatch warning. en.json — ragEmbedModel name/hint.
+FILES TOUCHED (6 — gated):
+  - scripts/core/embedding-catalogue.js  (+173 / -0, new pure catalogue module)
+  - scripts/browser-rag.js               (+283 / -40, v2 schema + meta + model selection + lazy loader)
+  - scripts/chat/commands.js             (+174 / -5, switch flow + confirm dialog + status surfacing)
+  - scripts/core/settings.js             (+38 / -0, two new settings)
+  - lang/en.json                         (+4 / -0, ragEmbedModel name/hint)
+  - test/embed-model-select.test.mjs     (+205 / -0, new — 53 assertions)
+TESTS:        node test/embed-model-select.test.mjs → 53/53; node --check on all changed JS; en.json parses;
+              node test/rag-cache.test.mjs → 14/14 (kept the `const all = await this._getCorpus()` invariant).
+SUITE:        npm test -> 60/61 files PASS (only pre-existing version-consistency.test.mjs fails on clean main)
+GATE:         GATE-EMBED-ARCH — explicit user authorization to exceed the 3-file/50-line soft limits in
+              favour of a future-proof architecture (Phase 1 384-dim + Phase 2 768-dim/transformers.js v3).
+ROLLBACK:     git revert <this commit> — removes the catalogue, the two settings, the i18n keys, the switch
+              flow and the test, and restores browser-rag.js to the single-model linear embedder. Existing
+              v1 IndexedDB stores are untouched (the v2 meta store is additive; absence = MiniLM/384), so a
+              revert leaves worlds working with no reindex.
+RESIDUAL RISK: LOW. Default model is unchanged (MiniLM/384) and the v2 meta store is additive — existing
+              worlds need NO forced reindex and behave byte-identically until a GM picks a different model.
+              transformers.js v3 is only fetched when a tfjsMajor:3 model is selected; WebGPU models still
+              run (slower) on WASM. The dims filter in search() guards against a partial/interrupted reindex.

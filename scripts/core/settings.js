@@ -12,6 +12,8 @@ import {
   DEFAULT_ENDPOINT, DEFAULT_MODEL, PROVIDER_PRESETS
 } from "./constants.js";
 import { buildModelChoices } from "./model-catalogue.js";
+// Embedding-model catalogue (browser RAG). Pure module, cycle-safe.
+import { buildEmbedModelChoices, DEFAULT_EMBED_MODEL } from "./embedding-catalogue.js";
 // EntityLinker lives in chronicle/.
 // It is only touched inside setting onChange callbacks (call-time), so this
 // late binding back into the main module is cycle-safe.
@@ -674,6 +676,42 @@ export const Settings = {
       config: true,
       type: Boolean,
       default: true
+    });
+
+    // (v0.21.0) Selectable embedding model for semantic memory. Choices are
+    // built from the catalogue and annotated "(slow on this device)" when a
+    // model wants WebGPU the current browser cannot provide. Switching models
+    // changes the vector dimensionality, so the onChange handler delegates to
+    // Commands.switchEmbedModel, which confirms + reindexes (or reverts).
+    // Imported lazily there to avoid a settings→commands import cycle.
+    game.settings.register(MODULE_ID, "ragEmbedModel", {
+      name: game.i18n.localize("ETERNAL_SKALD.settings.ragEmbedModel.name"),
+      hint: game.i18n.localize("ETERNAL_SKALD.settings.ragEmbedModel.hint"),
+      scope: "world",
+      config: true,
+      type: String,
+      choices: buildEmbedModelChoices({
+        webgpu: (typeof navigator !== "undefined") && !!navigator.gpu
+      }),
+      default: DEFAULT_EMBED_MODEL,
+      onChange: (value) => {
+        // Defer to Commands so the heavy confirm/reindex/revert flow lives in
+        // one place. Dynamic import keeps this module free of a cycle.
+        import("../chat/commands.js")
+          .then(({ Commands }) => Commands?.switchEmbedModel?.(value))
+          .catch((err) => console.warn(LOG_PREFIX, "[RAG] embed-model switch failed:", err?.message || err));
+      }
+    });
+
+    // Hidden mirror of the model the vector store was last BUILT with. Lets the
+    // onChange handler above learn the PREVIOUS model synchronously (without an
+    // async IndexedDB read) so it can revert on cancel. Maintained by
+    // BrowserRAG.setActiveModel(); never shown in the config UI.
+    game.settings.register(MODULE_ID, "ragEmbedModelActive", {
+      scope: "world",
+      config: false,
+      type: String,
+      default: ""
     });
 
     // (v0.20.0 F1) Index official / world COMPENDIUM packs into semantic memory
