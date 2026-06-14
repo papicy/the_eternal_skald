@@ -455,15 +455,22 @@ export const MovesMethods = {
     // enforceJourneyProgressGate toggle and opts.force remain the deliberate
     // overrides; journeyMinProgressBoxes still governs OTHER progress kinds, but
     // a journey now requires the full track regardless of that floor.
-    const needBoxes = kind === "journey" ? 10 : minBoxes;
-    if (kind === "journey" && gateOn && !opts.force && score < needBoxes) {
+    // (gate 2026-06-14 — symmetric 10/10 completion gate) The v0.25.4 gate only
+    // blocked journeys; extend the SAME exact-10/10 requirement to vow + combat so
+    // a completion roll can't fire before the track is fully charted. `site` keeps
+    // the journeyMinProgressBoxes floor; enforceJourneyProgressGate + opts.force
+    // remain the deliberate overrides. (Intentionally stricter than Ironsworn RAW.)
+    const strictKind = kind === "journey" || kind === "vow" || kind === "combat";
+    const needBoxes = strictKind ? 10 : minBoxes;
+    if (strictKind && gateOn && !opts.force && score < needBoxes) {
+      const noun = kind === "combat" ? "fight" : kind;
       return {
         ok: false,
         method: "none",
         error: `“${track.name}” is only at ${score}/10 — "${move?.name ?? moveRef}" can be rolled ` +
-               `once the journey is fully charted (10/10 boxes). ` +
-               `Mark more progress (e.g. "Undertake a Journey" or !progress <boxes>) first, ` +
-               `then make the progress roll once you arrive.`
+               `once the ${noun} is fully charted (10/10 boxes). ` +
+               `Mark more progress first (e.g. !progress <boxes>), ` +
+               `then make the completion roll.`
       };
     }
 
