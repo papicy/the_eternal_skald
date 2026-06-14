@@ -13,6 +13,34 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.24.0] — 2026-06-14
+
+A **selectable embedding-model** pass. Turns the hardcoded single-model
+browser-RAG embedder into a future-proof, GM-selectable architecture covering
+both 384-dim models (Phase 1) and 768-dim / transformers.js v3 models (Phase 2)
+— all **additive / default-safe** and fully backwards-compatible.
+
+### Added
+- **Memory Embedding Model** setting (`ragEmbedModel`): choose among five local
+  models — `all-MiniLM-L6-v2` (default, 384-dim), `bge-small-en-v1.5`,
+  `Supabase/gte-small`, `gte-small-en-v1.5`, and 768-dim `nomic-embed-text-v1.5`.
+  The dropdown flags models that want WebGPU with a "(slow on this device)" hint
+  when the browser lacks it.
+- A pure, dependency-free **embedding-model catalogue** (`scripts/core/embedding-catalogue.js`)
+  as the single source of truth for per-model facts (dimensions, transformers.js
+  major version, pooling/normalization, query/passage instruction prefixes).
+- **One-click confirm-and-reindex** on a model switch: rebuilds the chronicle
+  (and compendiums when that indexing is enabled) in one pass, or reverts on
+  cancel.
+- IndexedDB schema **v1→v2** with an additive `meta` store that records which
+  model built the vector store, enabling dimension-mismatch detection.
+- **Lazy transformers.js v3 loader** — the pinned v2.x line stays the default
+  path; v3 is fetched only when a v3 model is selected.
+
+### Compatibility
+- The default model is unchanged (MiniLM/384) and the v2 `meta` store is
+  additive, so existing worlds keep working with **no forced reindex**.
+
 ## [0.23.0] — 2026-06-13
 
 A memory-scaling pass ("L1"). Adds an **opt-in approximate-nearest-neighbour
