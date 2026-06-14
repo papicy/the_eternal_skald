@@ -13,6 +13,43 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.25.0] — 2026-06-14
+
+A **narration & story memory** pass. Extends browser-RAG so the unfolding
+*story* — not raw chat — can be embedded into semantic memory. **Story-only by
+design**, fully **opt-in / default-safe**, and engineered so embedding never
+blocks chat posting.
+
+### Added
+- **Index Narration & Story** setting (`ragIndexNarration`, default OFF): when
+  enabled, embeds AI-generated Skald story cards and player in-character
+  (IC/EMOTE) narration into semantic memory for recall.
+- **Narration Sources** setting (`ragNarrationSources`: `both` | `ai` | `player`)
+  to choose which narration to index.
+- **Include Emotes as Narration** (`ragNarrationIncludeEmotes`, default ON),
+  **Minimum Narration Length** (`ragNarrationMinChars`, default 20), and a
+  rolling **Narration Memory Cap** (`ragNarrationMaxRecords`, default 4000;
+  0 = unlimited) that evicts the oldest narration vectors without touching
+  journal or chronicle memory.
+- A pure, synchronous **narration classifier** (`BrowserRAG.prepareNarrationRecord`)
+  that admits only genuine story — AI story cards (via an explicit `story:true`
+  flag or a curated `variant` allow-list) and player IC/EMOTE spoken by an actor
+  — and rejects OOC, dice rolls, system/help/error/suggest cards, slash-commands
+  and whispers.
+- A debounced, micro-batched **narration indexing queue** (`indexNarration` +
+  `embedBatch` + `_drainNarrationQueue`) that drains off the hot path via
+  `requestIdleCallback`, embedding bursts in a single pipeline call.
+- `createChatMessage` / `updateChatMessage` / `deleteChatMessage` hooks that
+  enqueue narration for background embedding and evict it on delete. The update
+  hook re-indexes the *final* streamed AI prose (replacing the placeholder),
+  keyed by a stable `narration:${id}` so re-embeds replace rather than duplicate.
+- `!rag-status` now reports narration memory health (total + AI/player counts).
+
+### Compatibility
+- Narration indexing is OFF by default and additive — existing worlds behave
+  exactly as before with **no forced reindex**. Whispers are never indexed, so
+  hidden GM info cannot leak into shared memory.
+
 ## [0.24.0] — 2026-06-14
 
 A **selectable embedding-model** pass. Turns the hardcoded single-model

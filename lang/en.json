@@ -307,6 +307,26 @@
         "name": "Auto-Index Journals",
         "hint": "Automatically embed each NPC, location, discovery, world fact, story thread and session chronicle into semantic memory as the Skald scribes it. Turn off to index only manually via the !reindex command. Defaults to ON."
       },
+      "ragIndexNarration": {
+        "name": "Index Narration & Story",
+        "hint": "Embed the unfolding story into semantic memory: AI-generated Skald story cards and player in-character (IC/EMOTE) narration. Story-only by design — out-of-character chat, dice rolls, system/help/error cards, slash-commands and whispers are never indexed. Pairs well with the Advanced Memory Index for long campaigns. Defaults to OFF (opt-in)."
+      },
+      "ragNarrationSources": {
+        "name": "Narration Sources",
+        "hint": "Which narration to index when Index Narration & Story is on: both AI story cards and player IC narration, AI-generated story only, or player in-character narration only. Default: both."
+      },
+      "ragNarrationIncludeEmotes": {
+        "name": "Include Emotes as Narration",
+        "hint": "Treat EMOTE messages (e.g. *draws his axe*) as player narration alongside in-character speech — they are genuine in-world action. Turn off to index only IC speech. Defaults to ON."
+      },
+      "ragNarrationMinChars": {
+        "name": "Minimum Narration Length",
+        "hint": "Skip narration shorter than this many characters — drops one-word emotes and chatter that add little retrievable meaning. Set to 0 to index everything that passes the story filter. Default: 20."
+      },
+      "ragNarrationMaxRecords": {
+        "name": "Narration Memory Cap",
+        "hint": "Maximum number of narration vectors to keep. When exceeded, the oldest narration memories are evicted (journals and chronicles are unaffected). Bounds search latency and storage. Set to 0 for unlimited. Default: 4000."
+      },
       "ragSimilarityThreshold": {
         "name": "Memory Relevance Threshold",
         "hint": "Minimum cosine similarity (0–1) for a memory to be considered relevant to a query. Lower values recall more (but looser) matches; higher values recall only strong matches. Default: 0.3."

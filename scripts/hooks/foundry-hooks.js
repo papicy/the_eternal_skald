@@ -518,6 +518,41 @@ Hooks.on("deleteJournalEntry", (entry /*, options, userId */) => {
   } catch (_) { /* defensive — memory upkeep must never break deletes */ }
 });
 
+/* === Narration → RAG memory (v0.25.0, opt-in) ========================
+ * Index the unfolding STORY into semantic memory: AI-generated Skald story
+ * cards and player in-character (IC/EMOTE) narration. Everything else —
+ * OOC, dice rolls, system/help/error/suggest cards, slash-commands and
+ * whispers — is rejected by BrowserRAG.prepareNarrationRecord, so these
+ * hooks stay dumb: they enqueue every message and let the classifier filter.
+ *
+ * Enqueue-only and soft-fail: embedding runs in the background and these
+ * handlers never throw, so narration memory can never break chat. A SEPARATE
+ * pair of create/update handlers (rather than editing the command/roll hooks
+ * above) keeps the concern isolated and trivially removable; Foundry happily
+ * runs multiple handlers for the same hook.
+ * ==================================================================== */
+Hooks.on("createChatMessage", (message) => {
+  try { BrowserRAG?.indexNarration?.(message); }
+  catch (_) { /* soft-fail: memory must never break chat */ }
+});
+
+// Re-embed on meaningful edits (debounced inside indexNarration; same id
+// replaces). Crucial for AI story cards: callSkaldStreaming posts a THINKING
+// placeholder, then patches in the final prose via updateChatMessage — so the
+// *edit* carries the real narration. Re-running the gate here indexes the
+// final content, not the placeholder, and the stable narration:${id} key means
+// each re-embed replaces the prior vector (never a half-streamed fragment).
+Hooks.on("updateChatMessage", (message, changed) => {
+  try { if (changed?.content !== undefined) BrowserRAG?.indexNarration?.(message); }
+  catch (_) { /* soft-fail */ }
+});
+
+// Evict a message's narration vector when it's deleted (mirrors deleteJournalEntry).
+Hooks.on("deleteChatMessage", (message) => {
+  try { if (message?.id) BrowserRAG?.remove?.(`narration:${message.id}`); }
+  catch (_) { /* soft-fail */ }
+});
+
 // --- Entity-linking cache upkeep (v0.5.1) ----------------------------
 // The narration entity-link index is built from the chronicle's journal
 // entries. Whenever an entry is created, renamed, or removed, mark the

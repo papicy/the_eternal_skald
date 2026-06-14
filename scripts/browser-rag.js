@@ -260,6 +260,14 @@ export const BrowserRAG = {
   _indexJobs: [],
   _indexBusy: false,
 
+  // Narration indexing (v0.25.0): debounced, micro-batched, drains off the
+  // hot path so embedding never blocks chat posting.
+  _narrationJobs: [],
+  _narrationBusy: false,
+  _narrationTimer: null,
+  _NARRATION_DEBOUNCE_MS: 400,
+  _NARRATION_BATCH: 12,
+
   /* ---------------- settings accessors ---------------- */
 
   /** Read a module setting defensively (returns undefined if unavailable). */
@@ -286,6 +294,106 @@ export const BrowserRAG = {
 
   /** Opt-in HNSW approximate index (default OFF) — for large chronicles. */
   useAnnIndex() { return this._setting("ragUseAnnIndex") === true; },
+
+  /* ---------------- narration / story indexing (v0.25.0) ---------------- */
+
+  /** Should narration/story be embedded automatically? (opt-in) */
+  indexNarrationEnabled() { return this._setting("ragIndexNarration") === true; },
+
+  /** Narration sources: "both" | "ai" | "player". */
+  narrationSources()      { return this._setting("ragNarrationSources") || "both"; },
+
+  /** Treat EMOTE messages as player narration too? */
+  narrationIncludeEmotes(){ return this._setting("ragNarrationIncludeEmotes") !== false; },
+
+  /** Minimum narration length (chars) worth embedding. */
+  narrationMinChars()     { const n = Number(this._setting("ragNarrationMinChars")); return Number.isFinite(n) && n >= 0 ? n : 20; },
+
+  /** Rolling cap for narration vectors (0 = unlimited). */
+  narrationMaxRecords()   { const n = Number(this._setting("ragNarrationMaxRecords")); return Number.isFinite(n) && n >= 0 ? n : 4000; },
+
+  /** AI card variants that are genuine STORY (not help/error/suggest UI). */
+  _STORY_VARIANTS: new Set(["default", "lore", "npc", "oracle", "scene", "combat"]),
+
+  /** Resolve Foundry's message-style enum across versions (v12+ STYLES, v11 TYPES). */
+  _chatStyles() {
+    const C = (typeof CONST !== "undefined" && CONST) || {};
+    return C.CHAT_MESSAGE_STYLES || C.CHAT_MESSAGE_TYPES || { OTHER: 0, OOC: 1, IC: 2, EMOTE: 3 };
+  },
+
+  /**
+   * Is this one of OUR Skald cards, and is it genuine STORY narration?
+   * Prefers an explicit { story:true } flag; falls back to the variant allow-list.
+   * @returns {boolean|null} true (index), false (skip — meta/UI card), null (not ours).
+   */
+  _aiStoryCard(message) {
+    const f = message?.flags?.[MODULE_ID];
+    if (!f) return null;                              // not a Skald card
+    if (f.story === true) return true;                // explicit, unambiguous
+    if (f.story === false) return false;              // explicitly non-story
+    // Legacy fallback: infer from variant. (oracle PROMPT cards are UI, but the
+    // explicit flag above is the recommended fix.)
+    return this._STORY_VARIANTS.has(f.variant);
+  },
+
+  /**
+   * Decide whether a ChatMessage is narration/story worth embedding.
+   * Cheap & synchronous so it can run on the hot path. Returns a prepared
+   * { id, text, metadata } record, or null to skip. Never throws.
+   */
+  prepareNarrationRecord(message) {
+    try {
+      if (!this.isAvailable() || !this.indexNarrationEnabled() || !message) return null;
+
+      const sources = this.narrationSources();         // "both" | "ai" | "player"
+      const styles  = this._chatStyles();
+      const style   = (message.style ?? message.type);
+      const isWhisper = Array.isArray(message.whisper) && message.whisper.length > 0;
+      const isRoll    = !!message.rolls?.length || style === styles.ROLL; // ROLL only exists pre-v12
+
+      let source = null, channel = null, alias = null;
+
+      // --- (A) AI-generated story card? ---
+      const ai = this._aiStoryCard(message);
+      if (ai === true) {
+        if (sources === "player") return null;         // AI excluded by setting
+        source = "ai"; channel = "ai";
+        alias  = message.flags?.[MODULE_ID]?.alias || "The Skald";
+      } else if (ai === false) {
+        return null;                                   // our meta/UI card → never index
+      } else {
+        // --- (B) Player narration? Only IC / EMOTE, in-world, non-roll, non-whisper ---
+        if (sources === "ai") return null;             // players excluded by setting
+        if (isWhisper || isRoll) return null;
+        const isIc    = style === styles.IC;
+        const isEmote = style === styles.EMOTE && this.narrationIncludeEmotes();
+        if (!isIc && !isEmote) return null;            // OOC / OTHER → reject
+        if (!message.speaker?.actor) return null;      // must be spoken in-world
+        source = "player"; channel = isEmote ? "emote" : "ic";
+        alias  = message.speaker?.alias || message.author?.name || "Someone";
+      }
+
+      // Extract & clean text (HTML → plain). For AI cards this also strips the
+      // card chrome; leading rune glyphs collapse to whitespace and are trimmed.
+      const raw  = String(message.content ?? "");
+      const text = raw.replace(/<[^>]+>/g, " ").replace(/[\u16A0-\u16FF]/g, " ") // runic banner glyphs
+                      .replace(/\s+/g, " ").trim();
+      if (!text || text.startsWith("!")) return null;            // command / empty
+      if (text.length < this.narrationMinChars()) return null;   // length floor
+
+      return {
+        id: `narration:${message.id}`,
+        text: `${alias}: ${text}`,
+        metadata: {
+          type: "narration", source, name: alias, channel,
+          variant: source === "ai" ? (message.flags?.[MODULE_ID]?.variant ?? null) : null,
+          user: message.author?.id ?? null,
+          scene: message.speaker?.scene ?? null,
+          timestamp: Date.now()
+        }
+      };
+    } catch (_) { return null; }   // never throw into a hook
+  },
 
   /* ---------------- active embedding model ---------------- */
 
@@ -636,6 +744,101 @@ export const BrowserRAG = {
     } finally {
       this._indexBusy = false;
     }
+  },
+
+  /* ---------------- narration queue (v0.25.0) ---------------- */
+
+  /**
+   * Enqueue a narration/story message for background embedding. Soft-fails and
+   * never blocks the caller — safe to fire-and-forget straight from a hook.
+   * The classifier (prepareNarrationRecord) does all filtering; non-narration
+   * messages are dropped here for free.
+   * @param {ChatMessage} message
+   */
+  indexNarration(message) {
+    const rec = this.prepareNarrationRecord(message);
+    if (!rec) return;
+    this._narrationJobs.push(rec);
+    // Debounce: let bursts accumulate so we can batch-embed them.
+    if (this._narrationTimer) return;
+    const schedule = (cb) =>
+      (typeof requestIdleCallback === "function")
+        ? requestIdleCallback(cb, { timeout: 1000 })
+        : setTimeout(cb, this._NARRATION_DEBOUNCE_MS);
+    this._narrationTimer = schedule(() => { this._narrationTimer = null; this._drainNarrationQueue(); });
+  },
+
+  /**
+   * Embed an array of passages in ONE pipeline call when possible (amortises
+   * per-call overhead). Falls back to serial embedding if the batch call fails.
+   * @param {string[]} texts
+   * @returns {Promise<number[][]>} one vector per input (empty array on hard failure).
+   */
+  async embedBatch(texts) {
+    if (!this._extractor) { const ok = await this.init(); if (!ok || !this._extractor) return []; }
+    const info = this._activeInfo();
+    const prepared = texts.map((t) => applyPrefix(String(t || ""), "passage", info));
+    try {
+      const out = await this._extractor(prepared, {
+        pooling: info?.pooling || "mean",
+        normalize: info?.normalize !== false
+      });
+      // transformers.js returns a [batch x dims] tensor; slice per row.
+      const dims = info.dims, data = out?.data ?? [];
+      const vecs = [];
+      for (let i = 0; i < texts.length; i++) vecs.push(Array.from(data.slice(i * dims, (i + 1) * dims)));
+      return vecs;
+    } catch (err) {
+      this._debug("embedBatch failed, falling back to serial:", err?.message || err);
+      // Soft fallback: embed one at a time so a single bad input can't drop the batch.
+      const vecs = [];
+      for (const t of texts) vecs.push(await this.embed(t, { role: "passage", cache: false }));
+      return vecs;
+    }
+  },
+
+  /** Serial, idle-friendly drain of the narration queue with retention sweep. */
+  async _drainNarrationQueue() {
+    if (this._narrationBusy) return;
+    this._narrationBusy = true;
+    try {
+      while (this._narrationJobs.length) {
+        const batch = this._narrationJobs.splice(0, this._NARRATION_BATCH);
+        const vecs  = await this.embedBatch(batch.map((b) => b.text));
+        for (let i = 0; i < batch.length; i++) {
+          const vec = vecs[i]; if (!vec?.length) continue;
+          const b = batch[i];
+          try {
+            await this._store.put({
+              id: b.id, text: b.text.slice(0, 8000), vector: vec,
+              metadata: { model: this._activeModelId(), dims: vec.length, ...b.metadata }
+            });
+          } catch (e) { this._debug("narration put failed:", e?.message || e); }
+        }
+        this._invalidateCorpus();
+        // Yield between batches so the UI stays responsive on long bursts.
+        await new Promise((r) => setTimeout(r, 0));
+      }
+      await this._enforceNarrationRetention();
+    } catch (e) {
+      this._debug("narration drain failed:", e?.message || e);
+    } finally {
+      this._narrationBusy = false;
+    }
+  },
+
+  /** Evict the oldest narration vectors once the rolling cap is exceeded. */
+  async _enforceNarrationRetention() {
+    const cap = this.narrationMaxRecords();
+    if (!cap) return;                       // 0 = unlimited
+    try {
+      const all  = await this._getCorpus();
+      const recs = all.filter((r) => r?.metadata?.type === "narration")
+                      .sort((a, b) => (a.metadata.timestamp || 0) - (b.metadata.timestamp || 0));
+      const overflow = recs.length - cap;
+      for (let i = 0; i < overflow; i++) await this._store.delete(recs[i].id);
+      if (overflow > 0) { this._invalidateCorpus(); this._debug(`narration retention: evicted ${overflow}`); }
+    } catch (e) { this._debug("narration retention failed:", e?.message || e); }
   },
 
   /** The actual per-entry indexing work (extraction + embed + store). */
@@ -999,6 +1202,17 @@ export const BrowserRAG = {
     try { count = await this.count(); } catch (_) {}
     let stored = "";
     try { stored = await this.storedModelId(); } catch (_) {}
+    // Narration sub-counts (story memory health) — cheap corpus scan, fail-soft.
+    let narrationCount = 0, narrationAi = 0, narrationPlayer = 0;
+    try {
+      const all = await this._getCorpus();
+      for (const r of all) {
+        if (r?.metadata?.type !== "narration") continue;
+        narrationCount++;
+        if (r.metadata.source === "ai") narrationAi++;
+        else if (r.metadata.source === "player") narrationPlayer++;
+      }
+    } catch (_) {}
     const activeId = this._activeModelId();
     const info = this._activeInfo();
     return {
@@ -1008,6 +1222,8 @@ export const BrowserRAG = {
       modelFailed:    this._initFailed,
       autoIndex:      this.autoIndex(),
       vectorCount:    count,
+      indexNarration: this.indexNarrationEnabled(),
+      narrationCount, narrationAi, narrationPlayer,
       model:          activeId,
       modelLabel:     info?.label || activeId,
       dims:           this.activeDims(),
