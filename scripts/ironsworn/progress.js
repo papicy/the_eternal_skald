@@ -433,10 +433,32 @@ export const ProgressMethods = {
     if (!actor?.items || !name) return null;
     const wantKind = kind ? String(kind).toLowerCase() : null;
     const matchesKind = (it) => !wantKind || this._trackKindOf(it) === wantKind;
+    const isOpen = (it) => !foundry.utils.getProperty(it, "system.completed");
 
-    // 1. Direct id / exact-name / substring match that ALSO satisfies the kind.
+    // 0. An explicit id is unambiguous — honour it exactly as given.
+    const byId = actor.items.get?.(name);
+    if (byId && matchesKind(byId)) return byId;
+
+    // 1. Direct exact-name / substring match that ALSO satisfies the kind.
+    //    PREFER AN OPEN TRACK: a directive (end_combat, mark_complete, journey
+    //    reuse) acts on the LIVE track, so when an earlier same-named track of
+    //    this kind was already completed — e.g. a foe "Wolf" you fought and
+    //    closed before, then meet again — resolve the still-OPEN one rather
+    //    than the stale completed duplicate (which would make end_combat a
+    //    no-op and leave the current fight open on the sheet). Fall back to a
+    //    completed match only when no open one exists, preserving the
+    //    idempotent mark-complete and closed-track paths.
     const direct = this.findTrack(actor, name);
-    if (direct && matchesKind(direct)) return direct;
+    if (direct && matchesKind(direct)) {
+      if (isOpen(direct)) return direct;
+      const lc = String(name).toLowerCase();
+      const openExact = actor.items.find?.(i =>
+        i.name?.toLowerCase() === lc && matchesKind(i) && isOpen(i));
+      if (openExact) return openExact;
+      const openSub = actor.items.find?.(i =>
+        i.name?.toLowerCase().includes(lc) && matchesKind(i) && isOpen(i));
+      return openSub ?? direct;
+    }
 
     // Normalisation: lower-case, strip leading articles & non-alphanumerics.
     const norm = (s) => String(s ?? "").toLowerCase()
@@ -449,7 +471,11 @@ export const ProgressMethods = {
     if (!targetWords.size) return null;
 
     // 2. Word-overlap scoring across candidate tracks of the right kind.
-    let best = null, bestScore = 0;
+    //    Track the best OPEN candidate separately and prefer it (see step 1):
+    //    a paraphrased end_combat / mark_complete should target the live track,
+    //    not a same-kind completed one. Fall back to the best completed match
+    //    only when no open candidate clears the threshold.
+    let best = null, bestScore = 0, bestOpen = null, bestOpenScore = 0;
     for (const it of actor.items) {
       if (it.type !== "progress") continue;
       if (!matchesKind(it)) continue;
@@ -460,8 +486,10 @@ export const ProgressMethods = {
       // Jaccard-like score over the smaller set so short names still match.
       const score = shared / Math.min(targetWords.size, candWords.size);
       if (score > bestScore) { bestScore = score; best = it; }
+      if (isOpen(it) && score > bestOpenScore) { bestOpenScore = score; bestOpen = it; }
     }
     // Require a solid majority of shared significant words to avoid mismatches.
+    if (bestOpenScore >= 0.5) return bestOpen;
     return bestScore >= 0.5 ? best : null;
   },
 
