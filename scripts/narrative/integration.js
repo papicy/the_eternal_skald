@@ -543,8 +543,15 @@ export const Integration = {
       }
 
       if (verb === "end_combat") {
-        const { name } = this._splitNameRank(rest);
-        return name ? { kind: "end_combat", name } : null;
+        // (fix — narrated conclusion) The prompt EXPLICITLY allows the AI to
+        // omit the foe name when ending a fight ("if unsure, you MAY omit the
+        // name"). The old `return name ? {…} : null` DROPPED a nameless
+        // [[EFFECT: end_combat]] at parse time, so the fight never closed and
+        // the applyEffects fallback (active-combat → closeStaleCombatTracks)
+        // never ran. Mirror the complete_* branch: always return the effect
+        // with a (possibly empty) name; _unquote strips surrounding quotes so
+        // [[EFFECT: end_combat "The Foe"]] resolves cleanly too.
+        return { kind: "end_combat", name: this._unquote(rest) };
       }
 
       // Mark a vow / journey / progress track COMPLETE. All of these verbs

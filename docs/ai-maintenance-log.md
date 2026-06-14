@@ -3715,63 +3715,65 @@ RESIDUAL RISK: LOW. The end_combat fallback only fires when the specific close f
               is now suppressed. The journey directive is prose-only guidance gated on an open-journey context
               match; it adds no write and no new directive grammar. XP remains vow-only (unchanged).
 
-
-
 ---
 
-### [2026-06-14 EEST] — Fix "Undertake a Journey" branching a duplicate track when one journey is already open
+### [2026-06-14 17:35 EEST] — ROOT CAUSE: parseEffects dropped a nameless end_combat (why PRs #33/#34/#35 "did nothing")
 
-TASK TYPE:    IMPLEMENT (+ TEST)
-TOKEN BUDGET: IMPLEMENT 5,000  |  USED: ~within budget  |  WITHIN BUDGET: YES
+TASK TYPE:    INVESTIGATE → IMPLEMENT (+ TEST)
+TOKEN BUDGET: IMPLEMENT 20,000  |  USED: ~within budget  |  WITHIN BUDGET: YES
 
 PRE-FLIGHT CHECKLIST (brief §3):
   [x] read engineering-brief.md (SKILL) + repository-map.md + relevant test
-  [x] task classified: IMPLEMENT (+ TEST)
-  [x] target file(s)+line(s) located (evidence below)
-  [x] <= 3 files / <= 50 changed lines per file (integration.js +14/-1; journey-tracking.test.mjs +49/-0)
-  [x] additive & backwards-compatible (new condition only RELAXES reuse when exactly one journey is open; multi-journey path unchanged)
+  [x] task classified: INVESTIGATE then IMPLEMENT (+ TEST)
+  [x] target file(s)+line(s) located with RUNTIME evidence (below)
+  [x] <= 3 files / <= 50 changed lines per file (integration.js +9 net; test +61)
+  [x] additive & backwards-compatible (a NAMED end_combat parses identically; we only STOP dropping the nameless form)
   [x] no setting/flag/directive/i18n key removed or renamed
   [x] architectural boundary: 🔴 LOCKED integration.js touched — GATE recorded below (human-approved)
-  [x] regression test added (test/journey-tracking.test.mjs [8]/[9] — RUNTIME, exercises the real Integration._autoJourneyFlow)
+  [x] regression test added AND proven to fail on the pre-fix code (8 failures) and pass after (full pipeline)
   [x] rollback plan defined
 
-PROBLEM:      Clicking/rolling "Undertake a Journey" while a journey was already open created a NEW
-              journey track every time instead of advancing the existing one. Root cause (verified in a
-              prior INVESTIGATE): the link/dialog roll path does not stamp a fresh _lastIntent, so
-              _resolveJourney falls back to a vow-derived name flagged specific:true; _autoJourneyFlow
-              then requires a fuzzy NAME match to reuse the open track, the vow-guessed name misses the
-              real journey's title, and a duplicate track is branched.
+PROBLEM:      After PRs #33/#34/#35, a narrated fight ending STILL left the combat track open. Evidence:
+              the AI narrates the foe's death ("its core ruptures… collapses into cooling glass… your
+              shadow stands alone") and says "No further effects are required", yet the track stays open.
+              All three prior PRs fixed code INSIDE the applyEffects `end_combat` case and the redundancy
+              filter — but the directive was being dropped one step EARLIER, at parse time, so none of
+              those fixes ever executed.
 
-EVIDENCE (brief §4 format):
-  CLAIM:      _autoJourneyFlow drops the open journey to null on a name mismatch when resolved.specific is true, then creates a new track.
-  EVIDENCE:   scripts/narrative/integration.js:2409-2430 :: _autoJourneyFlow (pre-edit reuse branch + create branch)
-  CONFIDENCE: HIGH    BASIS: read the lines directly
-  CLAIM:      With no fresh intent, _resolveJourney returns the active-vow fallback flagged specific:true.
-  EVIDENCE:   scripts/narrative/integration.js:2073-2075 (freshness gate) + 2271 :: _fallbackJourneyName (vow → specific:true)
-  CONFIDENCE: HIGH    BASIS: read the lines directly
-  CLAIM:      findTrackFuzzy needs >=0.5 shared-word score; a vow-guessed name fails against a descriptive journey title.
-  EVIDENCE:   scripts/ironsworn/progress.js:432-465 :: findTrackFuzzy (threshold at :465)
-  CONFIDENCE: HIGH    BASIS: read the lines directly; computed the Jaccard-min score by hand
+ROOT CAUSE (proven by RUNNING the real parser, not theory):
+  CLAIM:      Integration.parseEffects DROPS a nameless [[EFFECT: end_combat]] (returns null), so it never
+              reaches _filterRedundantCombatEffects or applyEffects — the PR #35 fallback can never run.
+  EVIDENCE:   scripts/narrative/integration.js:545-548 :: parseEffect "end_combat" branch (pre-fix:
+              `return name ? { kind:"end_combat", name } : null;`)
+              PROVEN: ran Integration.parseEffects("…[[EFFECT: end_combat]]") → returned []  (has end_combat? false)
+  CONFIDENCE: HIGH    BASIS: executed the real parseEffects and read the lines
+  CLAIM:      The prompt EXPLICITLY allows the AI to omit the foe name, so a nameless directive is EXPECTED.
+  EVIDENCE:   scripts/ai/prompt-builder.js:798 ("if unsure, you MAY omit the name (e.g. [[EFFECT: complete_vow]])")
+  CONFIDENCE: HIGH    BASIS: read the line
+  CLAIM:      The sibling complete_* branch KEEPS the effect with an empty name, proving the inconsistency.
+  EVIDENCE:   scripts/narrative/integration.js:560-565 (`name: name || ""`)
+              PROVEN: parseEffects("[[EFFECT: complete_vow]]") → [{kind:"complete_track",name:"",trackKind:"vow"}]
+  CONFIDENCE: HIGH    BASIS: executed the real parseEffects and read the lines
 
-CHANGE:       integration.js _autoJourneyFlow (~2409): count OPEN journey tracks on the actor; only run
-              the specific-name disambiguation/branching when MORE THAN ONE open journey competes
-              (`openJourneys > 1`). When exactly one open journey exists it is unambiguously the journey
-              this roll advances, so reuse it regardless of name specificity — restoring progress-marking
-              on the existing track. Count uses the existing sys()._trackKindOf classifier over actor.items.
+CHANGE:       scripts/narrative/integration.js:545-554 — the end_combat parse branch now returns the effect
+              unconditionally with a (possibly empty) _unquote(rest) name, mirroring the complete_* branch.
+              The downstream handler resolves an empty name via getActiveCombat → and the PR #35
+              closeStaleCombatTracks fallback, so the fight reliably closes. _unquote also strips surrounding
+              quotes, fixing a secondary bug where [[EFFECT: end_combat "The Foe"]] kept its quotes.
 FILES TOUCHED (2):
-  - scripts/narrative/integration.js        (+14 / -1)
-  - test/journey-tracking.test.mjs          (+49 / -0 — adds runtime cases [8] single-journey reuse, [9] multi-journey branch preserved)
-TESTS:        node test/journey-tracking.test.mjs → 34 passed, 0 failed (was 29; +5 assertions).
-              Verified the test FAILS with the fix reverted (3 failing assertions in [8]) → it genuinely guards the change.
-SUITE:        npm test → PASS (65 of 65 test files green); test/load-smoke.mjs → clean import.
-GATE:         GATE-JOURNEY-SINGLE-REUSE — human-approved in conversation ("User has approved Option A …
-              Modify _autoJourneyFlow in scripts/narrative/integration.js") to edit the 🔴 LOCKED
-              scripts/narrative/integration.js. Smallest-safe-change principle applied (single guarded
-              condition; no behaviour change for the multi-journey case).
-ROLLBACK:     git revert <this commit> — restores the prior `if (track && specific)` reuse branch and
-              removes the two new test cases. No settings/flags/directives/i18n keys changed, so the
-              revert is byte-clean with no migration.
-RESIDUAL RISK: LOW. The new condition only ADDS reuse in the single-open-journey case (it never branches
-              where the old code reused, and never reuses across multiple competing journeys where the old
-              code disambiguated). Journey completion still closes tracks at 10/10, so a finished journey
-              stops counting toward `openJourneys`. XP remains vow-only (unchanged).
+  - scripts/narrative/integration.js     (+9 net — 1 code line + comment)
+  - test/combat-close-journey.test.mjs   (+61 — new tests [7]/[8]/[9], incl. a FULL-PIPELINE reproduction)
+TESTS:        node test/combat-close-journey.test.mjs → 22 passed, 0 failed
+              PROOF IT CATCHES THE BUG: stashing the fix and re-running → 14 passed, 8 FAILED, incl.
+              "PIPELINE RESULT: combat track is CLOSED" → expected true, got false (the exact reported symptom).
+SUITE:        npm test → PASS (65 of 65 test files green); test/load-smoke.mjs → clean import
+GATE:         GATE-ENDCOMBAT-PARSE — human-approved in conversation ("proceed") to edit the 🔴 LOCKED
+              scripts/narrative/integration.js.
+ROLLBACK:     git revert <this commit> — restores `return name ? {…} : null` and removes the new tests.
+              No settings/flags/directives/i18n keys changed; byte-clean revert, no migration.
+RESIDUAL RISK: LOW for the covered case (AI signals end via a nameless/quoted directive). OUT OF SCOPE /
+              honest residual: when the AI emits NO directive at all (pure prose + "No further effects are
+              required"), there is nothing to parse — that is AI behaviour, not a parse defect, and is not
+              addressed here. Mitigation already exists separately: rolling "End the Fight" auto-completes
+              via _autoCompletionFlow regardless of the narration. A NAMED end_combat parses exactly as
+              before, so no existing behaviour changes.

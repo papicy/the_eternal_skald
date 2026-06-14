@@ -203,6 +203,67 @@ console.log("[6] filter: MISS on 'End the Fight' (no auto-complete) → end_comb
      "on a miss nothing auto-completed → end_combat is NOT dropped");
 }
 
+/* ===================================================================== *
+ *  FIX 3 (root cause) — parseEffects must NOT drop a nameless end_combat.
+ *
+ *  This is the defect that made PRs #33/#34/#35 appear to "do nothing": the
+ *  AI narrates the kill and emits [[EFFECT: end_combat]] WITHOUT a foe name
+ *  (the prompt EXPLICITLY allows omitting the name). The old parser returned
+ *  null for a nameless end_combat, so the directive vanished BEFORE applyEffects
+ *  — the fallback chain could never run and the track stayed open.
+ *
+ *  These tests run the REAL parser, so they fail if the drop ever returns.
+ * ===================================================================== */
+console.log("[7] parseEffects: nameless [[EFFECT: end_combat]] is KEPT (not dropped)");
+{
+  installGame();
+  const { effects } = Integration.parseEffects("The creature collapses into cooling glass. [[EFFECT: end_combat]]");
+  ok(effects.some(e => e.kind === "end_combat"),
+     "a nameless end_combat survives parsing (was silently dropped before the fix)");
+  const ec = effects.find(e => e.kind === "end_combat");
+  eq(ec?.name, "", "nameless end_combat parses with an empty name (handler resolves the active foe)");
+}
+
+console.log("[8] parseEffects: quoted foe name is UNQUOTED");
+{
+  installGame();
+  const { effects } = Integration.parseEffects('It yields. [[EFFECT: end_combat "The Primordial"]]');
+  const ec = effects.find(e => e.kind === "end_combat");
+  eq(ec?.name, "The Primordial", "surrounding quotes stripped from the foe name");
+}
+
+console.log("[9] FULL PIPELINE — AI narrates the kill with a nameless end_combat → fight CLOSES");
+{
+  installGame();
+  // Reproduce the EXACT reported scenario end-to-end: the AI narrates the
+  // foe's death and appends a nameless [[EFFECT: end_combat]] (active-combat
+  // flag drifted, so it cannot resolve by name). Run the real pipeline:
+  // parseEffects → _filterRedundantCombatEffects → applyEffects.
+  const foes = [{ id: "c1", name: "The Primordial", completed: false }];
+  const { adapter, calls } = makeAdapter(foes, { fuzzyResolves: false, activeResolves: false });
+  registerSystem("foundry-ironsworn", adapter);
+
+  const aiReply =
+    "Its core ruptures and it sinks to its knees, collapsing into cooling glass. " +
+    "Your shadow stands alone on the scorched field. [[EFFECT: end_combat]]";
+
+  // STEP 1 — parse (this is where the bug used to drop the directive).
+  const { effects } = Integration.parseEffects(aiReply);
+  ok(effects.some(e => e.kind === "end_combat"), "pipeline: end_combat survived parsing");
+
+  // STEP 2 — redundancy filter (this was a plain narration, NOT a rolled
+  // completion move, so nothing should be filtered out here).
+  const parsed = { moveName: "Strike", outcome: "Strong Hit" };
+  const safe = Integration._filterRedundantCombatEffects(effects, parsed, "");
+  ok(safe.some(e => e.kind === "end_combat"), "pipeline: filter kept end_combat for a plain narration");
+
+  // STEP 3 — apply: the fight must actually close.
+  const applied = await Integration.applyEffects(safe, ACTOR);
+  eq(foes[0].completed, true, "PIPELINE RESULT: 'The Primordial' combat track is CLOSED on the sheet");
+  ok(calls.closeStale === 1, "pipeline: fallback sweeper engaged (no specific foe resolvable)");
+  ok(applied.some(s => /ended combat/.test(s)), "pipeline: applyEffects reports the fight ended");
+}
+
 /* ===================================================================== */
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
