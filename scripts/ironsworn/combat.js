@@ -277,6 +277,22 @@ export const CombatMethods = {
     if (done.length) {
       lines.push(`Recently ended fights: ${done.slice(0, 5).map(t => t.name).join(", ")}.`);
     }
+
+    // State-aware rollability hint (v0.22.x — closed-track guard). "End the
+    // Fight" is a PROGRESS move rolled against a foe's filled boxes: it is only
+    // a valid suggestion once a still-open foe has reached 10/10. Closed fights
+    // (the "Recently ended" list) are DONE — suggesting "End the Fight" against
+    // them dead-ends on a roll. Tell the AI explicitly so it never offers the
+    // move on a finished or under-filled track. Read-only; never mutates state.
+    const ready = active.filter(t => Number(t.boxes) >= 10);
+    if (ready.length) {
+      lines.push(`"End the Fight" is ROLLABLE now against: ${ready.map(t => t.name).join(", ")} (10/10).`);
+    } else if (active.length) {
+      lines.push(`Do NOT suggest "End the Fight" yet — no active foe is at 10/10. Wear foes down with "Strike"/"Clash" first.`);
+    }
+    if (done.length) {
+      lines.push(`Do NOT suggest "End the Fight" against ended fights — those tracks are CLOSED.`);
+    }
     return lines.join("\n");
   },
 

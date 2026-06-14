@@ -380,6 +380,31 @@ export const MovesMethods = {
     }
     if (!track && kind && kind !== "combat" && kind !== "site") track = this._newestOpenTrackItem(actor, kind);
     if (!track) {
+      // Graceful closed-track fallback (v0.22.x — closed-track guard). If no
+      // OPEN track of this kind exists but one was RECENTLY COMPLETED, the move
+      // was offered against a track that is already finished (e.g. "End the
+      // Fight" on a foe that is already defeated, or "Fulfill Your Vow" on a
+      // vow just sworn-and-sealed). Return a clear, non-error "already complete"
+      // result so the Skald narrates the resolution instead of dead-ending the
+      // player with "begin one first". Applies uniformly to vows, journeys and
+      // combat via the shared `kind` path. Read-only; never mutates the track.
+      if (kind && typeof this._newestTrackItemOfKind === "function") {
+        let recent = null;
+        try { recent = this._newestTrackItemOfKind(actor, kind, /*openOnly=*/false); } catch (_) {}
+        if (recent && foundry.utils.getProperty(recent, "system.completed")) {
+          const done = kind === "combat" ? "that fight is already won"
+                     : kind === "vow"    ? "that vow is already fulfilled"
+                     : kind === "journey"? "that journey is already complete"
+                     :                      `that ${kind} is already complete`;
+          return {
+            ok: false,
+            method: "already-complete",
+            track: recent.name,
+            error: `“${recent.name}” is already complete — ${done}. There is no open ` +
+                   `${kind === "combat" ? "fight" : kind} to roll "${move?.name ?? moveRef}" against.`
+          };
+        }
+      }
       const noun = kind ?? "progress";
       const begin = kind === "combat" ? "Enter the fray"
                   : kind === "site"   ? "Discover a Site"

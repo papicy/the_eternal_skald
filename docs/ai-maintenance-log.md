@@ -3577,3 +3577,76 @@ RESIDUAL RISK: LOW. Default model is unchanged (MiniLM/384) and the v2 meta stor
               worlds need NO forced reindex and behave byte-identically until a GM picks a different model.
               transformers.js v3 is only fetched when a tfjsMajor:3 model is selected; WebGPU models still
               run (slower) on WASM. The dims filter in search() guards against a partial/interrupted reindex.
+
+
+
+
+---
+
+### [2026-06-14 15:10 EEST] — Guard progress moves against closed/under-filled tracks
+AGENT:        Abacus AI Agent (maintenance)
+TASK TYPE:    IMPLEMENT (+ TEST)
+TOKEN BUDGET: IMPLEMENT 20,000  |  USED: ~within budget  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md (SKILL) + repository-map.md in full
+  [x] task classified: IMPLEMENT (+ TEST)
+  [x] target file(s)+line(s) located (evidence below)
+  [x] <= 3 files / <= 50 changed lines per file (combat.js +16/-0; moves.js +25/-0; new test)
+  [x] additive & backwards-compatible (new guidance text + a new graceful return branch only)
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] architectural boundary: two 🔴 LOCKED ironsworn rules-bridge submodules touched — GATE recorded below
+  [x] regression test added (test/ironsworn-closed-track.test.mjs)
+  [x] rollback plan defined
+
+PROBLEM:      After a combat progress track closed at 10/10, the Skald still suggested "End the
+              Fight" against the already-defeated foe (it appeared in the "Recently ended fights"
+              context with no signal it was closed), and attempting the roll dead-ended on the
+              generic "No open fight track … Enter the fray first" error instead of a graceful reply.
+
+EVIDENCE (brief §4 format):
+  CLAIM:      describeCombatState fed the AI a "Recently ended fights" list with no signal those tracks are closed/not rollable.
+  EVIDENCE:   scripts/ironsworn/combat.js:259-281 :: describeCombatState (pre-edit)
+  CONFIDENCE: HIGH
+  BASIS:      read the lines directly
+  CLAIM:      rollProgressMove returned a generic "Enter the fray first" error on a closed track with no graceful fallback.
+  EVIDENCE:   scripts/ironsworn/moves.js:382-394 :: rollProgressMove (pre-edit)
+  CONFIDENCE: HIGH
+  BASIS:      read the lines directly
+  CLAIM:      _newestTrackItemOfKind(actor, kind, openOnly=false) can surface a recently-completed track of any kind, enabling closed-track detection.
+  EVIDENCE:   scripts/ironsworn/progress.js:970-1004 :: _newestTrackItemOfKind
+  CONFIDENCE: HIGH
+  BASIS:      read the lines directly
+  CLAIM:      MovesMethods and ProgressMethods are Object.assign'd onto one IronswornController, so this._newestTrackItemOfKind is callable from rollProgressMove.
+  EVIDENCE:   scripts/ironsworn-controller.js:36,228-229 :: IronswornController = Object.assign(...)
+  CONFIDENCE: HIGH
+  BASIS:      read the lines directly
+
+CHANGE:       (1) scripts/ironsworn/combat.js — describeCombatState now appends a STATE-AWARE
+              rollability hint: announces "End the Fight" as rollable ONLY for active foes at 10/10,
+              tells the AI NOT to suggest it when no foe is at 10/10, and NOT to suggest it against
+              ended (closed) fights. Read-only; mutates no state.
+              (2) scripts/ironsworn/moves.js — rollProgressMove, when no OPEN track of the move's
+              kind exists, detects a RECENTLY COMPLETED track of that kind and returns a graceful
+              { ok:false, method:"already-complete", track } result (combat → "already won",
+              vow → "already fulfilled", journey → "already complete") instead of the generic
+              "begin one first" error. Applies uniformly to combat, vows and journeys via the shared
+              `kind` path. Player agency preserved: manual rolls on still-open tracks are untouched,
+              and with nothing completed the original generic error path is unchanged.
+FILES TOUCHED (3):
+  - scripts/ironsworn/combat.js          (+16 / -0)
+  - scripts/ironsworn/moves.js           (+25 / -0)
+  - test/ironsworn-closed-track.test.mjs (+~165 / -0, new — 19 assertions, 7 scenarios)
+TESTS:        node test/ironsworn-closed-track.test.mjs → 19 passed, 0 failed
+SUITE:        npm test -> PASS (63 of 63 test files green); test/load-smoke.mjs → clean import
+GATE:         GATE-CLOSED-TRACK-MOVES — human-approved in conversation ("proceed") to edit the two
+              🔴 LOCKED ironsworn rules-bridge submodules scripts/ironsworn/combat.js and
+              scripts/ironsworn/moves.js. Smallest-safe option chosen (additive guidance text + one
+              graceful return branch); no 3rd code file needed.
+ROLLBACK:     git revert <this commit> — removes the rollability hint, the graceful already-complete
+              branch, and the new test. No settings/flags/directives/i18n keys changed, so the revert
+              is byte-clean with no migration.
+RESIDUAL RISK: LOW. combat.js change is pure read-only prompt text. moves.js change only adds a NEW
+              early return for the no-open-track case and never alters the open-track roll path or the
+              journey progress gate; the new method value "already-complete" is additive (callers that
+              only check `ok` are unaffected). XP remains vow-only.
