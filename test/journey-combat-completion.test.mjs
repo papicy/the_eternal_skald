@@ -250,6 +250,56 @@ console.log("[8] REGRESSION — completing journey/foe is NOT a vow (no XP award
   ok(isVow(v), "a vow track is still recognised by the XP gate");
 }
 
+console.log("[9] DUPLICATE-NAME RESOLUTION — end_combat targets the OPEN track");
+{
+  // Production bug: you fight a foe with a recurring name (e.g. "Wolf"),
+  // defeat it (track completed), then meet another "Wolf" and a NEW open
+  // track is created. A narrated end_combat resolved the FIRST same-name
+  // match — the stale COMPLETED one — so completeTrack was a no-op and the
+  // CURRENT fight stayed open on the sheet. findTrackFuzzy must prefer the
+  // still-OPEN track of the right kind.
+  const actor = new MockActor();
+  const oldFoe = await Ctrl.createProgressTrack(actor, "Wolf", "combat", "dangerous");
+  await Ctrl.completeTrack(actor, oldFoe.id);            // earlier Wolf, defeated
+  const newFoe = await Ctrl.createProgressTrack(actor, "Wolf", "combat", "dangerous"); // met again
+
+  // (a) Exact same name → resolve the OPEN duplicate, not the completed one.
+  const exact = Ctrl.findTrackFuzzy(actor, "Wolf", "combat");
+  ok(exact && exact.id === newFoe.id, "exact same-name dup resolves the OPEN track");
+  ok(exact && getProperty(exact, "system.completed") !== true, "resolved track is still open");
+
+  // (b) Paraphrased name → fuzzy scoring must also prefer the open duplicate.
+  const fuzzy = Ctrl.findTrackFuzzy(actor, "the Wolf beast", "combat");
+  ok(fuzzy && fuzzy.id === newFoe.id, "paraphrased dup also resolves the OPEN track");
+
+  // (c) End the combat as the directive does → it must close the LIVE fight.
+  const c = await Ctrl.completeTrack(actor, exact.id);
+  ok(c?.ok, "completeTrack closes the resolved (open) foe");
+  eq(getProperty(actor.items.get(newFoe.id), "system.completed"), true, "current Wolf fight closed");
+  const openCombat = actor.items.filter(i => i.getFlag(SCOPE, "trackKind") === "combat"
+    && getProperty(i, "system.completed") !== true);
+  eq(openCombat.length, 0, "no open combat track left dangling after end_combat");
+}
+
+console.log("[10] DUPLICATE-NAME — explicit id honoured + completed-only fallback");
+{
+  const actor = new MockActor();
+  // (a) An explicit item id is unambiguous and must win even over an open dup.
+  const closed = await Ctrl.createProgressTrack(actor, "Husk", "combat", "formidable");
+  await Ctrl.completeTrack(actor, closed.id);
+  await Ctrl.createProgressTrack(actor, "Husk", "combat", "formidable"); // open dup
+  const byId = Ctrl.findTrackFuzzy(actor, closed.id, "combat");
+  ok(byId && byId.id === closed.id, "explicit id resolves that exact track");
+
+  // (b) When ONLY a completed track matches, it must still resolve (so
+  //     idempotent mark_complete on an already-closed foe keeps working).
+  const actor2 = new MockActor();
+  const onlyClosed = await Ctrl.createProgressTrack(actor2, "Frostbound Elk", "combat", "dangerous");
+  await Ctrl.completeTrack(actor2, onlyClosed.id);
+  const found = Ctrl.findTrackFuzzy(actor2, "Frostbound Elk", "combat");
+  ok(found && found.id === onlyClosed.id, "completed-only match still resolves (idempotent path preserved)");
+}
+
 /* ===================================================================== */
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

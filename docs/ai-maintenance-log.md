@@ -3777,3 +3777,79 @@ RESIDUAL RISK: LOW for the covered case (AI signals end via a nameless/quoted di
               addressed here. Mitigation already exists separately: rolling "End the Fight" auto-completes
               via _autoCompletionFlow regardless of the narration. A NAMED end_combat parses exactly as
               before, so no existing behaviour changes.
+
+
+
+---
+
+### [2026-06-14 18:40 EEST] — ROOT CAUSE: findTrackFuzzy resolved a STALE completed duplicate, so end_combat closed nothing
+
+TASK TYPE:    INVESTIGATE → IMPLEMENT (+ TEST)
+TOKEN BUDGET: IMPLEMENT 20,000  |  USED: ~within budget  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md (SKILL) + repository-map.md + relevant tests
+  [x] task classified: INVESTIGATE then IMPLEMENT (+ TEST)
+  [x] target file(s)+line(s) located with RUNTIME evidence (below)
+  [x] <= 3 files / <= 50 changed lines per file (progress.js +31 net; test +54; this log)
+  [x] additive & backwards-compatible (only CHANGES which same-name/same-kind duplicate is chosen; resolution of a single match or a completed-only match is unchanged)
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] architectural boundary: only the 🟡 GUARDED scripts/ironsworn/progress.js edited — NO 🔴 LOCKED file touched, so no gate required
+  [x] regression test added AND proven to fail on the pre-fix code (5 failures) and pass after
+  [x] rollback plan defined
+
+PROBLEM:      When a combat ended, the progress track was NOT moved to the system's "Completed" tab — it
+              stayed visible/open on the active sheet. This persisted even though end_combat reported success
+              and fired the "🏆 Combat ended: <foe>" chat line. The system relocates a track to the Completed
+              tab purely on item.system.completed === true (same mechanism vows already use), so the symptom
+              meant the CURRENT track's completed flag was never set.
+
+ROOT CAUSE (proven by RUNNING the real controller, not theory):
+  CLAIM:      ProgressMethods.findTrackFuzzy returned the FIRST name+kind match without preferring an OPEN
+              track, so when an earlier same-named foe (e.g. "Wolf", "Husk" — recurring Ironsworn foes) was
+              already completed, it resolved that STALE completed duplicate. completeTrack on an
+              already-completed item is an idempotent no-op, so end_combat reported ok and narrated success
+              while the CURRENT open track was never closed and stayed on the sheet.
+  EVIDENCE:   scripts/ironsworn/progress.js:432-466 (pre-fix findTrackFuzzy) — step 1 returned `direct`
+              (findTrack's first exact/substring hit) and step 2 returned the single best-scoring match,
+              neither distinguishing completed from open.
+              end_combat handler: scripts/narrative/integration.js:3052-3056 resolves the foe via
+              findTrackFuzzy(actor, name, "combat") then calls completeTrack on whatever it returns.
+              PROVEN: a throwaway repro built a completed "Wolf" + an open "Wolf"; pre-fix
+              findTrackFuzzy("Wolf","combat") returned the COMPLETED one → completeTrack no-op → open track
+              left dangling. The new test [9] reproduces this and FAILS on pre-fix code (5 failures).
+  CONFIDENCE: HIGH    BASIS: executed the real controller method and read the lines
+  CLAIM:      resolveDisplayTrack already prefers an open track (notDone), confirming open-preference is the
+              established, intended convention that findTrackFuzzy simply lacked.
+  EVIDENCE:   scripts/ironsworn/progress.js:470-520 (resolveDisplayTrack prefers `notDone`)
+  CONFIDENCE: HIGH    BASIS: read the lines
+
+CHANGE:       scripts/ironsworn/progress.js:432-494 — findTrackFuzzy now (0) honours an explicit item id
+              first; (1) for an exact/substring name+kind hit, PREFERS a still-open track and only falls back
+              to a completed duplicate when no open one exists; (2) in the word-overlap scoring branch, tracks
+              the best OPEN candidate separately and prefers it (≥0.5), falling back to the best completed
+              match only when no open candidate clears the threshold. No deletion, no new setting — the
+              existing completion paths already set system.completed correctly; the defect was purely in
+              picking the wrong duplicate to complete.
+FILES TOUCHED (3):
+  - scripts/ironsworn/progress.js                  (+31 net — open-preference in findTrackFuzzy)
+  - test/journey-combat-completion.test.mjs        (+54 — new tests [9] duplicate-name resolution, [10] explicit-id + completed-only fallback)
+  - docs/ai-maintenance-log.md                     (this entry)
+TESTS:        node test/journey-combat-completion.test.mjs → 36 passed, 0 failed
+              PROOF IT CATCHES THE BUG: stashing the progress.js fix and re-running → 31 passed, 5 FAILED,
+              incl. "exact same-name dup resolves the OPEN track", "current Wolf fight closed (expected true,
+              got false)" and "no open combat track left dangling after end_combat (expected 0, got 1)" — the
+              exact reported symptom. Test [10] passes both before and after, confirming the explicit-id and
+              completed-only (idempotent mark_complete) paths are unchanged.
+SUITE:        npm test → PASS (65 of 65 test files green); test/load-smoke.mjs → clean import
+GATE:         None required — change is confined to the 🟡 GUARDED scripts/ironsworn/progress.js; no 🔴 LOCKED
+              file edited.
+ROLLBACK:     git revert <this commit> — restores the prior findTrackFuzzy (first-match) behaviour and removes
+              the new tests + this log entry. No settings/flags/directives/i18n keys changed; byte-clean
+              revert, no migration.
+RESIDUAL RISK: LOW. The change only re-orders WHICH duplicate of the same name+kind is chosen when both an
+              open and a completed one exist — it never widens or narrows the set of matches, and a single
+              match or a completed-only match resolves exactly as before (test [10]). All findTrackFuzzy
+              callers (end_combat, mark_complete, add/set_progress, journey reuse, chat/commands journey
+              filter) act on the LIVE track, so preferring the open duplicate is correct for every caller;
+              mark_complete additionally has its own idempotent already-completed guard.
