@@ -234,13 +234,17 @@ console.log("[9] Regression: vow/journey/combat resolution is unchanged");
   const actor = new MockActor();
   await Ctrl.createProgressTrack(actor, { name: "Avenge the Fallen", trackType: "vow", rank: "formidable" });
   const vow = actor.items.find(i => i.name === "Avenge the Fallen");
-  await vow.update({ "system.current": 7 * 4 }); // 7 boxes
+  // (gate 2026-06-14) The 10/10 completion gate is now symmetric across
+  // journey/vow/combat, so a completion roll fires only on a fully-charted
+  // track. Charge the vow to 10/10 — this still verifies the track RESOLUTION
+  // (the vow is picked, not the open site) which is what this regression guards.
+  await vow.update({ "system.current": 10 * 4 }); // 10 boxes (fully charted)
   // Add an open site too — it must NOT be picked for "Fulfill Your Vow".
   await makeSite(actor, "A Distracting Site");
   const res = await Ctrl.rollProgressMove("Fulfill Your Vow", { actor });
   ok(res.ok, "[9] Fulfill Your Vow still rolls");
   eq(res.track, "Avenge the Fallen", "[9] picked the vow, not the site");
-  eq(progressRolls[0].score, 7, "[9] rolled the vow's score");
+  eq(progressRolls[0].score, 10, "[9] rolled the vow's score");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

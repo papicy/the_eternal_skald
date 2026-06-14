@@ -532,6 +532,12 @@ export const EntityLinker = {
     // Move — custom link wired by Integration.wireSuggestionCard. We carry
     // the Datasworn ID so the click handler can open the *system's* official
     // move dialog/sheet directly (no intermediate card).
+    // (gate 2026-06-14 — validate suggestions before linking) A COMPLETION move
+    // ("Fulfill Your Vow" / "End the Fight" / "Reach Your Destination") must only
+    // become a clickable roll when a matching track is actually at 10/10. If no
+    // such track is ready, render plain text so the AI can't surface a roll the
+    // mechanics would reject. Non-completion moves are unaffected. Fails OPEN.
+    if (!this._completionMoveRollable(entry.moveName)) return escapeHtml(matchedText);
     const move = escapeHtml(entry.moveName);
     const dsid = escapeHtml(entry.moveDsId ?? "");
     const icon = escapeHtml(this._styleFor("move").icon); // (v0.9.0) customisable
@@ -539,6 +545,45 @@ export const EntityLinker = {
       `data-es-kind="move" data-move="${move}" data-move-dsid="${dsid}" ` +
       `data-tooltip="Ironsworn move: ${move} — click to roll">` +
       `<i class="fa-solid ${icon}"></i>${escapeHtml(matchedText)}</a>`;
+  },
+
+  /**
+   * (gate 2026-06-14) Read-only check: is a COMPLETION move actually rollable
+   * right now? A completion move ("Fulfill Your Vow", "End the Fight", "Reach
+   * Your Destination") is only rollable when the active character has at least
+   * one open progress track of the matching kind sitting at a full 10/10 boxes
+   * — mirroring the symmetric 10/10 gate in IronswornController.rollProgressMove.
+   * Non-completion moves are always rollable from here (returns true). Fails
+   * OPEN: any error, no adapter, or no active actor returns true so a transient
+   * lookup problem never strips legitimate links.
+   * @param {string} moveName
+   * @returns {boolean}
+   */
+  _completionMoveRollable(moveName) {
+    try {
+      const n = String(moveName || "").toLowerCase();
+      let kind = null;
+      if (/\bfulfill (?:your|the|this) vow\b/.test(n)) kind = "vow";
+      else if (/\bend the fight\b/.test(n)) kind = "combat";
+      else if (/\breach (?:your|the|this) destination\b/.test(n)) kind = "journey";
+      if (!kind) return true; // not a completion move — never gated here
+
+      const adapter = getActiveAdapter();
+      if (!adapter?.isActive?.() || typeof adapter.getProgressTracks !== "function") return true;
+      const actor = adapter.getActiveCharacter?.();
+      if (!actor) return true;
+
+      const tracks = adapter.getProgressTracks(actor) || [];
+      return tracks.some(t => {
+        if (!t || t.completed) return false;
+        const k = String(t.kind || t.subtype || t.type || "").toLowerCase();
+        const kindMatch = kind === "combat" ? (k === "combat" || k === "foe") : (k === kind);
+        if (!kindMatch) return false;
+        return Number(t.boxes ?? 0) >= 10;
+      });
+    } catch (_) {
+      return true; // fail OPEN — never strip a link on a transient error
+    }
   },
 
   /**

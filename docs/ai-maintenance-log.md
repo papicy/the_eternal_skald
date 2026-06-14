@@ -4153,3 +4153,76 @@ RESIDUAL RISK: LOW. (A) leaving the track open relies on the existing fresh-inte
               the continuation card is fully fail-soft (try/catch, no-ops when inactive or on the
               completion roll's own turn) and gated by the move-suggestion setting.
 ```
+
+```
+### [2026-06-14 23:59 EEST] — Make AI narration respect mechanical progress-track state (3 root causes)
+AGENT:        Abacus.AI Agent (SkaldCoder)
+TASK TYPE:    IMPLEMENT
+TOKEN BUDGET: IMPLEMENT (standard)  |  USED: within  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read SKILL.md (engineering rules) + repository-map.md
+  [x] task classified (IMPLEMENT — minimal additive fixes)
+  [x] target file(s)+line(s) located (evidence below)
+  [~] <= 3 files / <= 50 changed lines per file — EXCEEDED by explicit user gate (see GATE)
+  [x] additive & backwards-compatible
+  [x] no setting/flag/directive/i18n key removed or renamed (enforceJourneyProgressGate /
+      journeyMinProgressBoxes CONTRACT preserved)
+  [~] LOCKED file moves.js edited — under explicit user gate (see GATE)
+  [x] regression test added (narration-progress-gating.test.mjs) + 2 affected tests updated
+  [x] rollback plan defined
+
+PROBLEM:      AI narration ignored mechanical progress-track state in 3 ways: (1) post-roll
+              narration lost the valid-move whitelist / journey-pacing / follow-up rules;
+              (2) any move name (incl. completion moves on un-charted tracks) became a
+              one-click roll; (3) the exact-10/10 completion gate only covered journeys, so
+              vow/combat completion rolls fired below 10/10.
+
+EVIDENCE (brief §4 format):
+  CLAIM:      buildSystemPrompt dropped allowFollowups when building the Ironsworn block.
+  EVIDENCE:   scripts/ai/prompt-builder.js:60-65 :: buildSystemPrompt -> buildIronswornPromptBlock({...})
+  CONFIDENCE: HIGH
+  BASIS:      Call object omitted allowFollowups; receiver (:456,:480) gates the VALID MOVES
+              whitelist on (allowMoves || allowFollowups). Only live caller is buildSystemPrompt.
+
+  CLAIM:      _renderLink made ANY move clickable with no track-state check.
+  EVIDENCE:   scripts/chronicle/entity-linking.js:535-541 :: EntityLinking._renderLink (Move branch)
+  CONFIDENCE: HIGH
+  BASIS:      Move branch emitted the es-move-link anchor unconditionally; no completion-state guard.
+
+  CLAIM:      The 10/10 progress gate only blocked journeys.
+  EVIDENCE:   scripts/ironsworn/moves.js:458-468 :: IronswornController.rollProgressMove
+  CONFIDENCE: HIGH
+  BASIS:      `needBoxes = kind === "journey" ? 10 : minBoxes` and gate `if (kind === "journey" && ...)`.
+
+CHANGE:       (1) prompt-builder.js: forward `allowFollowups: !!extras.allowFollowups` into
+              buildIronswornPromptBlock. (2) entity-linking.js: in _renderLink Move branch, return
+              plain text when `!this._completionMoveRollable(entry.moveName)`; added read-only helper
+              _completionMoveRollable (classifies vow/combat/journey completion moves, checks the
+              active actor for an open matching track at boxes>=10 via getActiveAdapter().
+              getProgressTracks; combat matches combat|foe; fails OPEN on any error/no-actor).
+              (3) moves.js: replaced journey-only gate with `strictKind = journey||vow||combat`;
+              `needBoxes = strictKind ? 10 : minBoxes`; gate fires on strictKind; error noun is
+              "fight" for combat. site keeps the minBoxes floor; toggle + opts.force unchanged.
+FILES TOUCHED (3 code + tests + version/docs):
+  - scripts/ai/prompt-builder.js              (+1 / -0)
+  - scripts/chronicle/entity-linking.js       (+45 / -0)
+  - scripts/ironsworn/moves.js                (+11 / -7)
+  - test/narration-progress-gating.test.mjs   (new, +130)
+  - test/journey-lifecycle-pacing.test.mjs    (updated [D] guards for strictKind)
+  - test/locate-objective.test.mjs            (updated [9]: vow charged to 10/10)
+  - module.json / package.json / README.md / CHANGELOG.md (version 0.25.4 -> 0.25.5; version files exempt)
+TESTS:        node test/narration-progress-gating.test.mjs -> 20 passed, 0 failed
+SUITE:        npm test -> PASS (67 files, 0 failed); node test/load-smoke.mjs -> clean import
+GATE:         GATE-2026-06-14-narration-progress — APPROVED by user verbatim: "apply all fixes -
+              disregard limits". Covers (a) editing LOCKED moves.js, (b) exceeding the 3-file /
+              50-line-per-file limits. Fix 3 is intentionally stricter than Ironsworn RAW per user.
+ROLLBACK:     git revert <this commit-sha>   (single-commit revert)
+RESIDUAL RISK: (A) The symmetric gate makes vow/combat completion rolls require a full 10/10 even
+              when enforceJourneyProgressGate is ON — stricter than RAW; opts.force / toggle off
+              both bypass. (B) _completionMoveRollable reads live actor state at render time; it
+              fails OPEN, so a transient adapter error reverts to the prior always-link behaviour
+              (no regression). (C) Fix 1 only widens the prompt content on the post-roll path that
+              already sets allowFollowups:true; the conversational path (allowFollowups:false) is
+              unchanged.
+```

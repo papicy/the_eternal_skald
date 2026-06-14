@@ -13,6 +13,36 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.25.5] — 2026-06-14
+
+A focused **narration-respects-progress** release that makes the AI's narration
+and clickable suggestions honour the mechanical progress-track state. Three
+minimal, additive fixes to three root causes.
+
+### Fixed
+- **Post-roll narration is wired to the rules again.** `buildSystemPrompt` was
+  dropping `allowFollowups` when building the Ironsworn prompt block, so
+  post-roll narration never received the valid-move whitelist, the
+  journey-pacing rules, or the follow-up-move instructions. The flag is now
+  forwarded, so the Skald narrates within the real move set after a roll.
+- **Completion-move suggestions are validated before they become clickable.**
+  The entity linker made *any* move name a one-click roll. A completion move
+  ("Fulfill Your Vow", "End the Fight", "Reach Your Destination") now only links
+  when the active character actually has a matching open track at a full 10/10;
+  otherwise it renders as plain text. The check is read-only and fails OPEN, so
+  a transient lookup problem never strips legitimate links.
+
+### Changed
+- **The exact-10/10 completion gate is now symmetric across journeys, vows and
+  fights.** The v0.25.4 gate only blocked journeys below 10/10; the same gate
+  now also applies to vow and combat completion rolls. Site progress still
+  honours the `journeyMinProgressBoxes` floor; the `enforceJourneyProgressGate`
+  toggle and the `force` override are unchanged. (This is intentionally stricter
+  than Ironsworn RAW — a deliberate design choice for this module.)
+
+All changes are additive and backwards-compatible; no settings, flags, or saved
+data change shape.
+
 ## [0.25.4] — 2026-06-14
 
 A focused **journey-lifecycle** release that hands arrival back to the dice and

@@ -59,6 +59,7 @@ export function buildSystemPrompt(extras = {}) {
   // when the foundry-ironsworn system is active and integration is on.
   const ironswornBlock = buildIronswornPromptBlock({
     allowMoves: !!extras.allowMoves,
+    allowFollowups: !!extras.allowFollowups,   // (gate 2026-06-14 — restore wiring: pass through so post-roll narration receives the valid-move whitelist, journey-pacing rules, and follow-up-move instructions)
     allowEffects: !!extras.allowEffects,
     allowTrackEffects: !!extras.allowTrackEffects,
     context: extras.context

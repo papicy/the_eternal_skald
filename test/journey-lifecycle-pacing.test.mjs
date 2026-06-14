@@ -109,10 +109,15 @@ const moves = readFileSync(join(SCRIPTS, "ironsworn", "moves.js"), "utf8");
  * [D] "Reach Your Destination" gate requires EXACTLY 10/10 for journeys.
  * --------------------------------------------------------------------- */
 {
-  ok(/const needBoxes\s*=\s*kind === ["']journey["'] \? 10 : minBoxes;/.test(moves),
-     "[D] journeys require 10 boxes; other progress kinds keep the minBoxes floor");
-  ok(/kind === ["']journey["'] && gateOn && !opts\.force && score < needBoxes/.test(moves),
-     "[D] gate blocks the journey progress roll below the required boxes");
+  // (gate 2026-06-14) The 10/10 gate is now symmetric across journey/vow/combat
+  // (strictKind); journeys are still fully gated, sites still keep the minBoxes
+  // floor. See narration-progress-gating.test.mjs for the vow/combat coverage.
+  ok(/const strictKind\s*=\s*kind === "journey"\s*\|\|\s*kind === "vow"\s*\|\|\s*kind === "combat";/.test(moves),
+     "[D] strictKind covers journey (and now vow + combat)");
+  ok(/const needBoxes\s*=\s*strictKind\s*\?\s*10\s*:\s*minBoxes;/.test(moves),
+     "[D] strict kinds require 10 boxes; other progress kinds keep the minBoxes floor");
+  ok(/strictKind && gateOn && !opts\.force && score < needBoxes/.test(moves),
+     "[D] gate blocks the strict-kind progress roll below the required boxes");
   // The CONTRACT setting reads are preserved (not removed/renamed).
   ok(/journeyMinProgressBoxes/.test(moves),
      "[D] journeyMinProgressBoxes setting still read (contract preserved)");
