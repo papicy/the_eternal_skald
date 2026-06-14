@@ -58,15 +58,16 @@ import { getWizardClass, maybeLaunchFirstRun } from "../ui/first-run-wizard.js";
 
 
 
-// --- init: register settings AND chat-command hooks -------------------
-console.log("The Eternal Skald | Registering Hooks.once('init') …");
-Hooks.once("init", () => {
-  // (fix — version drift) Authoritative startup banner: the version is read from
-  // the module manifest (module.json) via game.modules, which is guaranteed
-  // populated inside the init hook. This is the reliable, always-correct version
-  // log (the top-level breadcrumb in eternal-skald.js may fire before the manifest
-  // is ready). Single source of truth — never goes stale on a version bump.
-  console.log(LOG_PREFIX, `init hook fired — initialising module v${game.modules.get(MODULE_ID)?.version ?? "?"} …`);
+/* === Settings + menus registration (relocated from init) =============
+ * These call game.i18n.localize() for every name/hint. During the "init"
+ * hook the translation files are not yet loaded, so localize() returns the
+ * raw key strings. Foundry's "i18nInit" hook fires AFTER translations load
+ * and BEFORE "setup"/"ready", so registering here keeps settings available
+ * to everything downstream while resolving labels correctly. Purely a
+ * timing move — no settings, flags, or directives were added/renamed.
+ * =================================================================== */
+console.log("The Eternal Skald | Registering Hooks.once('i18nInit') ...");
+Hooks.once("i18nInit", () => {
   try {
     Settings.register();
     console.log(LOG_PREFIX, "Settings registered.");
@@ -119,6 +120,24 @@ Hooks.once("init", () => {
   } catch (err) {
     console.warn(LOG_PREFIX, "First-run wizard menu registration failed:", err?.message ?? err);
   }
+});
+
+// --- init: register settings AND chat-command hooks -------------------
+console.log("The Eternal Skald | Registering Hooks.once('init') …");
+Hooks.once("init", () => {
+  // (fix — version drift) Authoritative startup banner: the version is read from
+  // the module manifest (module.json) via game.modules, which is guaranteed
+  // populated inside the init hook. This is the reliable, always-correct version
+  // log (the top-level breadcrumb in eternal-skald.js may fire before the manifest
+  // is ready). Single source of truth — never goes stale on a version bump.
+  console.log(LOG_PREFIX, `init hook fired — initialising module v${game.modules.get(MODULE_ID)?.version ?? "?"} …`);
+  // NOTE: Settings.register() and the settings/wizard registerMenu calls were
+  // relocated to the i18nInit hook below. They call game.i18n.localize() for
+  // every name/hint; during init the translation files are not yet loaded, so
+  // those calls returned the raw key strings (e.g.
+  // "ETERNAL_SKALD.settings.aiMode.name"). i18nInit fires after translations
+  // load and before setup, so registration still happens in time and the labels
+  // resolve correctly. Purely a timing move — no settings/flags were changed.
 
   /* === Keybinding: toggle AI Mode (v0.3.2) =============================
    * Lets the GM flip the AI Mode master toggle on/off with a keyboard

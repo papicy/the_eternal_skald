@@ -150,14 +150,16 @@ function renderPanelHtml() {
     return `<section class="es-set-pane ${i === 0 ? "active" : ""}" data-tab="${t.id}">${body}</section>`;
   }).join("");
   return `<style>
-    .eternal-skald-settings .es-set-strip{display:flex;gap:.25rem;border-bottom:1px solid #0003;margin-bottom:.5rem;flex-wrap:wrap;}
+    #eternal-skald-settings-panel .window-content{display:flex;flex-direction:column;min-height:0;}
+    .eternal-skald-settings{display:flex;flex-direction:column;flex:1 1 auto;min-height:0;}
+    .eternal-skald-settings .es-set-strip{display:flex;gap:.25rem;border-bottom:1px solid #0003;margin-bottom:.5rem;flex-wrap:wrap;flex:0 0 auto;}
     .eternal-skald-settings .es-set-tab{padding:.35rem .6rem;cursor:pointer;border:1px solid transparent;border-bottom:none;border-radius:4px 4px 0 0;}
     .eternal-skald-settings .es-set-tab.active{background:#0001;border-color:#0003;font-weight:bold;}
-    .eternal-skald-settings .es-set-pane{display:none;overflow:auto;max-height:60vh;}
-    .eternal-skald-settings .es-set-pane.active{display:block;}
+    .eternal-skald-settings .es-set-pane{display:none;overflow:auto;min-height:0;}
+    .eternal-skald-settings .es-set-pane.active{display:block;flex:1 1 auto;}
     .eternal-skald-settings .es-set-field{margin:.4rem 0;}
     .eternal-skald-settings .es-set-field .notes{font-size:.85em;opacity:.8;margin:.15rem 0 0;}
-    .eternal-skald-settings .es-set-footer{display:flex;justify-content:flex-end;margin-top:.5rem;}
+    .eternal-skald-settings .es-set-footer{display:flex;justify-content:flex-end;margin-top:.5rem;flex:0 0 auto;}
   </style>
   <div class="es-set-strip">${strip}</div>
   ${panes}

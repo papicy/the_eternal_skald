@@ -4010,3 +4010,67 @@ RESIDUAL RISK: LOW-MEDIUM. Actor resolution now prefers the roll's speaker; in t
               journey roll (low noise, intentional diagnostic for this defect) — can be re-gated once the
               user confirms the fix from a production trace. Branching for distinct destinations preserved
               ([12] green). Completion still closes at 10/10; XP remains vow-only (unchanged).
+
+
+
+```
+### [2026-06-14 18:30 Asia/Nicosia] — Register settings on i18nInit + pin settings-panel footer
+AGENT:        Abacus.AI Agent (SkaldCoder)
+TASK TYPE:    IMPLEMENT
+TOKEN BUDGET: 5,000  |  USED: ~4,400  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md + repository-map.md
+  [x] task classified (IMPLEMENT)
+  [x] target file(s)+line(s) located (evidence below)
+  [x] <= 3 code files / <= 50 changed lines per file (+ version/doc files, exempt per convention)
+  [x] additive & backwards-compatible (timing move + CSS only)
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] no architectural boundary crossed (hooks wiring + core/ui CSS only; no GATE needed)
+  [x] regression test added/extended (settings-panel.test.mjs [D])
+  [x] rollback plan defined
+
+PROBLEM:      (1) Module settings showed raw localization keys (e.g.
+              "ETERNAL_SKALD.settings.aiMode.name") instead of text. (2) The tabbed
+              settings panel could clip the "Save Changes" button on taller screens.
+
+EVIDENCE (brief §4 format):
+  CLAIM:      Settings/menus were registered in the init hook, where game.i18n.localize() returns raw keys (translations not yet loaded).
+  EVIDENCE:   scripts/hooks/foundry-hooks.js:63-121 (pre-change) :: Hooks.once("init") -> Settings.register()/registerMenu
+  CONFIDENCE: HIGH
+  BASIS:      read the exact lines; confirmed no i18nInit hook existed (grep returned none).
+
+  CLAIM:      The panel mixed a fixed 680px window height with a viewport-relative max-height:60vh pane and an unpinned footer, clipping the Save button.
+  EVIDENCE:   scripts/ui/settings-panel.js:156,160,164,193 (pre-change) :: es-set-pane / es-set-footer / DEFAULT_OPTIONS.position
+  CONFIDENCE: HIGH
+  BASIS:      read the exact lines directly.
+
+  CLAIM:      The en.json "missing keys" reported during investigation were a false alarm; all referenced keys already resolve.
+  EVIDENCE:   lang/en.json :: ETERNAL_SKALD.settingsPanel.menu.{name,label,hint}, ETERNAL_SKALD.wizard.menu.{name,label,hint}
+  CONFIDENCE: HIGH
+  BASIS:      script-checked every localize() key across scripts/**/*.js against en.json — MISSING: NONE.
+
+CHANGE:       (1) Moved Settings.register() and the tabbedSettings + firstRunWizard
+              registerMenu calls out of Hooks.once("init") into a new
+              Hooks.once("i18nInit") block (fires after translations load, before
+              setup/ready). init keeps its version banner, keybinding, and chat hooks.
+              (2) settings-panel.js render CSS: made #...panel .window-content and the
+              .eternal-skald-settings root flex columns, pane flexes (flex:1 1 auto;
+              min-height:0; overflow:auto) replacing max-height:60vh, footer pinned
+              (flex:0 0 auto) — Save button always visible.
+              (3) lang/en.json: no change needed — verified all keys already present.
+FILES TOUCHED (3 code + version/doc files):
+  - scripts/hooks/foundry-hooks.js   (+37 / -10)
+  - scripts/ui/settings-panel.js     (+6 / -4)
+  - test/settings-panel.test.mjs     (+23, section [D] regression guards)
+  - module.json / package.json / README.md / CHANGELOG.md (0.25.2 -> 0.25.3 + entry; enforced by version-consistency.test.mjs)
+TESTS:        node test/settings-panel.test.mjs -> 31 passed, 0 failed (added 8 [D] assertions).
+SUITE:        npm test -> PASS (65 of 65 files); node test/load-smoke.mjs -> clean import (logs the new i18nInit hook).
+GATE:         none — within all hard limits; purely additive timing + CSS change.
+ROLLBACK:     git revert <this commit> — restores init-hook registration, the 60vh pane,
+              and v0.25.2. No settings/flags/directives/i18n keys changed -> clean revert.
+RESIDUAL RISK: LOW. i18nInit fires before setup/ready so settings remain available to all
+              downstream consumers; the keybinding (still in init) reads settings only at
+              runtime (onDown), long after i18nInit. CSS uses standard flexbox; if a Foundry
+              theme overrides .window-content the worst case degrades to prior behaviour.
+```

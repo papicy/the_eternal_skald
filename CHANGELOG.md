@@ -13,6 +13,26 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.25.3] — 2026-06-14
+
+A small **bug-fix** release fixing two issues in the module settings UI.
+
+### Fixed
+- **Settings labels showed raw localization keys** (e.g.
+  `ETERNAL_SKALD.settings.aiMode.name`) instead of human-readable text. Settings
+  and their menus were registered inside the Foundry `init` hook, which fires
+  *before* the translation files are loaded, so every `game.i18n.localize()` call
+  returned the key string unchanged. Registration now runs on the `i18nInit` hook
+  (after translations load, before `setup`/`ready`), so all names and hints
+  resolve correctly. The existing en.json keys were already present — this was
+  purely a timing issue; no settings, flags, or directives changed.
+- **Tabbed settings panel could hide the "Save Changes" button.** The panel had a
+  fixed pixel height but its scrollable pane used a viewport-relative
+  `max-height:60vh`, so on taller screens the footer was pushed outside the
+  window frame and clipped. The panel now lays out as a flex column with the
+  scroll pane flexing to fill the available height and the footer pinned, so the
+  Save button is always visible.
+
 ## [0.25.2] — 2026-06-14
 
 A follow-up **bug-fix** release: the v0.25.1 provenance gate was correct in

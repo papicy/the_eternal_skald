@@ -5,7 +5,7 @@
 **AI Storyteller, Oracle & Tactical Controller for Foundry VTT**
 
 [![Foundry VTT](https://img.shields.io/badge/Foundry_VTT-v14-crimson?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyTDIgN2wxMCA1IDEwLTV6TTIgMTdsOSA1IDktNVY3bC05IDV6Ii8+PC9zdmc+&labelColor=1a1a1a)](https://foundryvtt.com)
-[![Version](https://img.shields.io/badge/version-0.25.2_alpha-gold?style=for-the-badge&labelColor=1a1a1a)](https://github.com/papicy/the_eternal_skald/releases)
+[![Version](https://img.shields.io/badge/version-0.25.3_alpha-gold?style=for-the-badge&labelColor=1a1a1a)](https://github.com/papicy/the_eternal_skald/releases)
 [![System](https://img.shields.io/badge/System-Ironsworn-4a7fa5?style=for-the-badge&labelColor=1a1a1a)](https://foundryvtt.com/packages/foundry-ironsworn)
 [![System](https://img.shields.io/badge/System-Nimble2-4a7fa5?style=for-the-badge&labelColor=1a1a1a)](https://foundryvtt.com/packages/foundry-ironsworn)
 [![System](https://img.shields.io/badge/System-DnD5e-4a7fa5?style=for-the-badge&labelColor=1a1a1a)](https://foundryvtt.com/packages/foundry-ironsworn)
@@ -30,7 +30,7 @@
 ---
 
 > [!WARNING]
-> **Alpha / Development Version (v0.25.2)** — Experimental pre-release software under active development. Expect rough edges and breaking changes between versions. **Please back up your world before use.**
+> **Alpha / Development Version (v0.25.3)** — Experimental pre-release software under active development. Expect rough edges and breaking changes between versions. **Please back up your world before use.**
 
 ---
 
@@ -74,14 +74,14 @@ If self-hosting, add the following to your Foundry startup flags:
 On startup you should see the server hook announce itself in the console:
 
 ```text
-⚔️  Skald | v0.25.2 — server hook active. /skald-api/* routes ready.
+⚔️  Skald | v0.25.3 — server hook active. /skald-api/* routes ready.
 ```
 
 You can confirm the routes are live by hitting the health endpoint
 (`http://your-foundry:30000/skald-api/health`), which returns:
 
 ```json
-{"status":"ok","service":"The Eternal Skald","version":"0.25.2"}
+{"status":"ok","service":"The Eternal Skald","version":"0.25.3"}
 ```
 
 > [!NOTE]
