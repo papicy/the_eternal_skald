@@ -13,6 +13,26 @@ Until `1.0.0`, treat every release as an experimental development build.
 > pre-release project and have been retired. The history below reflects the corrected
 > `0.x` lineage; the retired tags map to the equivalent `0.x` entries.
 
+## [0.25.1] — 2026-06-14
+
+A **bug-fix** release for journey progress tracking.
+
+### Fixed
+- **"Undertake a Journey" no longer spawns duplicate progress tracks.** Rolling
+  the move from the move dialog / a narration link stamps no fresh player intent,
+  so the journey name fell back to a vow-derived guess flagged "specific". The
+  prior `openJourneys > 1` guard never engaged once duplicates had accumulated,
+  so each roll fuzzy-missed the real open track and branched yet another copy.
+  Reuse-vs-branch is now decided by the **provenance** of the resolved
+  destination: a new track is opened only when the destination comes from actual
+  player intent (regex / direction / context / AI extraction); for a guessed name
+  (vow / scene / generic) the newest open journey is always reused. Robust whether
+  one or many journeys are open, so the duplicate "bleed" stops.
+
+### Changed
+- Added gated diagnostic logging (behind the existing **Debug Logging** setting)
+  at the journey-flow decision points to aid future runtime diagnosis.
+
 ## [0.25.0] — 2026-06-14
 
 A **narration & story memory** pass. Extends browser-RAG so the unfolding
