@@ -2500,7 +2500,10 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
     // AI-emitted completion directive to avoid a confusing double-completion
     // notification. (On weak/miss nothing was completed, so we leave the
     // effects alone — though the prompt steers the AI away from completing.)
-    const autoCompleted = this._completionMoveKind(parsed?.moveName)
+    // (v0.10.27) Which track KIND (vow/combat/journey) did the rolled move
+    // resolve, and did _autoCompletionFlow report it auto-completed this turn?
+    const completedKind = this._completionMoveKind(parsed?.moveName);
+    const autoCompleted = completedKind
       && /auto-completed/.test(String(autoSummary || ""));
     if (!combat && !journey && !milestone && !autoCompleted) return effects;
     return (effects || []).filter(e => {
@@ -2510,10 +2513,18 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
       // drop any AI-emitted create_journey to avoid a duplicate track.
       if (journey && e.kind === "create_journey") { this._dbg("→ dropping redundant create_journey effect (auto-applied)"); return false; }
       // A completion move already auto-finished the track — drop redundant
-      // completion directives (both the legacy complete_*/end_combat effects
-      // and the new MARK_COMPLETE write directive).
-      if (autoCompleted && (e.kind === "complete_track" || e.kind === "end_combat" || e.kind === "mark_complete")) {
-        this._dbg("→ dropping redundant completion effect (auto-completed on strong hit)"); return false;
+      // completion directives. (fix — narrative conclusion) SCOPE the drop to
+      // the kind the rolled move actually resolved: an `end_combat` is only
+      // redundant when the ROLLED move was the combat completion ("End the
+      // Fight"). A vow/journey completion in the SAME turn no longer suppresses
+      // a genuine end_combat the AI emitted for a separately-concluded fight.
+      if (autoCompleted) {
+        if (completedKind === "combat" && e.kind === "end_combat") {
+          this._dbg("→ dropping redundant end_combat (combat auto-completed)"); return false;
+        }
+        if (e.kind === "complete_track" || e.kind === "mark_complete") {
+          this._dbg("→ dropping redundant completion directive (auto-completed)"); return false;
+        }
       }
       return true;
     });
@@ -3023,6 +3034,17 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
             r = foe
               ? await sys().completeTrack(actor, foe.id)
               : await sys().completeTrack(actor, eff.name);
+            // (fix — narrative conclusion) When the targeted close did NOT
+            // resolve a track (the AI ended the fight with no usable name and
+            // no active-combat flag set), fall back to the robust sweeper so a
+            // narrated ending never leaves an open combat track lingering on
+            // the sheet. Additive: only runs when the specific close failed.
+            if (!r?.ok && typeof sys().closeStaleCombatTracks === "function") {
+              try {
+                const sweep = await sys().closeStaleCombatTracks(actor, {});
+                if (sweep?.ok && sweep.closed?.length) r = { ok: true, name: sweep.closed.join(", ") };
+              } catch (_) { /* best-effort */ }
+            }
             if (r?.ok) {
               applied.push(`ended combat “${r.name}”`);
               this._notifyCombat(`🏆 Combat ended: ${r.name}`);
