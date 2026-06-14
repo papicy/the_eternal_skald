@@ -18,6 +18,7 @@ import { RecapExport } from "../chronicle/recap-export.js";
 import { IronswornData } from "../ironsworn-data.js";
 import { getActiveAdapter } from "../systems/registry.js";
 import { BrowserRAG } from "../browser-rag.js";
+import { EMBED_MODELS, DEFAULT_EMBED_MODEL, modelInfo } from "../core/embedding-catalogue.js";
 import { findCommand } from "./command-registry.js";
 import { openCommandReference } from "../ui/command-reference.js";
 
@@ -767,6 +768,174 @@ export const Commands = {
     }
   },
 
+  /* ------------------ embedding-model switch (v0.21.0) ------------- */
+  /**
+   * Handle a change to the `ragEmbedModel` setting. Fired from the setting's
+   * onChange (so it runs AFTER Foundry has persisted the new value). Switching
+   * models changes the vector dimensionality, so existing embeddings become
+   * incompatible and must be rebuilt. Flow:
+   *
+   *   1. GM-only. Players never hold the chronicle's authoritative store, and
+   *      every browser keeps its OWN IndexedDB, so each GM client rebuilds its
+   *      local store independently.
+   *   2. No-op when the "new" id equals the model the store was last built with
+   *      (`ragEmbedModelActive`). This is what makes the cancel→revert path
+   *      safe: reverting the setting refires onChange, but newId===prevId then.
+   *   3. Confirm with the GM (DialogV2 → classic Dialog fallback). Auto-reindex
+   *      is the DEFAULT action; the dialog explains the one-pass rebuild and
+   *      mentions compendiums when that indexing is enabled.
+   *   4. On confirm: reset the embedder, reindex the chronicle, and — when
+   *      compendium indexing is on — rebuild compendia in the same pass. The
+   *      reindex stamps the store's meta + the active-model mirror.
+   *   5. On cancel: revert the `ragEmbedModel` setting to the previous model.
+   *
+   * @param {string} newId catalogue id just selected.
+   * @returns {Promise<void>}
+   */
+  async switchEmbedModel(newId) {
+    if (!game.user?.isGM) return;
+
+    const valid  = (newId && EMBED_MODELS[newId]) ? newId : DEFAULT_EMBED_MODEL;
+    const prevId = game.settings.get(MODULE_ID, "ragEmbedModelActive") || DEFAULT_EMBED_MODEL;
+
+    // No change vs the model the store was built with → nothing to do. Also the
+    // quiet exit for the revert-on-cancel refire (prevId is unchanged there).
+    if (valid === prevId) return;
+
+    const prevInfo = modelInfo(prevId);
+    const newInfo  = modelInfo(valid);
+    console.log(`${LOG_PREFIX} [RAG] embedding model switch requested: ${prevId} (${prevInfo.dims}d) → ${valid} (${newInfo.dims}d)`);
+
+    // If RAG cannot run here we cannot rebuild — but the world setting still
+    // persists, so the next environment that CAN index will use the new model.
+    if (!BrowserRAG?.isAvailable?.()) {
+      Chat.postSystem(
+        `<em>Embedding model set to <strong>${escapeHtml(newInfo.label)}</strong>. Semantic memory is unavailable here, so nothing was rebuilt — run <code>!reindex</code> where memory is enabled.</em>`,
+        { gmWhisper: true }
+      );
+      return;
+    }
+
+    const withComp = BrowserRAG.indexCompendiumsEnabled?.() === true;
+    const confirmed = await this._confirmModelSwitch({ prevInfo, newInfo, withComp });
+    if (!confirmed) {
+      // Revert the visible setting. This refires onChange(prevId), but step 2
+      // turns that into a no-op (valid===prevId).
+      try { await game.settings.set(MODULE_ID, "ragEmbedModel", prevId); } catch (_) {}
+      console.log(`${LOG_PREFIX} [RAG] model switch cancelled — reverted to ${prevId}.`);
+      Chat.postSystem(`<em>Embedding-model change cancelled. Still using <strong>${escapeHtml(prevInfo.label)}</strong>.</em>`, { gmWhisper: true });
+      return;
+    }
+
+    // Rebuild the embedder for the newly-selected model, then reindex.
+    try { BrowserRAG.resetEmbedder?.(); } catch (_) {}
+
+    RagProgress.show("Re-weaving memory with the new model…");
+    try {
+      const entries = JournalSystem.listEntries();
+      const { indexed, total } = await BrowserRAG.reindexAll(entries, {
+        onProgress: (done, tot, modelEvt) => {
+          if (modelEvt && modelEvt.status && modelEvt.status !== "ready") {
+            const pct = typeof modelEvt.progress === "number" ? ` ${modelEvt.progress}%` : "";
+            RagProgress.update(`Loading ${newInfo.label}…${pct}`, modelEvt.progress);
+          } else {
+            const pct = tot ? Math.round((done / tot) * 100) : 0;
+            RagProgress.update(`Embedding chronicle ${done}/${tot}`, pct);
+          }
+        }
+      });
+
+      let compMsg = "";
+      if (withComp) {
+        const caps = getActiveAdapter()?.capabilities?.() || {};
+        const wantTypes = new Set(["JournalEntry", "Item", "Actor"]);
+        if (caps.oracles) wantTypes.add("RollTable");
+        const packs = [...(game.packs ?? [])].filter((p) => wantTypes.has(p?.documentName));
+        if (packs.length) {
+          const { indexed: ci, total: ct } = await BrowserRAG.indexCompendiums(packs, {
+            onProgress: (done, tot, label) => {
+              const pct = tot ? Math.round((done / tot) * 100) : 0;
+              RagProgress.update(`Binding ${escapeHtml(String(label))} ${done}/${tot}`, pct);
+            }
+          });
+          compMsg = ` and <strong>${ci}</strong>/<strong>${ct}</strong> compendium entries`;
+        }
+      }
+
+      // Belt-and-braces: reindexAll already stamps the active model, but record
+      // it explicitly in case there were zero entries to embed.
+      try { await BrowserRAG.setActiveModel?.(valid); } catch (_) {}
+
+      RagProgress.done(`Memory re-woven with ${newInfo.label}.`);
+      return Chat.postSkald(
+        `<p>Semantic memory now speaks through <strong>${escapeHtml(newInfo.label)}</strong> (${newInfo.dims}-dim). ` +
+        `I re-wove <strong>${indexed}</strong> of <strong>${total}</strong> chronicle entries${compMsg}.</p>`,
+        { variant: "lore", title: "A New Voice for Memory" }
+      );
+    } catch (err) {
+      console.warn(LOG_PREFIX, "[RAG] model switch reindex failed", err);
+      RagProgress.fail("Memory re-weaving failed.");
+      return Chat.postSystem(`<strong>The re-weaving faltered:</strong> ${escapeHtml(err?.message || String(err))}`, { gmWhisper: true });
+    }
+  },
+
+  /**
+   * Confirmation dialog for an embedding-model switch. Prefers DialogV2 (v13+),
+   * falls back to the classic Dialog. Resolves to a boolean.
+   * @param {{prevInfo:object, newInfo:object, withComp:boolean}} opts
+   * @returns {Promise<boolean>}
+   */
+  async _confirmModelSwitch({ prevInfo, newInfo, withComp } = {}) {
+    const dimNote = (prevInfo?.dims !== newInfo?.dims)
+      ? `<li>Vector size changes <strong>${prevInfo?.dims}</strong> → <strong>${newInfo?.dims}</strong>, so existing embeddings are incompatible.</li>`
+      : `<li>A different model produces different vectors, so memory must be rebuilt for accurate recall.</li>`;
+    const compNote = withComp
+      ? `<li>Indexed <strong>compendiums</strong> will be rebuilt in the same pass.</li>`
+      : ``;
+    const content =
+      `<div class="eternal-skald-card es-variant-lore"><div class="es-body">` +
+      `<p><strong>Switch embedding model to ${escapeHtml(newInfo?.label || "the selected model")}?</strong></p>` +
+      `<ul style="margin:.25em 0 .5em 1.1em;">${dimNote}${compNote}` +
+      `<li>Your entire chronicle will be re-embedded now (this may take a while and downloads the model on first use).</li></ul>` +
+      `<p style="color:var(--color-text-dark-secondary,#888);">Cancel to keep <strong>${escapeHtml(prevInfo?.label || "the current model")}</strong>.</p>` +
+      `</div></div>`;
+
+    // Prefer DialogV2 (v13+).
+    try {
+      const DV2 = foundry?.applications?.api?.DialogV2;
+      if (DV2?.confirm) {
+        return await DV2.confirm({
+          window: { title: "Change Memory Model" },
+          content,
+          rejectClose: false,
+          modal: true
+        });
+      }
+    } catch (e) {
+      console.warn(LOG_PREFIX, "DialogV2 confirm failed, falling back:", e?.message || e);
+    }
+
+    // Classic Dialog fallback.
+    return new Promise((resolve) => {
+      try {
+        // eslint-disable-next-line no-undef
+        new Dialog({
+          title: "Change Memory Model",
+          content,
+          buttons: {
+            rebuild: { icon: '<i class="fas fa-sync"></i>',  label: "Rebuild", callback: () => resolve(true) },
+            cancel:  { icon: '<i class="fas fa-times"></i>', label: "Cancel",  callback: () => resolve(false) }
+          },
+          default: "rebuild",
+          close: () => resolve(false)
+        }).render(true);
+      } catch (e) {
+        console.error(LOG_PREFIX, "No dialog API available for model switch", e);
+        resolve(false);
+      }
+    });
+  },
+
   /* --------------------------- !rag-status (v0.5.0) ---------------- */
   /** Report semantic-memory health (model, vector count, settings). */
   async ragStatus(_args) {
@@ -781,7 +950,10 @@ export const Commands = {
       ["Model loaded",       s.modelFailed ? "⚠️ failed this session" : yn(s.modelReady)],
       ["Auto-index",         yn(s.autoIndex)],
       ["Vectors stored",     String(s.vectorCount)],
-      ["Model",              `<code>${escapeHtml(s.model)}</code> (${s.dims}-dim)`],
+      ["Model",              `${escapeHtml(s.modelLabel || s.model)} <code>${escapeHtml(s.model)}</code> (${s.dims}-dim)`],
+      ...(s.dimMismatch
+        ? [["⚠️ Store built with", `<code>${escapeHtml(s.storedModel)}</code> — run <code>!reindex</code> to rebuild for the selected model`]]
+        : []),
       ["Max results",        String(s.maxResults)],
       ["Context budget",     `${s.contextTokens} tokens`],
       ["Similarity threshold", String(s.threshold)]
