@@ -3777,88 +3777,79 @@ RESIDUAL RISK: LOW for the covered case (AI signals end via a nameless/quoted di
               addressed here. Mitigation already exists separately: rolling "End the Fight" auto-completes
               via _autoCompletionFlow regardless of the narration. A NAMED end_combat parses exactly as
               before, so no existing behaviour changes.
-  - scripts/narrative/integration.js        (+14 / -1)
-  - test/journey-tracking.test.mjs          (+49 / -0 — adds runtime cases [8] single-journey reuse, [9] multi-journey branch preserved)
-TESTS:        node test/journey-tracking.test.mjs → 34 passed, 0 failed (was 29; +5 assertions).
-              Verified the test FAILS with the fix reverted (3 failing assertions in [8]) → it genuinely guards the change.
-SUITE:        npm test → PASS (65 of 65 test files green); test/load-smoke.mjs → clean import.
-GATE:         GATE-JOURNEY-SINGLE-REUSE — human-approved in conversation ("User has approved Option A …
-              Modify _autoJourneyFlow in scripts/narrative/integration.js") to edit the 🔴 LOCKED
-              scripts/narrative/integration.js. Smallest-safe-change principle applied (single guarded
-              condition; no behaviour change for the multi-journey case).
-ROLLBACK:     git revert <this commit> — restores the prior `if (track && specific)` reuse branch and
-              removes the two new test cases. No settings/flags/directives/i18n keys changed, so the
-              revert is byte-clean with no migration.
-RESIDUAL RISK: LOW. The new condition only ADDS reuse in the single-open-journey case (it never branches
-              where the old code reused, and never reuses across multiple competing journeys where the old
-              code disambiguated). Journey completion still closes tracks at 10/10, so a finished journey
-              stops counting toward `openJourneys`. XP remains vow-only (unchanged).
 
 
 
-### [2026-06-14 EEST] — Fix (SUPERSEDES prior single-open-journey fix): "Undertake a Journey" still branched duplicates as they accumulated
+---
 
-TASK TYPE:    DEBUG → IMPLEMENT (+ TEST)
-TOKEN BUDGET: IMPLEMENT 5,000  |  USED: ~within budget  |  WITHIN BUDGET: YES
+### [2026-06-14 18:40 EEST] — ROOT CAUSE: findTrackFuzzy resolved a STALE completed duplicate, so end_combat closed nothing
+
+TASK TYPE:    INVESTIGATE → IMPLEMENT (+ TEST)
+TOKEN BUDGET: IMPLEMENT 20,000  |  USED: ~within budget  |  WITHIN BUDGET: YES
 
 PRE-FLIGHT CHECKLIST (brief §3):
   [x] read engineering-brief.md (SKILL) + repository-map.md + relevant tests
-  [x] task classified: DEBUG (runtime trace) → IMPLEMENT (+ TEST)
-  [x] target file(s)+line(s) located (evidence below)
-  [x] <= 3 files / <= 50 changed lines per file (integration.js +16/-14; journey-tracking.test.mjs +20/-3; this log append-only)
-  [x] additive & backwards-compatible (new gate RELAXES reuse for guessed names; intent-named branching preserved)
+  [x] task classified: INVESTIGATE then IMPLEMENT (+ TEST)
+  [x] target file(s)+line(s) located with RUNTIME evidence (below)
+  [x] <= 3 files / <= 50 changed lines per file (progress.js +31 net; test +54; this log)
+  [x] additive & backwards-compatible (only CHANGES which same-name/same-kind duplicate is chosen; resolution of a single match or a completed-only match is unchanged)
   [x] no setting/flag/directive/i18n key removed or renamed
-  [x] architectural boundary: 🔴 LOCKED integration.js touched — GATE-JOURNEY-SINGLE-REUSE extended below (human-approved)
-  [x] regression test added (test/journey-tracking.test.mjs [9] corrected + [10] accumulated-duplicates — RUNTIME, exercises the real Integration._autoJourneyFlow)
+  [x] architectural boundary: only the 🟡 GUARDED scripts/ironsworn/progress.js edited — NO 🔴 LOCKED file touched, so no gate required
+  [x] regression test added AND proven to fail on the pre-fix code (5 failures) and pass after
   [x] rollback plan defined
 
-PROBLEM:      The prior fix ([2026-06-14] "single open journey") did NOT resolve the production bug.
-              Clicking "Undertake a Journey" in narration STILL branched a new progress track instead of
-              advancing the existing open journey. Runtime trace (added via this._dbg) showed why: the
-              prior fix only relaxed reuse when EXACTLY ONE journey was open (`openJourneys > 1` guard).
-              But the bug itself ACCUMULATES duplicate open journeys over sessions, so in the real failure
-              state there are 2+ open journeys → the guard condition is TRUE → the specific-name
-              disambiguation runs → the vow-GUESSED name (no fresh intent) fuzzy-misses every real track →
-              a fresh duplicate is branched every time. The fix never engaged in the state it was meant to
-              cure; the bleed continued without bound.
+PROBLEM:      When a combat ended, the progress track was NOT moved to the system's "Completed" tab — it
+              stayed visible/open on the active sheet. This persisted even though end_combat reported success
+              and fired the "🏆 Combat ended: <foe>" chat line. The system relocates a track to the Completed
+              tab purely on item.system.completed === true (same mechanism vows already use), so the symptom
+              meant the CURRENT track's completed flag was never set.
 
-EVIDENCE (brief §4 format):
-  CLAIM:      Link/dialog rolls never stamp a fresh _lastIntent, so _resolveJourney serves a Layer-4 fallback name.
-  EVIDENCE:   scripts/narrative/integration.js:2070-2076 (freshness gate; intent="" when stale/absent)
-  CONFIDENCE: HIGH    BASIS: read the lines directly
-  CLAIM:      The Layer-4 vow fallback returns specific:true with source:"vow" — looks "specific" but is a GUESS, not player intent.
-  EVIDENCE:   scripts/narrative/integration.js:2268-2272 :: _fallbackJourneyName (vow → {specific:true, source:"vow"})
-  CONFIDENCE: HIGH    BASIS: read the lines directly
-  CLAIM:      Intent-derived names carry source regex|direction|context|ai; only these reflect a real, freshly-stated destination.
-  EVIDENCE:   scripts/narrative/integration.js:2080-2101 :: _resolveJourney Layers L1-L3 set those sources
-  CONFIDENCE: HIGH    BASIS: read the lines directly
-  CLAIM:      The prior `openJourneys > 1` guard branches a duplicate once 2+ journeys are open and the name is a vow guess.
-  EVIDENCE:   reverted-fix run: node test/journey-tracking.test.mjs → 5 failing assertions ([9]/[10]) with the old guard, 0 with the new gate
-  CONFIDENCE: HIGH    BASIS: executed the revert-check both ways
+ROOT CAUSE (proven by RUNNING the real controller, not theory):
+  CLAIM:      ProgressMethods.findTrackFuzzy returned the FIRST name+kind match without preferring an OPEN
+              track, so when an earlier same-named foe (e.g. "Wolf", "Husk" — recurring Ironsworn foes) was
+              already completed, it resolved that STALE completed duplicate. completeTrack on an
+              already-completed item is an idempotent no-op, so end_combat reported ok and narrated success
+              while the CURRENT open track was never closed and stayed on the sheet.
+  EVIDENCE:   scripts/ironsworn/progress.js:432-466 (pre-fix findTrackFuzzy) — step 1 returned `direct`
+              (findTrack's first exact/substring hit) and step 2 returned the single best-scoring match,
+              neither distinguishing completed from open.
+              end_combat handler: scripts/narrative/integration.js:3052-3056 resolves the foe via
+              findTrackFuzzy(actor, name, "combat") then calls completeTrack on whatever it returns.
+              PROVEN: a throwaway repro built a completed "Wolf" + an open "Wolf"; pre-fix
+              findTrackFuzzy("Wolf","combat") returned the COMPLETED one → completeTrack no-op → open track
+              left dangling. The new test [9] reproduces this and FAILS on pre-fix code (5 failures).
+  CONFIDENCE: HIGH    BASIS: executed the real controller method and read the lines
+  CLAIM:      resolveDisplayTrack already prefers an open track (notDone), confirming open-preference is the
+              established, intended convention that findTrackFuzzy simply lacked.
+  EVIDENCE:   scripts/ironsworn/progress.js:470-520 (resolveDisplayTrack prefers `notDone`)
+  CONFIDENCE: HIGH    BASIS: read the lines
 
-CHANGE:       integration.js _autoJourneyFlow (~2409): replace the open-journey COUNT heuristic with an
-              INTENT-PROVENANCE gate. Compute `fromIntent = ["regex","direction","context","ai"].includes(resolved.source)`.
-              Only run the specific-name disambiguation/branching when `track && specific && fromIntent` —
-              i.e. when the destination came from an actually-stated player intent. For a GUESSED name
-              (source vow/scene/generic) always reuse the newest open journey, robust whether one or many
-              journeys are open. Added two gated this._dbg(...) trace lines at the decision points (no
-              console spam — guarded by the existing debugLogging setting) to make future runtime diagnosis
-              trivial. Removed the now-unused openJourneys count.
-FILES TOUCHED (2 code + this log):
-  - scripts/narrative/integration.js        (+16 / -14 — fromIntent gate + 2 _dbg traces; removed openJourneys count)
-  - test/journey-tracking.test.mjs          (+20 / -3 — [9] corrected to assert reuse on a guessed name; new [10] accumulated-duplicates regression)
-TESTS:        node test/journey-tracking.test.mjs → 37 passed, 0 failed (was 34).
-              Revert-check: with the old `openJourneys > 1` guard restored, [9]+[10] FAIL (5 assertions,
-              duplicate branched) → the new tests genuinely guard the corrected behaviour.
-SUITE:        npm test → PASS (65 of 65 test files green); test/load-smoke.mjs → clean import.
-GATE:         GATE-JOURNEY-SINGLE-REUSE (EXTENDED) — the human approval to edit 🔴 LOCKED
-              scripts/narrative/integration.js ("Option A — Modify _autoJourneyFlow") covers this
-              superseding refinement to the SAME function and the same single-open-journey defect class.
-              The change stays within _autoJourneyFlow, adds only a provenance gate + diagnostic logging,
-              and does not touch any other LOCKED region. Smallest-safe-change principle applied.
-ROLLBACK:     git revert <this commit> — restores the `openJourneys > 1` guard and the prior [9] test.
-              No settings/flags/directives/i18n keys changed, so the revert is byte-clean, no migration.
-RESIDUAL RISK: LOW. The gate only ADDS reuse for guessed (non-intent) names; when the player explicitly
-              names a NEW destination the source is regex/direction/context/ai → fromIntent is true →
-              legitimate journey-separation branching is preserved (verified: journey-combat-completion
-              tests still green). Completion still closes tracks at 10/10. XP remains vow-only (unchanged).
+CHANGE:       scripts/ironsworn/progress.js:432-494 — findTrackFuzzy now (0) honours an explicit item id
+              first; (1) for an exact/substring name+kind hit, PREFERS a still-open track and only falls back
+              to a completed duplicate when no open one exists; (2) in the word-overlap scoring branch, tracks
+              the best OPEN candidate separately and prefers it (≥0.5), falling back to the best completed
+              match only when no open candidate clears the threshold. No deletion, no new setting — the
+              existing completion paths already set system.completed correctly; the defect was purely in
+              picking the wrong duplicate to complete.
+FILES TOUCHED (3):
+  - scripts/ironsworn/progress.js                  (+31 net — open-preference in findTrackFuzzy)
+  - test/journey-combat-completion.test.mjs        (+54 — new tests [9] duplicate-name resolution, [10] explicit-id + completed-only fallback)
+  - docs/ai-maintenance-log.md                     (this entry)
+TESTS:        node test/journey-combat-completion.test.mjs → 36 passed, 0 failed
+              PROOF IT CATCHES THE BUG: stashing the progress.js fix and re-running → 31 passed, 5 FAILED,
+              incl. "exact same-name dup resolves the OPEN track", "current Wolf fight closed (expected true,
+              got false)" and "no open combat track left dangling after end_combat (expected 0, got 1)" — the
+              exact reported symptom. Test [10] passes both before and after, confirming the explicit-id and
+              completed-only (idempotent mark_complete) paths are unchanged.
+SUITE:        npm test → PASS (65 of 65 test files green); test/load-smoke.mjs → clean import
+GATE:         None required — change is confined to the 🟡 GUARDED scripts/ironsworn/progress.js; no 🔴 LOCKED
+              file edited.
+ROLLBACK:     git revert <this commit> — restores the prior findTrackFuzzy (first-match) behaviour and removes
+              the new tests + this log entry. No settings/flags/directives/i18n keys changed; byte-clean
+              revert, no migration.
+RESIDUAL RISK: LOW. The change only re-orders WHICH duplicate of the same name+kind is chosen when both an
+              open and a completed one exist — it never widens or narrows the set of matches, and a single
+              match or a completed-only match resolves exactly as before (test [10]). All findTrackFuzzy
+              callers (end_combat, mark_complete, add/set_progress, journey reuse, chat/commands journey
+              filter) act on the LIVE track, so preferring the open duplicate is correct for every caller;
+              mark_complete additionally has its own idempotent already-completed guard.
