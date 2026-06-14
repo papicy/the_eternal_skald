@@ -1904,12 +1904,13 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
   /**
    * (v0.10.27) Deterministically integrate the OUTCOME of a progress-completion
    * move with the relevant track:
-   *   • STRONG HIT → the track is finished. Auto-complete the correct track,
-   *     resolved via the story-arc flags (active vow / active combat) with a
-   *     graceful fallback to the last-rolled / newest-open track of that kind.
-   *   • WEAK HIT / MISS → the track is NOT completed; we only return a note so
-   *     the narration prompt describes the complication / consequence and the
-   *     track stays open for another attempt.
+   *   • STRONG or WEAK HIT → the progress move SUCCEEDS (in Ironsworn a weak
+   *     hit is success WITH a cost), so the track is finished. Auto-complete
+   *     the correct track, resolved via the story-arc flags (active vow /
+   *     active combat) with a graceful fallback to the last-rolled /
+   *     newest-open track of that kind. A weak hit adds an "at a cost" note.
+   *   • MISS → the track is NOT completed; we only return a note so the
+   *     narration prompt describes the setback and the track stays open.
    * Returns a short human-readable summary (for the prompt + GM whisper), or ""
    * when the move isn't a completion move / nothing applied. Never throws.
    */
@@ -1947,18 +1948,22 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
       target = sys().resolveCompletionTrack(actor, "", "journey");
     }
 
-    if (!strong) {
-      // Weak hit or miss — explicitly DO NOT complete. Provide narration guidance.
+    // (fix — Ironsworn rules) A PROGRESS move succeeds on BOTH a strong hit AND
+    // a weak hit (a weak hit is success WITH a cost); only a MISS fails.
+    // Previously this completed on a strong hit ONLY and treated a weak hit
+    // like a miss, so a vow/fight/journey rolled on a weak hit never closed.
+    // Complete on strong OR weak; leave the track open only on a miss.
+    if (!strong && !weak) {
+      // Miss — explicitly DO NOT complete. Provide narration guidance.
       const label = kind === "combat" ? "fight" : kind;
       const name  = target?.name ? ` “${target.name}”` : "";
-      return weak
-        ? `${label}${name} NOT yet finished (weak hit) — narrate partial success at a cost; the track stays open`
-        : `${label}${name} NOT finished (miss) — narrate a serious setback/complication; the track stays open`;
+      return `${label}${name} NOT finished (miss) — narrate a serious setback/complication; the track stays open`;
     }
 
-    // Strong hit — complete the track.
+    // Strong or weak hit — complete the track (a weak hit is success at a cost).
+    const tone = strong ? "strong hit" : "weak hit";
     if (!target) {
-      return `no open ${kind} track to complete (strong hit on ${parsed.moveName})`;
+      return `no open ${kind} track to complete (${tone} on ${parsed.moveName})`;
     }
     let r;
     if (kind === "combat") {
@@ -1971,9 +1976,10 @@ Narrate this outcome vividly as the Skald (2–4 sentences).${allowEffects ? " T
     if (r?.ok) {
       const verb = kind === "vow" ? "fulfilled vow" : kind === "combat" ? "won the fight" : "reached destination";
       this._notifyCombat(`🏆 ${verb}: ${r.name}`);
-      try { await Chat.postSystem(`<em>🤖 Skald marked “${escapeHtml(r.name)}” complete (strong hit on ${escapeHtml(parsed.moveName)}).</em>`, { gmWhisper: true }); } catch (_) {}
-      this._auditWrite("ROLL_COMPLETE", { trackKind: kind, name: r.name }, true, `strong hit on ${parsed.moveName}`);
-      return `${verb} “${r.name}” (strong hit — auto-completed)`;
+      try { await Chat.postSystem(`<em>🤖 Skald marked “${escapeHtml(r.name)}” complete (${escapeHtml(tone)} on ${escapeHtml(parsed.moveName)}).</em>`, { gmWhisper: true }); } catch (_) {}
+      this._auditWrite("ROLL_COMPLETE", { trackKind: kind, name: r.name }, true, `${tone} on ${parsed.moveName}`);
+      const costNote = weak ? " — at a cost; narrate the complication" : "";
+      return `${verb} “${r.name}” (${tone} — auto-completed)${costNote}`;
     }
     this._auditWrite("ROLL_COMPLETE", { trackKind: kind, name: target?.name }, false, r?.error);
     return "";
