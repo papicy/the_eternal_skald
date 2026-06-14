@@ -3580,73 +3580,67 @@ RESIDUAL RISK: LOW. Default model is unchanged (MiniLM/384) and the v2 meta stor
 
 
 
-
 ---
 
-### [2026-06-14 15:10 EEST] — Guard progress moves against closed/under-filled tracks
+### [2026-06-14 13:41 EEST] — Fix Ironsworn progress-track completion (capabilities + weak-hit)
 AGENT:        Abacus AI Agent (maintenance)
 TASK TYPE:    IMPLEMENT (+ TEST)
 TOKEN BUDGET: IMPLEMENT 20,000  |  USED: ~within budget  |  WITHIN BUDGET: YES
 
 PRE-FLIGHT CHECKLIST (brief §3):
-  [x] read engineering-brief.md (SKILL) + repository-map.md in full
+  [x] read engineering-brief.md (SKILL) + repository-map.md
   [x] task classified: IMPLEMENT (+ TEST)
   [x] target file(s)+line(s) located (evidence below)
-  [x] <= 3 files / <= 50 changed lines per file (combat.js +16/-0; moves.js +25/-0; new test)
-  [x] additive & backwards-compatible (new guidance text + a new graceful return branch only)
+  [x] <= 3 files / <= 50 changed lines per file (mechanics.js +33/-5; integration.js +22/-16)
+  [x] additive & backwards-compatible (legacy diagnostic caps keys retained; only a MISS now leaves a track open)
   [x] no setting/flag/directive/i18n key removed or renamed
-  [x] architectural boundary: two 🔴 LOCKED ironsworn rules-bridge submodules touched — GATE recorded below
-  [x] regression test added (test/ironsworn-closed-track.test.mjs)
+  [x] architectural boundary: two 🔴 LOCKED files touched — GATE recorded below (human-approved)
+  [x] regression test added (test/ironsworn-capabilities.test.mjs)
   [x] rollback plan defined
 
-PROBLEM:      After a combat progress track closed at 10/10, the Skald still suggested "End the
-              Fight" against the already-defeated foe (it appeared in the "Recently ended fights"
-              context with no signal it was closed), and attempting the roll dead-ended on the
-              generic "No open fight track … Enter the fray first" error instead of a graceful reply.
+PROBLEM:      On the active foundry-ironsworn system the Skald reported "progress tracking is not
+              supported" and combat/journey/vow tracks were never completed/removed after a
+              progress roll. The Ironsworn adapter advertised the wrong capability shape, and the
+              completion flow only fired on a strong hit (treating a rules-valid weak hit as failure).
 
 EVIDENCE (brief §4 format):
-  CLAIM:      describeCombatState fed the AI a "Recently ended fights" list with no signal those tracks are closed/not rollable.
-  EVIDENCE:   scripts/ironsworn/combat.js:259-281 :: describeCombatState (pre-edit)
+  CLAIM:      IronswornController IS the registered foundry-ironsworn adapter, so its capabilities() gates tools/commands.
+  EVIDENCE:   scripts/hooks/foundry-hooks.js:236 :: registerSystem("foundry-ironsworn", IronswornController)
+  CONFIDENCE: HIGH
+  BASIS:      read the line directly
+  CLAIM:      capabilities() returned a legacy diagnostic object missing every canonical SYSTEM_CAPABILITIES key.
+  EVIDENCE:   scripts/ironsworn/mechanics.js:40-48 :: MechanicsMethods.capabilities (pre-edit)
   CONFIDENCE: HIGH
   BASIS:      read the lines directly
-  CLAIM:      rollProgressMove returned a generic "Enter the fray first" error on a closed track with no graceful fallback.
-  EVIDENCE:   scripts/ironsworn/moves.js:382-394 :: rollProgressMove (pre-edit)
+  CLAIM:      The AI updateProgress tool and the !progress command are gated on capabilities().progressTracks.
+  EVIDENCE:   scripts/ai/tools/registry.js:81; scripts/narrative/tool-runner.js:59; scripts/chat/commands.js:236
   CONFIDENCE: HIGH
   BASIS:      read the lines directly
-  CLAIM:      _newestTrackItemOfKind(actor, kind, openOnly=false) can surface a recently-completed track of any kind, enabling closed-track detection.
-  EVIDENCE:   scripts/ironsworn/progress.js:970-1004 :: _newestTrackItemOfKind
-  CONFIDENCE: HIGH
-  BASIS:      read the lines directly
-  CLAIM:      MovesMethods and ProgressMethods are Object.assign'd onto one IronswornController, so this._newestTrackItemOfKind is callable from rollProgressMove.
-  EVIDENCE:   scripts/ironsworn-controller.js:36,228-229 :: IronswornController = Object.assign(...)
+  CLAIM:      _autoCompletionFlow completed the track on a strong hit only; a weak hit was treated like a miss.
+  EVIDENCE:   scripts/narrative/integration.js:1950-1957 :: _autoCompletionFlow (pre-edit)
   CONFIDENCE: HIGH
   BASIS:      read the lines directly
 
-CHANGE:       (1) scripts/ironsworn/combat.js — describeCombatState now appends a STATE-AWARE
-              rollability hint: announces "End the Fight" as rollable ONLY for active foes at 10/10,
-              tells the AI NOT to suggest it when no foe is at 10/10, and NOT to suggest it against
-              ended (closed) fights. Read-only; mutates no state.
-              (2) scripts/ironsworn/moves.js — rollProgressMove, when no OPEN track of the move's
-              kind exists, detects a RECENTLY COMPLETED track of that kind and returns a graceful
-              { ok:false, method:"already-complete", track } result (combat → "already won",
-              vow → "already fulfilled", journey → "already complete") instead of the generic
-              "begin one first" error. Applies uniformly to combat, vows and journeys via the shared
-              `kind` path. Player agency preserved: manual rolls on still-open tracks are untouched,
-              and with nothing completed the original generic error path is unchanged.
+CHANGE:       (1) scripts/ironsworn/mechanics.js — capabilities() now returns the canonical
+              SYSTEM_CAPABILITIES-shaped boolean map (progressTracks/moves/oracles/vows/xp/etc. ON;
+              systemActive tracks isActive()). Legacy diagnostic fields (prerollDialog/characterSheet/
+              activeCharacter) retained additively. Keys inlined to avoid a new cross-layer import.
+              (2) scripts/narrative/integration.js — _autoCompletionFlow now completes the track on a
+              STRONG or WEAK hit (a weak hit is success at a cost) and leaves the track open only on a
+              MISS; a weak hit adds an "at a cost" narration note. Doc comment updated to match.
 FILES TOUCHED (3):
-  - scripts/ironsworn/combat.js          (+16 / -0)
-  - scripts/ironsworn/moves.js           (+25 / -0)
-  - test/ironsworn-closed-track.test.mjs (+~165 / -0, new — 19 assertions, 7 scenarios)
-TESTS:        node test/ironsworn-closed-track.test.mjs → 19 passed, 0 failed
+  - scripts/ironsworn/mechanics.js     (+33 / -5)
+  - scripts/narrative/integration.js   (+22 / -16)
+  - test/ironsworn-capabilities.test.mjs (+90 / -0, new — 50 assertions)
+TESTS:        node test/ironsworn-capabilities.test.mjs → 50 passed, 0 failed
 SUITE:        npm test -> PASS (63 of 63 test files green); test/load-smoke.mjs → clean import
-GATE:         GATE-CLOSED-TRACK-MOVES — human-approved in conversation ("proceed") to edit the two
-              🔴 LOCKED ironsworn rules-bridge submodules scripts/ironsworn/combat.js and
-              scripts/ironsworn/moves.js. Smallest-safe option chosen (additive guidance text + one
-              graceful return branch); no 3rd code file needed.
-ROLLBACK:     git revert <this commit> — removes the rollability hint, the graceful already-complete
-              branch, and the new test. No settings/flags/directives/i18n keys changed, so the revert
-              is byte-clean with no migration.
-RESIDUAL RISK: LOW. combat.js change is pure read-only prompt text. moves.js change only adds a NEW
-              early return for the no-open-track case and never alters the open-track roll path or the
-              journey progress gate; the new method value "already-complete" is additive (callers that
-              only check `ok` are unaffected). XP remains vow-only.
+GATE:         GATE-PROGRESS-COMPLETION — human-approved in conversation to edit the 🔴 LOCKED files
+              scripts/narrative/integration.js and scripts/ironsworn/mechanics.js (rules-bridge submodule).
+ROLLBACK:     git revert <this commit> — restores the legacy capabilities() object and the strong-hit-only
+              completion flow, and removes the new test. No settings/flags/directives/i18n keys were changed,
+              so a revert is byte-clean with no migration.
+RESIDUAL RISK: LOW. capabilities() flips several flags ON (sheetWrites/impacts/momentum/xp/compendium*/
+              createCharacter) that consumers may newly gate on; all such writes remain individually
+              GM-gated and feature-detected in their own methods, so no unguarded write is introduced.
+              Weak-hit completion now closes tracks that previously lingered — intended, and XP remains
+              vow-only (the updateItem XP hook is unchanged).

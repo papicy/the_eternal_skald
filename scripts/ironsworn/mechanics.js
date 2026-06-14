@@ -37,13 +37,41 @@ export const MechanicsMethods = {
     return typeof api?.applications?.IronswornPrerollDialog?.showForOfficialMove === "function";
   },
 
-  /** A small capability report for diagnostics / the !skald-status card. */
+  /**
+   * Capability map for the multi-system adapter contract (see
+   * systems/adapter-interface.js → SYSTEM_CAPABILITIES). Consumers gate
+   * features on these canonical boolean keys: the AI tool registry only
+   * offers `updateProgress`/`rollMove`/`queryOracle` when the matching key
+   * is true, and `!progress` checks `capabilities().progressTracks`.
+   *
+   * Ironsworn is the module's native system, so it lights up the full
+   * mechanical surface. The keys are inlined (not imported) to keep the
+   * rules-bridge layer self-contained. The legacy diagnostic fields
+   * (prerollDialog/characterSheet/activeCharacter) are retained additively
+   * so existing diagnostics that read them keep working.
+   */
   capabilities() {
     return {
-      systemActive:    this.isActive(),
-      prerollDialog:   this.hasPrerollDialog(),
-      characterSheet:  !!this.api()?.applications?.SFCharacterMoveSheet,
-      activeCharacter: !!this.getActiveCharacter()
+      // --- canonical SYSTEM_CAPABILITIES keys ---
+      systemActive:     this.isActive(),
+      characterReads:   true,
+      sheetWrites:      true,
+      progressTracks:   true,
+      vows:             true,
+      oracles:          true,
+      momentum:         true,
+      impacts:          true,
+      moves:            true,
+      moveDialogs:      true,
+      xp:               true,
+      compendiumFoes:   true,
+      compendiumAssets: true,
+      createCharacter:  true,
+      mapVision:        true,
+      // --- legacy diagnostic fields (retained for backwards compatibility) ---
+      prerollDialog:    this.hasPrerollDialog(),
+      characterSheet:   !!this.api()?.applications?.SFCharacterMoveSheet,
+      activeCharacter:  !!this.getActiveCharacter()
     };
   },
 
