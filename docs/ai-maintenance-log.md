@@ -3714,3 +3714,64 @@ RESIDUAL RISK: LOW. The end_combat fallback only fires when the specific close f
               only NARROWS what is dropped (never drops more than before), so no effect that previously applied
               is now suppressed. The journey directive is prose-only guidance gated on an open-journey context
               match; it adds no write and no new directive grammar. XP remains vow-only (unchanged).
+
+
+
+---
+
+### [2026-06-14 EEST] — Fix "Undertake a Journey" branching a duplicate track when one journey is already open
+
+TASK TYPE:    IMPLEMENT (+ TEST)
+TOKEN BUDGET: IMPLEMENT 5,000  |  USED: ~within budget  |  WITHIN BUDGET: YES
+
+PRE-FLIGHT CHECKLIST (brief §3):
+  [x] read engineering-brief.md (SKILL) + repository-map.md + relevant test
+  [x] task classified: IMPLEMENT (+ TEST)
+  [x] target file(s)+line(s) located (evidence below)
+  [x] <= 3 files / <= 50 changed lines per file (integration.js +14/-1; journey-tracking.test.mjs +49/-0)
+  [x] additive & backwards-compatible (new condition only RELAXES reuse when exactly one journey is open; multi-journey path unchanged)
+  [x] no setting/flag/directive/i18n key removed or renamed
+  [x] architectural boundary: 🔴 LOCKED integration.js touched — GATE recorded below (human-approved)
+  [x] regression test added (test/journey-tracking.test.mjs [8]/[9] — RUNTIME, exercises the real Integration._autoJourneyFlow)
+  [x] rollback plan defined
+
+PROBLEM:      Clicking/rolling "Undertake a Journey" while a journey was already open created a NEW
+              journey track every time instead of advancing the existing one. Root cause (verified in a
+              prior INVESTIGATE): the link/dialog roll path does not stamp a fresh _lastIntent, so
+              _resolveJourney falls back to a vow-derived name flagged specific:true; _autoJourneyFlow
+              then requires a fuzzy NAME match to reuse the open track, the vow-guessed name misses the
+              real journey's title, and a duplicate track is branched.
+
+EVIDENCE (brief §4 format):
+  CLAIM:      _autoJourneyFlow drops the open journey to null on a name mismatch when resolved.specific is true, then creates a new track.
+  EVIDENCE:   scripts/narrative/integration.js:2409-2430 :: _autoJourneyFlow (pre-edit reuse branch + create branch)
+  CONFIDENCE: HIGH    BASIS: read the lines directly
+  CLAIM:      With no fresh intent, _resolveJourney returns the active-vow fallback flagged specific:true.
+  EVIDENCE:   scripts/narrative/integration.js:2073-2075 (freshness gate) + 2271 :: _fallbackJourneyName (vow → specific:true)
+  CONFIDENCE: HIGH    BASIS: read the lines directly
+  CLAIM:      findTrackFuzzy needs >=0.5 shared-word score; a vow-guessed name fails against a descriptive journey title.
+  EVIDENCE:   scripts/ironsworn/progress.js:432-465 :: findTrackFuzzy (threshold at :465)
+  CONFIDENCE: HIGH    BASIS: read the lines directly; computed the Jaccard-min score by hand
+
+CHANGE:       integration.js _autoJourneyFlow (~2409): count OPEN journey tracks on the actor; only run
+              the specific-name disambiguation/branching when MORE THAN ONE open journey competes
+              (`openJourneys > 1`). When exactly one open journey exists it is unambiguously the journey
+              this roll advances, so reuse it regardless of name specificity — restoring progress-marking
+              on the existing track. Count uses the existing sys()._trackKindOf classifier over actor.items.
+FILES TOUCHED (2):
+  - scripts/narrative/integration.js        (+14 / -1)
+  - test/journey-tracking.test.mjs          (+49 / -0 — adds runtime cases [8] single-journey reuse, [9] multi-journey branch preserved)
+TESTS:        node test/journey-tracking.test.mjs → 34 passed, 0 failed (was 29; +5 assertions).
+              Verified the test FAILS with the fix reverted (3 failing assertions in [8]) → it genuinely guards the change.
+SUITE:        npm test → PASS (65 of 65 test files green); test/load-smoke.mjs → clean import.
+GATE:         GATE-JOURNEY-SINGLE-REUSE — human-approved in conversation ("User has approved Option A …
+              Modify _autoJourneyFlow in scripts/narrative/integration.js") to edit the 🔴 LOCKED
+              scripts/narrative/integration.js. Smallest-safe-change principle applied (single guarded
+              condition; no behaviour change for the multi-journey case).
+ROLLBACK:     git revert <this commit> — restores the prior `if (track && specific)` reuse branch and
+              removes the two new test cases. No settings/flags/directives/i18n keys changed, so the
+              revert is byte-clean with no migration.
+RESIDUAL RISK: LOW. The new condition only ADDS reuse in the single-open-journey case (it never branches
+              where the old code reused, and never reuses across multiple competing journeys where the old
+              code disambiguated). Journey completion still closes tracks at 10/10, so a finished journey
+              stops counting toward `openJourneys`. XP remains vow-only (unchanged).
